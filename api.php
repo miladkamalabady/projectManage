@@ -7,7 +7,8 @@ require __DIR__ . '/lib/bootstrap.php';
 function accessible_projects(PDO $pdo, int $userId): array
 {
     $statement = $pdo->prepare(
-        'SELECT p.*, pu.access_role
+        'SELECT p.id, p.name, p.code, p.description, p.status, p.start_date, p.end_date,
+                p.created_by, p.created_at, p.updated_at, pu.access_role
          FROM projects p
          JOIN project_users pu ON pu.project_id = p.id
          WHERE pu.user_id = ?
@@ -20,7 +21,10 @@ function accessible_projects(PDO $pdo, int $userId): array
 function project_context(PDO $pdo, int $userId, int $projectId): array
 {
     $statement = $pdo->prepare(
-        'SELECT p.*, pu.access_role
+        'SELECT p.id, p.name, p.code, p.description, p.status, p.start_date, p.end_date,
+                p.created_by, p.created_at, p.updated_at, p.bale_chat_id, p.bale_enabled,
+                (p.bale_bot_token IS NOT NULL AND p.bale_bot_token <> "") AS bale_configured,
+                pu.access_role
          FROM projects p
          JOIN project_users pu ON pu.project_id = p.id
          WHERE p.id = ? AND pu.user_id = ?'
@@ -50,6 +54,17 @@ function require_project_editor(array $project): void
 function valid_iso_date(?string $date): bool
 {
     return $date === null || preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) === 1;
+}
+
+function valid_bale_token(string $token): bool
+{
+    return strlen($token) <= 255 && preg_match('/^\d{5,20}:[A-Za-z0-9_-]{20,220}$/', $token) === 1;
+}
+
+function valid_bale_chat_id(string $chatId): bool
+{
+    return preg_match('/^-?\d{1,20}$/', $chatId) === 1
+        || preg_match('/^@[A-Za-z0-9_]{5,64}$/', $chatId) === 1;
 }
 
 function next_task_id(PDO $pdo, array $project): string
@@ -124,6 +139,16 @@ try {
 
         $projectId = (int) $selected['id'];
         $_SESSION['project_id'] = $projectId;
+
+        if ($selected['access_role'] === 'project_manager') {
+            $baleStatement = $pdo->prepare(
+                'SELECT bale_chat_id, bale_enabled,
+                        (bale_bot_token IS NOT NULL AND bale_bot_token <> "") AS bale_configured
+                 FROM projects WHERE id = ?'
+            );
+            $baleStatement->execute([$projectId]);
+            $selected = array_merge($selected, $baleStatement->fetch() ?: []);
+        }
 
         $taskStatement = $pdo->prepare(
             'SELECT t.*, u.display_name AS assigned_name
@@ -244,25 +269,39 @@ try {
         $description = trim((string) ($input['description'] ?? ''));
         $startDate = trim((string) ($input['start_date'] ?? '')) ?: null;
         $endDate = trim((string) ($input['end_date'] ?? '')) ?: null;
+        $baleToken = trim((string) ($input['bale_bot_token'] ?? ''));
+        $baleChatId = trim((string) ($input['bale_chat_id'] ?? ''));
         if ($name === '' || preg_match('/^[A-Z0-9_-]{2,20}$/', $code) !== 1) {
             json_response(['ok' => false, 'error' => 'نام پروژه و کد لاتین ۲ تا ۲۰ نویسه‌ای را وارد کنید.'], 422);
         }
         if (!valid_iso_date($startDate) || !valid_iso_date($endDate)) {
             json_response(['ok' => false, 'error' => 'تاریخ پروژه معتبر نیست.'], 422);
         }
+        if (($baleToken === '') !== ($baleChatId === '')) {
+            json_response(['ok' => false, 'error' => 'برای اتصال بله، توکن ربات و شناسه گروه یا کانال را با هم وارد کنید.'], 422);
+        }
+        if ($baleToken !== '' && (!valid_bale_token($baleToken) || !valid_bale_chat_id($baleChatId))) {
+            json_response(['ok' => false, 'error' => 'توکن ربات یا شناسه مقصد بله معتبر نیست.'], 422);
+        }
+        $encryptedBaleToken = $baleToken !== '' ? encrypt_project_secret($baleToken) : null;
+        $baleEnabled = $encryptedBaleToken !== null ? 1 : 0;
         try {
             $pdo->beginTransaction();
             $statement = $pdo->prepare(
-                "INSERT INTO projects (name, code, description, status, start_date, end_date, created_by)
-                 VALUES (?, ?, ?, 'active', ?, ?, ?)"
+                "INSERT INTO projects
+                 (name, code, description, status, start_date, end_date, bale_bot_token, bale_chat_id, bale_enabled, created_by)
+                 VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)"
             );
-            $statement->execute([$name, $code, $description, $startDate, $endDate, (int) $user['id']]);
+            $statement->execute([
+                $name, $code, $description, $startDate, $endDate,
+                $encryptedBaleToken, $baleChatId !== '' ? $baleChatId : null, $baleEnabled, (int) $user['id'],
+            ]);
             $projectId = (int) $pdo->lastInsertId();
             $member = $pdo->prepare(
                 "INSERT INTO project_users (project_id, user_id, access_role) VALUES (?, ?, 'project_manager')"
             );
             $member->execute([$projectId, (int) $user['id']]);
-            log_activity($pdo, (int) $user['id'], 'project', (string) $projectId, 'create', ['name' => $name], $projectId);
+            log_activity($pdo, (int) $user['id'], 'project', (string) $projectId, 'create', ['title' => $name], $projectId);
             $pdo->commit();
             json_response(['ok' => true, 'message' => 'پروژه جدید ایجاد شد.', 'project_id' => $projectId]);
         } catch (PDOException $exception) {
@@ -287,13 +326,71 @@ try {
         $name = trim((string) ($input['name'] ?? ''));
         $description = trim((string) ($input['description'] ?? ''));
         $status = (string) ($input['status'] ?? 'active');
+        $baleToken = trim((string) ($input['bale_bot_token'] ?? ''));
+        $baleChatId = trim((string) ($input['bale_chat_id'] ?? ''));
+        $baleEnabled = (string) ($input['bale_enabled'] ?? '0') === '1' ? 1 : 0;
         if ($name === '' || !in_array($status, ['active', 'paused', 'completed', 'archived'], true)) {
             json_response(['ok' => false, 'error' => 'نام یا وضعیت پروژه معتبر نیست.'], 422);
         }
-        $statement = $pdo->prepare('UPDATE projects SET name = ?, description = ?, status = ? WHERE id = ?');
-        $statement->execute([$name, $description, $status, $projectId]);
-        log_activity($pdo, (int) $user['id'], 'project', (string) $projectId, 'update', ['status' => $status], $projectId);
+        if ($baleToken !== '' && !valid_bale_token($baleToken)) {
+            json_response(['ok' => false, 'error' => 'توکن ربات بله معتبر نیست.'], 422);
+        }
+        if ($baleChatId !== '' && !valid_bale_chat_id($baleChatId)) {
+            json_response(['ok' => false, 'error' => 'شناسه گروه یا کانال بله معتبر نیست.'], 422);
+        }
+        if ($baleEnabled === 1 && ($baleChatId === '' || ($baleToken === '' && empty($project['bale_configured'])))) {
+            json_response(['ok' => false, 'error' => 'برای فعال‌سازی اعلان، توکن و شناسه مقصد بله لازم است.'], 422);
+        }
+        if ($baleToken !== '') {
+            $statement = $pdo->prepare(
+                'UPDATE projects SET name = ?, description = ?, status = ?, bale_bot_token = ?, bale_chat_id = ?, bale_enabled = ? WHERE id = ?'
+            );
+            $statement->execute([$name, $description, $status, encrypt_project_secret($baleToken), $baleChatId ?: null, $baleEnabled, $projectId]);
+        } else {
+            $statement = $pdo->prepare(
+                'UPDATE projects SET name = ?, description = ?, status = ?, bale_chat_id = ?, bale_enabled = ? WHERE id = ?'
+            );
+            $statement->execute([$name, $description, $status, $baleChatId ?: null, $baleEnabled, $projectId]);
+        }
+        log_activity($pdo, (int) $user['id'], 'project', (string) $projectId, 'update', ['title' => $name, 'status' => $status], $projectId);
         json_response(['ok' => true, 'message' => 'تنظیمات پروژه ذخیره شد.']);
+    }
+
+    if ($action === 'test_bale') {
+        require_project_manager($project);
+        try {
+            $baleToken = trim((string) ($input['bale_bot_token'] ?? ''));
+            $baleChatId = trim((string) ($input['bale_chat_id'] ?? '')) ?: (string) ($project['bale_chat_id'] ?? '');
+            if ($baleToken === '') {
+                $tokenStatement = $pdo->prepare('SELECT bale_bot_token FROM projects WHERE id = ?');
+                $tokenStatement->execute([$projectId]);
+                $encryptedToken = (string) ($tokenStatement->fetchColumn() ?: '');
+                if ($encryptedToken !== '') {
+                    $baleToken = decrypt_project_secret($encryptedToken);
+                }
+            }
+            if (!valid_bale_token($baleToken) || !valid_bale_chat_id($baleChatId)) {
+                json_response(['ok' => false, 'error' => 'ابتدا توکن ربات و شناسه معتبر گروه یا کانال را وارد کنید.'], 422);
+            }
+            bale_send_message(
+                $baleToken,
+                $baleChatId,
+                "✅ اتصال اعلان پروژه با موفقیت برقرار شد.\n\nپروژه: " . bale_safe_text((string) $project['name']) . "\nارسال‌کننده آزمون: " . bale_safe_text((string) $user['display_name'])
+            );
+        } catch (Throwable $exception) {
+            json_response(['ok' => false, 'error' => 'ارسال آزمایشی ناموفق بود: ' . $exception->getMessage()], 422);
+        }
+        json_response(['ok' => true, 'message' => 'پیام آزمایشی با موفقیت در بله ارسال شد.']);
+    }
+
+    if ($action === 'remove_bale_config') {
+        require_project_manager($project);
+        $statement = $pdo->prepare(
+            'UPDATE projects SET bale_bot_token = NULL, bale_chat_id = NULL, bale_enabled = 0 WHERE id = ?'
+        );
+        $statement->execute([$projectId]);
+        log_activity($pdo, (int) $user['id'], 'project', (string) $projectId, 'remove_bale_config', ['title' => (string) $project['name']], $projectId);
+        json_response(['ok' => true, 'message' => 'اتصال بله از این پروژه حذف شد.']);
     }
 
     if ($action === 'create_task') {
@@ -318,13 +415,16 @@ try {
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $statement->execute([$id, $projectId, $wbs, $domain, $title, $criteria, $sourcePage, $priority, $ownerType]);
-        log_activity($pdo, (int) $user['id'], 'task', $id, 'create', [], $projectId);
+        log_activity($pdo, (int) $user['id'], 'task', $id, 'create', ['title' => $title, 'wbs' => $wbs], $projectId);
         json_response(['ok' => true, 'message' => "فعالیت {$id} ایجاد شد."]);
     }
 
     if ($action === 'delete_task') {
         require_project_manager($project);
         $id = (string) ($input['id'] ?? '');
+        $titleStatement = $pdo->prepare('SELECT title FROM tasks WHERE id = ? AND project_id = ?');
+        $titleStatement->execute([$id, $projectId]);
+        $deletedTitle = (string) ($titleStatement->fetchColumn() ?: '');
         $unlinkIssues = $pdo->prepare('UPDATE issues SET task_id = NULL WHERE task_id = ? AND project_id = ?');
         $unlinkIssues->execute([$id, $projectId]);
         $statement = $pdo->prepare('DELETE FROM tasks WHERE id = ? AND project_id = ?');
@@ -332,7 +432,7 @@ try {
         if ($statement->rowCount() === 0) {
             json_response(['ok' => false, 'error' => 'فعالیت در این پروژه پیدا نشد.'], 404);
         }
-        log_activity($pdo, (int) $user['id'], 'task', $id, 'delete', [], $projectId);
+        log_activity($pdo, (int) $user['id'], 'task', $id, 'delete', ['title' => $deletedTitle], $projectId);
         json_response(['ok' => true, 'message' => 'فعالیت حذف شد.']);
     }
 
@@ -424,7 +524,11 @@ try {
         );
         $statement->execute([$projectId, $taskId, $title, $description, $severity, (int) $user['id'], $dueDate]);
         $id = (string) $pdo->lastInsertId();
-        log_activity($pdo, (int) $user['id'], 'issue', $id, 'create', ['task_id' => $taskId], $projectId);
+        log_activity($pdo, (int) $user['id'], 'issue', $id, 'create', [
+            'title' => $title,
+            'task_id' => $taskId,
+            'severity' => $severity,
+        ], $projectId);
         json_response(['ok' => true, 'message' => 'اشکال جدید ثبت شد.']);
     }
 
@@ -447,12 +551,15 @@ try {
         if ($id < 1) {
             json_response(['ok' => false, 'error' => 'شناسه اشکال معتبر نیست.'], 422);
         }
+        $titleStatement = $pdo->prepare('SELECT title FROM issues WHERE id = ? AND project_id = ?');
+        $titleStatement->execute([$id, $projectId]);
+        $deletedTitle = (string) ($titleStatement->fetchColumn() ?: '');
         $statement = $pdo->prepare('DELETE FROM issues WHERE id = ? AND project_id = ?');
         $statement->execute([$id, $projectId]);
         if ($statement->rowCount() === 0) {
             json_response(['ok' => false, 'error' => 'رکورد اشکال پیدا نشد.'], 404);
         }
-        log_activity($pdo, (int) $user['id'], 'issue', (string) $id, 'delete', [], $projectId);
+        log_activity($pdo, (int) $user['id'], 'issue', (string) $id, 'delete', ['title' => $deletedTitle], $projectId);
         json_response(['ok' => true, 'message' => 'رکورد اشکال حذف شد.']);
     }
 
@@ -472,7 +579,7 @@ try {
         );
         $statement->execute([$projectId, $title, str_replace('T', ' ', $date), $participants, $decisions, $actions, (int) $user['id']]);
         $id = (string) $pdo->lastInsertId();
-        log_activity($pdo, (int) $user['id'], 'meeting', $id, 'create', [], $projectId);
+        log_activity($pdo, (int) $user['id'], 'meeting', $id, 'create', ['title' => $title], $projectId);
         json_response(['ok' => true, 'message' => 'صورت‌جلسه ثبت شد.']);
     }
 
