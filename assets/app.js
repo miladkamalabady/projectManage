@@ -64,6 +64,71 @@ function fa(value) {
     return String(value).replace(/\d/g, digit => "۰۱۲۳۴۵۶۷۸۹"[Number(digit)]);
 }
 
+function en(value) {
+    return String(value)
+        .replace(/[۰-۹]/g, digit => String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit)))
+        .replace(/[٠-٩]/g, digit => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit)));
+}
+
+function pad2(value) {
+    return String(value).padStart(2, "0");
+}
+
+function jalaliToGregorian(jy, jm, jd) {
+    jy += 1595;
+    let days = -355668 + (365 * jy) + (Math.floor(jy / 33) * 8)
+        + Math.floor(((jy % 33) + 3) / 4) + jd
+        + (jm < 7 ? (jm - 1) * 31 : ((jm - 7) * 30) + 186);
+    let gy = 400 * Math.floor(days / 146097);
+    days %= 146097;
+    if (days > 36524) {
+        gy += 100 * Math.floor(--days / 36524);
+        days %= 36524;
+        if (days >= 365) days++;
+    }
+    gy += 4 * Math.floor(days / 1461);
+    days %= 1461;
+    if (days > 365) {
+        gy += Math.floor((days - 1) / 365);
+        days = (days - 1) % 365;
+    }
+    let gd = days + 1;
+    const monthDays = [0, 31, (gy % 4 === 0 && gy % 100 !== 0) || gy % 400 === 0 ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let gm = 1;
+    while (gm <= 12 && gd > monthDays[gm]) {
+        gd -= monthDays[gm];
+        gm++;
+    }
+    return [gy, gm, gd];
+}
+
+function parseJalaliDate(value) {
+    const normalized = en(value).trim().replaceAll("-", "/");
+    const match = normalized.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);
+    if (!match) return null;
+    const jy = Number(match[1]);
+    const jm = Number(match[2]);
+    const jd = Number(match[3]);
+    const maxDay = jm <= 6 ? 31 : jm <= 11 ? 30 : 30;
+    if (jy < 1300 || jy > 1600 || jm < 1 || jm > 12 || jd < 1 || jd > maxDay) return null;
+    return jalaliToGregorian(jy, jm, jd);
+}
+
+function currentJalaliDate() {
+    const parts = new Intl.DateTimeFormat("en-US-u-ca-persian", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+    }).formatToParts(new Date());
+    const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+    return `${values.year}/${values.month}/${values.day}`;
+}
+
+function currentTime() {
+    const now = new Date();
+    return `${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
+}
+
 function formatDate(value, includeTime = false) {
     if (!value) return "تعیین نشده";
     const normalized = String(value).includes("T") ? value : String(value).replace(" ", "T");
@@ -303,7 +368,8 @@ function meetingsView() {
 function newMeetingModal() {
     openModal("ثبت صورت‌جلسه", `<form id="meetingForm" class="form-grid">
         <label class="field full">عنوان جلسه<input name="title" required></label>
-        <label class="field">تاریخ و ساعت<input name="meeting_date" type="datetime-local" required></label>
+        <label class="field">تاریخ جلسه (شمسی)<input name="meeting_date_jalali" value="${fa(currentJalaliDate())}" inputmode="numeric" placeholder="۱۴۰۵/۰۶/۱۲" required><small>با قالب سال/ماه/روز وارد کنید.</small></label>
+        <label class="field">ساعت جلسه<input name="meeting_time" type="time" value="${currentTime()}" required></label>
         <label class="field">حاضران<input name="participants" placeholder="پیمانکار، ناظر، بهره‌بردار…" required></label>
         <label class="field full">مصوبات<textarea name="decisions" required></textarea></label>
         <label class="field full">اقدامات، مسئول و مهلت<textarea name="actions"></textarea></label>
@@ -416,7 +482,17 @@ document.addEventListener("submit", event => {
     if (form.id === "taskForm") return submitAndReload({ action:"update_task", ...values }, "فعالیت ذخیره شد.");
     if (form.id === "issueForm") return submitAndReload({ action:"create_issue", ...values }, "اشکال ثبت شد.");
     if (form.id === "issueStatusForm") return submitAndReload({ action:"update_issue", ...values }, "وضعیت اشکال ثبت شد.");
-    if (form.id === "meetingForm") return submitAndReload({ action:"create_meeting", ...values }, "صورت‌جلسه ثبت شد.");
+    if (form.id === "meetingForm") {
+        const gregorian = parseJalaliDate(values.meeting_date_jalali);
+        if (!gregorian || !/^\d{2}:\d{2}$/.test(values.meeting_time)) {
+            return showToast("تاریخ شمسی یا ساعت معتبر نیست. نمونه صحیح: ۱۴۰۵/۰۶/۱۲", true);
+        }
+        const [year, month, day] = gregorian;
+        values.meeting_date = `${year}-${pad2(month)}-${pad2(day)}T${values.meeting_time}`;
+        delete values.meeting_date_jalali;
+        delete values.meeting_time;
+        return submitAndReload({ action:"create_meeting", ...values }, "صورت‌جلسه ثبت شد.");
+    }
     if (form.id === "userForm") return submitAndReload({ action:"create_user", ...values }, "کاربر ایجاد شد.");
 });
 
