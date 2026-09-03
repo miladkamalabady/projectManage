@@ -60,7 +60,7 @@ if (!$configMissing) {
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="سامانه مدیریت و کنترل پروژه سمپاد">
     <title>سامانه مدیریت پروژه سمپاد</title>
-    <link rel="stylesheet" href="assets/app.css">
+    <link rel="stylesheet" href="assets/app.css?v=2.0.0">
 </head>
 <body>
 <?php if ($configMissing): ?>
@@ -100,19 +100,18 @@ if (!$configMissing) {
             <div class="brand-lockup"><div class="brand-mark">س</div><div><strong>سمپاد</strong><small>مدیریت پروژه</small></div></div>
             <nav id="mainNav" aria-label="منوی اصلی">
                 <button class="nav-item active" data-view="dashboard"><span>⌂</span>داشبورد</button>
-                <button class="nav-item" data-view="tasks"><span>▤</span>فعالیت‌ها <b>۱۵۹</b></button>
+                <button class="nav-item" data-view="tasks"><span>▤</span>فعالیت‌ها <b id="taskNavCount">۰</b></button>
                 <button class="nav-item" data-view="issues"><span>⚑</span>اشکالات</button>
                 <button class="nav-item" data-view="meetings"><span>◷</span>جلسات و مصوبات</button>
-                <?php if ($user['role'] === 'manager'): ?>
-                    <button class="nav-item" data-view="users"><span>♙</span>کاربران و نقش‌ها</button>
-                <?php endif; ?>
+                <button class="nav-item" data-view="settings" id="settingsNav"><span>⚙</span>تنظیمات پروژه</button>
             </nav>
-            <div class="sidebar-note"><strong>مبنای پروژه</strong><span>صفحات ۶ تا ۱۶ شرح خدمات سامانه‌های سازمان</span></div>
+            <div class="sidebar-note"><strong>پروژه فعال</strong><span id="sidebarProjectName">در حال دریافت…</span></div>
         </aside>
         <main class="main">
             <header class="topbar">
                 <button class="mobile-menu" id="menuButton" type="button">☰</button>
-                <div><small>کنترل پروژه سامانه جامع سمپاد</small><h1 id="pageTitle">داشبورد</h1></div>
+                <div><small>سامانه چندپروژه‌ای کنترل و نظارت</small><h1 id="pageTitle">داشبورد</h1></div>
+                <label class="project-switcher"><span>پروژه فعال</span><select id="projectSelect" aria-label="انتخاب پروژه"></select></label>
                 <div class="user-menu">
                     <div class="avatar"><?= htmlspecialchars(mb_substr($user['display_name'], 0, 1), ENT_QUOTES, 'UTF-8') ?></div>
                     <div><strong><?= htmlspecialchars($user['display_name'], ENT_QUOTES, 'UTF-8') ?></strong><small id="roleLabel"></small></div>
@@ -130,7 +129,7 @@ if (!$configMissing) {
             'user' => $user,
         ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
     </script>
-    <script src="assets/app.js?v=1.2.0"></script>
+    <script src="assets/app.js?v=2.0.0"></script>
 <?php endif; ?>
 </body>
 </html>
