@@ -48,6 +48,7 @@ $success = false;
 $results = [];
 $createdProjects = 0;
 $createdUsers = 0;
+$createdActivities = 0;
 
 function v4_column_exists(PDO $pdo, string $table, string $column): bool
 {
@@ -88,6 +89,15 @@ try {
             $pdo->exec('ALTER TABLE users ADD COLUMN must_change_password TINYINT(1) NOT NULL DEFAULT 0 AFTER active');
         }
 
+        $activitiesPath = __DIR__ . '/data/cultural_projects_1405_activities.json';
+        if (!is_file($activitiesPath)) {
+            throw new RuntimeException('فایل داده فعالیت‌ها روی هاست موجود نیست: data/cultural_projects_1405_activities.json');
+        }
+        $activityCatalog = json_decode((string) file_get_contents($activitiesPath), true, 512, JSON_THROW_ON_ERROR);
+        if (!is_array($activityCatalog) || count($activityCatalog) !== count($projects)) {
+            throw new RuntimeException('فایل داده فعالیت‌ها معتبر یا کامل نیست.');
+        }
+
         $pdo->beginTransaction();
         $findProject = $pdo->prepare('SELECT id FROM projects WHERE code = ?');
         $insertProject = $pdo->prepare(
@@ -100,6 +110,12 @@ try {
         $setMember = $pdo->prepare(
             "INSERT INTO project_users (project_id, user_id, access_role) VALUES (?, ?, 'editor')
              ON DUPLICATE KEY UPDATE access_role = IF(access_role = 'project_manager', access_role, 'editor')"
+        );
+        $insertTask = $pdo->prepare(
+            "INSERT INTO tasks
+             (id, project_id, wbs, domain, title, acceptance_criteria, source_page, priority, owner_type)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'متوسط', 'پیمانکار')
+             ON DUPLICATE KEY UPDATE id = VALUES(id)"
         );
 
         foreach ($projects as [$code, $slug, $name, $category, $contentOwner, $weight]) {
@@ -125,6 +141,37 @@ try {
 
             $setMember->execute([$projectId, $nazerId]);
             $setMember->execute([$projectId, $karfarmaId]);
+
+            $projectActivities = $activityCatalog[$code] ?? null;
+            if (!is_array($projectActivities) || !$projectActivities) {
+                throw new RuntimeException("برای پروژه {$code} فعالیت معتبری در فایل داده وجود ندارد.");
+            }
+            $projectCreatedActivities = 0;
+            foreach (array_values($projectActivities) as $activityIndex => $activity) {
+                $title = trim((string) ($activity['title'] ?? ''));
+                $domain = trim((string) ($activity['domain'] ?? 'فرآیند اصلی')) ?: 'فرآیند اصلی';
+                $source = trim((string) ($activity['source'] ?? 'شرح خدمات')) ?: 'شرح خدمات';
+                if ($title === '') {
+                    throw new RuntimeException("عنوان یکی از فعالیت‌های پروژه {$code} خالی است.");
+                }
+                $taskNumber = $activityIndex + 1;
+                $taskId = $code . '-RFP-' . str_pad((string) $taskNumber, 3, '0', STR_PAD_LEFT);
+                $criteria = 'پیاده‌سازی کامل فعالیت مطابق سند خدمات پرورشی و فرهنگی ۱۴۰۵ و تأیید ناظر و کارفرما.';
+                $insertTask->execute([
+                    $taskId,
+                    $projectId,
+                    '1.' . $taskNumber,
+                    mb_substr($domain, 0, 190),
+                    $title,
+                    $criteria,
+                    mb_substr('سند ۱۴۰۵ - ' . $source, 0, 32),
+                ]);
+                if ($insertTask->rowCount() === 1) {
+                    $projectCreatedActivities++;
+                    $createdActivities++;
+                }
+            }
+
             $results[] = [
                 'name' => $name,
                 'code' => $code,
@@ -135,6 +182,8 @@ try {
                 'project_created' => $projectCreated,
                 'nazer_created' => $nazerCreated,
                 'karfarma_created' => $karfarmaCreated,
+                'activity_count' => count($projectActivities),
+                'created_activities' => $projectCreatedActivities,
             ];
         }
 
@@ -144,6 +193,7 @@ try {
                 'project_count' => count($projects),
                 'created_projects' => $createdProjects,
                 'created_users' => $createdUsers,
+                'created_activities' => $createdActivities,
             ]);
         } catch (Throwable $logException) {
             error_log('Migration v4 activity log failed: ' . $logException->getMessage());
@@ -171,13 +221,14 @@ try {
     <p class="eyebrow">مهاجرت پروژه‌ها و حساب‌ها</p>
     <h1>پروژه‌های خدمات پرورشی و فرهنگی ۱۴۰۵</h1>
     <?php if ($success): ?>
-        <div class="alert success"><?= $createdProjects ?> پروژه و <?= $createdUsers ?> کاربر جدید ساخته شد. موارد موجود بدون بازنشانی رمز حفظ شدند.</div>
+        <div class="alert success"><?= $createdProjects ?> پروژه، <?= $createdUsers ?> کاربر و <?= $createdActivities ?> فعالیت جدید ساخته شد. موارد موجود بدون بازنشانی رمز حفظ شدند.</div>
         <div class="alert info">رمزهای موقت تصادفی فقط در جدول زیر نمایش داده می‌شوند. این صفحه را ذخیره کنید؛ هر کاربر در اولین ورود ملزم به تعیین رمز شخصی خواهد بود.</div>
-        <div class="table-wrap migration-table"><table class="data-table"><thead><tr><th>پروژه</th><th>کد</th><th>حساب ناظر</th><th>رمز موقت ناظر</th><th>حساب کارفرما</th><th>رمز موقت کارفرما</th></tr></thead><tbody>
+        <div class="table-wrap migration-table"><table class="data-table"><thead><tr><th>پروژه</th><th>کد</th><th>فعالیت‌ها</th><th>حساب ناظر</th><th>رمز موقت ناظر</th><th>حساب کارفرما</th><th>رمز موقت کارفرما</th></tr></thead><tbody>
         <?php foreach ($results as $row): ?>
             <tr>
                 <td><strong><?= htmlspecialchars($row['name'], ENT_QUOTES, 'UTF-8') ?></strong></td>
                 <td><span class="code"><?= htmlspecialchars($row['code'], ENT_QUOTES, 'UTF-8') ?></span></td>
+                <td><?= (int) $row['activity_count'] ?> مورد (<?= (int) $row['created_activities'] ?> جدید)</td>
                 <td><span class="code"><?= htmlspecialchars($row['nazer'], ENT_QUOTES, 'UTF-8') ?></span></td>
                 <td><span class="code"><?= htmlspecialchars($row['nazer_password'] ?? 'رمز فعلی حفظ شد', ENT_QUOTES, 'UTF-8') ?></span></td>
                 <td><span class="code"><?= htmlspecialchars($row['karfarma'], ENT_QUOTES, 'UTF-8') ?></span></td>
@@ -189,7 +240,7 @@ try {
         <div class="alert error"><strong>اقدام امنیتی:</strong> پس از ذخیره فهرست حساب‌ها، فایل <code>migrate_v4.php</code> را از هاست حذف کنید.</div>
     <?php else: ?>
         <?php if ($error): ?><div class="alert error"><?= htmlspecialchars($error, ENT_QUOTES, 'UTF-8') ?></div><?php endif; ?>
-        <div class="alert info">این مهاجرت ۲۳ پروژه و برای هر پروژه یک ناظر و یک کارفرما با رمز موقت تصادفی ایجاد می‌کند. مدیر فعلی، مدیر همه پروژه‌ها خواهد شد. اجرای مجدد، پروژه و کاربر تکراری نمی‌سازد و رمز حساب موجود را تغییر نمی‌دهد.</div>
+        <div class="alert info">این مهاجرت ۲۳ پروژه، ۳۳۳ فعالیت استخراج‌شده از جداول فرایندهای سند و برای هر پروژه یک ناظر و یک کارفرما با رمز موقت تصادفی ایجاد می‌کند. مدیر فعلی، مدیر همه پروژه‌ها خواهد شد. اجرای مجدد، پروژه، فعالیت یا کاربر تکراری نمی‌سازد و رمز حساب موجود را تغییر نمی‌دهد.</div>
         <form method="post" class="form-stack">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token(), ENT_QUOTES, 'UTF-8') ?>">
             <button class="button primary wide" type="submit">ایجاد پروژه‌ها و حساب‌ها</button>
