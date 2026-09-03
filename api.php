@@ -172,10 +172,13 @@ try {
             $projectMembers = $memberStatement->fetchAll();
         }
 
+        $logFilter = $user['role'] === 'manager'
+            ? '(l.project_id = ? OR l.project_id IS NULL)'
+            : "l.project_id = ? AND l.entity_type NOT IN ('system', 'project', 'project_member', 'user')";
         $logStatement = $pdo->prepare(
-            'SELECT l.*, u.display_name FROM activity_logs l
+            "SELECT l.*, u.display_name FROM activity_logs l
              LEFT JOIN users u ON u.id = l.user_id
-             WHERE l.project_id = ? ORDER BY l.created_at DESC LIMIT 12'
+             WHERE {$logFilter} ORDER BY l.created_at DESC LIMIT 12"
         );
         $logStatement->execute([$projectId]);
         $logs = $logStatement->fetchAll();
@@ -207,6 +210,32 @@ try {
         json_response(['ok' => false, 'error' => 'بدنه درخواست معتبر نیست.'], 422);
     }
     $action = (string) ($input['action'] ?? '');
+
+    if ($action === 'change_password') {
+        $currentPassword = (string) ($input['current_password'] ?? '');
+        $newPassword = (string) ($input['new_password'] ?? '');
+        $confirmPassword = (string) ($input['confirm_password'] ?? '');
+        if (mb_strlen($newPassword) < 10) {
+            json_response(['ok' => false, 'error' => 'رمز عبور جدید باید حداقل ۱۰ نویسه داشته باشد.'], 422);
+        }
+        if (!hash_equals($newPassword, $confirmPassword)) {
+            json_response(['ok' => false, 'error' => 'رمز عبور جدید و تکرار آن یکسان نیستند.'], 422);
+        }
+        $passwordStatement = $pdo->prepare('SELECT password_hash FROM users WHERE id = ? AND active = 1');
+        $passwordStatement->execute([(int) $user['id']]);
+        $currentHash = (string) ($passwordStatement->fetchColumn() ?: '');
+        if ($currentHash === '' || !password_verify($currentPassword, $currentHash)) {
+            json_response(['ok' => false, 'error' => 'رمز عبور فعلی صحیح نیست.'], 422);
+        }
+        if (password_verify($newPassword, $currentHash)) {
+            json_response(['ok' => false, 'error' => 'رمز عبور جدید نباید با رمز فعلی یکسان باشد.'], 422);
+        }
+        $updatePassword = $pdo->prepare('UPDATE users SET password_hash = ? WHERE id = ?');
+        $updatePassword->execute([password_hash($newPassword, PASSWORD_DEFAULT), (int) $user['id']]);
+        session_regenerate_id(true);
+        log_activity($pdo, (int) $user['id'], 'user', (string) $user['id'], 'change_password');
+        json_response(['ok' => true, 'message' => 'رمز عبور با موفقیت تغییر کرد.']);
+    }
 
     if ($action === 'create_project') {
         require_role($user, ['manager']);
