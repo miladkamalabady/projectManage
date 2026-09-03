@@ -105,6 +105,10 @@ try {
     $user = require_user();
     $pdo = db();
 
+    if (!empty($user['must_change_password'])) {
+        json_response(['ok' => false, 'error' => 'برای ادامه ابتدا رمز عبور اولیه خود را تغییر دهید.'], 428);
+    }
+
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         $projects = accessible_projects($pdo, (int) $user['id']);
         $requestedProjectId = (int) ($_GET['project_id'] ?? 0);
@@ -255,7 +259,9 @@ try {
         if (password_verify($newPassword, $currentHash)) {
             json_response(['ok' => false, 'error' => 'رمز عبور جدید نباید با رمز فعلی یکسان باشد.'], 422);
         }
-        $updatePassword = $pdo->prepare('UPDATE users SET password_hash = ? WHERE id = ?');
+        $updatePassword = database_column_exists($pdo, 'users', 'must_change_password')
+            ? $pdo->prepare('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?')
+            : $pdo->prepare('UPDATE users SET password_hash = ? WHERE id = ?');
         $updatePassword->execute([password_hash($newPassword, PASSWORD_DEFAULT), (int) $user['id']]);
         session_regenerate_id(true);
         log_activity($pdo, (int) $user['id'], 'user', (string) $user['id'], 'change_password');
@@ -627,9 +633,15 @@ try {
         }
         try {
             $pdo->beginTransaction();
-            $statement = $pdo->prepare(
-                'INSERT INTO users (email, password_hash, display_name, role) VALUES (?, ?, ?, ?)'
-            );
+            if (database_column_exists($pdo, 'users', 'must_change_password')) {
+                $statement = $pdo->prepare(
+                    'INSERT INTO users (email, password_hash, display_name, role, must_change_password) VALUES (?, ?, ?, ?, 1)'
+                );
+            } else {
+                $statement = $pdo->prepare(
+                    'INSERT INTO users (email, password_hash, display_name, role) VALUES (?, ?, ?, ?)'
+                );
+            }
             $statement->execute([$email, password_hash($password, PASSWORD_DEFAULT), $name, $role]);
             $memberId = (int) $pdo->lastInsertId();
             $member = $pdo->prepare(
