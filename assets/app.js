@@ -174,13 +174,16 @@ function currentTime() {
 
 function formatDate(value, includeTime = false) {
     if (!value) return "تعیین نشده";
-    const normalized = String(value).includes("T") ? value : String(value).replace(" ", "T");
+    const raw = String(value);
+    const normalized = /^\d{4}-\d{2}-\d{2}$/.test(raw)
+        ? `${raw}T12:00:00`
+        : (raw.includes("T") ? raw : raw.replace(" ", "T"));
     const date = new Date(normalized);
     if (Number.isNaN(date.getTime())) return esc(value);
     const options = includeTime
-        ? { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }
-        : { year: "numeric", month: "short", day: "numeric" };
-    return new Intl.DateTimeFormat("fa-IR", options).format(date);
+        ? { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }
+        : { year: "numeric", month: "2-digit", day: "2-digit" };
+    return new Intl.DateTimeFormat("fa-IR-u-ca-persian", options).format(date);
 }
 
 function showToast(message, error = false) {
@@ -391,7 +394,7 @@ function taskModal(taskId) {
             <input type="hidden" name="id" value="${esc(task.id)}">
             <label class="field">وضعیت<select name="status" ${canEdit ? "" : "disabled"}>${Object.entries(labels.taskStatus).map(([key,value]) => `<option value="${key}" ${task.status === key ? "selected" : ""}>${value}</option>`).join("")}</select></label>
             <label class="field">درصد پیشرفت<input name="progress" type="number" min="0" max="100" value="${Number(task.progress)}" ${canEdit ? "" : "disabled"}></label>
-            <label class="field">ددلاین پیمانکار (شمسی)<input name="contractor_deadline_jalali" inputmode="numeric" placeholder="۱۴۰۵/۰۶/۱۲" value="${fa(isoToJalaliInput(task.contractor_deadline))}" ${canEdit ? "" : "disabled"}></label>
+            <label class="field">ددلاین پیمانکار (شمسی)<input name="contractor_deadline_jalali" inputmode="numeric" dir="ltr" placeholder="۱۴۰۵/۰۶/۱۲" value="${fa(isoToJalaliInput(task.contractor_deadline))}" ${canEdit ? "" : "disabled"}><small>تاریخ را با قالب سال/ماه/روز وارد کنید.</small></label>
             <label class="field full">یادداشت و توضیحات<textarea name="notes" ${canEdit ? "" : "disabled"}>${esc(task.notes || "")}</textarea></label>
             ${canEdit ? `<div class="button-row full"><button class="button primary" type="submit">ذخیره تغییرات</button>${isProjectManager ? `<button class="button danger task-delete" data-task="${esc(task.id)}" type="button">حذف فعالیت</button>` : ""}</div>` : ""}
         </form>
@@ -402,8 +405,13 @@ function taskModal(taskId) {
 }
 
 function approvalCard(title, kind, current, allowed) {
+    const cancelLabel = current === "approved" ? "لغو تأیید" : "لغو نظر";
     return `<section class="approval-card"><h4>${title}</h4><p style="font-size:11px;color:var(--muted)">وضعیت فعلی: ${labels.approval[current]}</p>
-        ${allowed ? `<div class="button-row"><button class="button ghost approval-action" data-kind="${kind}" data-decision="approved">تأیید</button><button class="button danger approval-action" data-kind="${kind}" data-decision="rejected">ثبت اشکال</button></div>` : '<small>این عملیات برای نقش شما فعال نیست.</small>'}
+        ${allowed ? `<div class="button-row">
+            ${current !== "approved" ? `<button class="button ghost approval-action" data-kind="${kind}" data-decision="approved">تأیید</button>` : ""}
+            ${current !== "rejected" ? `<button class="button danger approval-action" data-kind="${kind}" data-decision="rejected">ثبت اشکال</button>` : ""}
+            ${current !== "pending" ? `<button class="button secondary approval-action" data-kind="${kind}" data-decision="pending">${cancelLabel}</button>` : ""}
+        </div>` : '<small>این عملیات برای نقش شما فعال نیست.</small>'}
     </section>`;
 }
 
