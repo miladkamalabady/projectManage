@@ -129,7 +129,7 @@ if (!$configMissing) {
             'user' => $user,
         ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
     </script>
-    <script src="assets/app.js?v=2.0.0"></script>
+    <script src="assets/app.js?v=2.0.1"></script>
 <?php endif; ?>
 </body>
 </html>
