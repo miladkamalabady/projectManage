@@ -21,7 +21,7 @@
 ## راه‌اندازی
 
 ```bash
-npm ci
+npm install
 npx wrangler login
 npx wrangler d1 create project-manage
 ```
