@@ -82,6 +82,7 @@ const labels = {
         supervisor_approval: "نظر ناظر",
         operator_approval: "نظر بهره‌بردار",
         change_password: "تغییر رمز عبور",
+        remove_bale_config: "حذف اتصال بله",
     },
     entityType: {
         task: "فعالیت",
@@ -535,6 +536,8 @@ function settingsView() {
     }
     const memberIds = new Set(appState.data.project_members.map(member => Number(member.id)));
     const availableUsers = appState.data.users.filter(user => !memberIds.has(Number(user.id)));
+    const baleConfigured = Boolean(Number(project.bale_configured || 0));
+    const baleEnabled = Boolean(Number(project.bale_enabled || 0));
     return `<div class="section-head"><div><h2>تنظیمات پروژه</h2><p>مدیریت مشخصات، فعالیت‌ها و دسترسی اعضای «${esc(project.name)}»</p></div>
         <div class="button-row">${appState.data.can_create_project ? '<button class="button ghost" id="newProject">+ پروژه جدید</button>' : ""}<button class="button primary" id="newTask">+ فعالیت جدید</button></div></div>
         <div class="settings-stack">
@@ -545,6 +548,13 @@ function settingsView() {
                         <label class="field">نام پروژه<input name="name" value="${esc(project.name)}" required></label>
                         <label class="field">وضعیت<select name="status">${Object.entries(labels.projectStatus).map(([key,value]) => `<option value="${key}" ${project.status === key ? "selected" : ""}>${value}</option>`).join("")}</select></label>
                         <label class="field">توضیحات<textarea name="description">${esc(project.description || "")}</textarea></label>
+                        <div class="integration-box">
+                            <div class="integration-head"><div><strong>اعلان پیام‌رسان بله</strong><small>ارسال خودکار تغییرات همین پروژه</small></div><span class="connection-status ${baleEnabled ? "active" : ""}">${baleEnabled ? "فعال" : (baleConfigured ? "غیرفعال" : "تنظیم نشده")}</span></div>
+                            <label class="field">توکن ربات بله<input name="bale_bot_token" type="password" autocomplete="new-password" placeholder="${baleConfigured ? "توکن ثبت شده؛ برای حفظ آن خالی بگذارید" : "123456789:AbCdEf..."}"><small>توکن قبلی هیچ‌گاه نمایش داده نمی‌شود. فقط برای جایگزینی، توکن جدید وارد کنید.</small></label>
+                            <label class="field">شناسه گروه یا کانال<input name="bale_chat_id" dir="ltr" value="${esc(project.bale_chat_id || "")}" placeholder="-123456789 یا @channelname"><small>ربات را به گروه/کانال اضافه کنید و مجوز ارسال پیام بدهید.</small></label>
+                            <label class="field">وضعیت اعلان<select name="bale_enabled"><option value="1" ${baleEnabled ? "selected" : ""}>فعال</option><option value="0" ${!baleEnabled ? "selected" : ""}>غیرفعال</option></select></label>
+                            <div class="button-row"><button class="button secondary" id="testBale" type="button">ارسال پیام آزمایشی</button>${baleConfigured ? '<button class="button danger" id="removeBale" type="button">حذف اتصال بله</button>' : ""}</div>
+                        </div>
                         <button class="button primary">ذخیره تنظیمات پروژه</button>
                     </form>
                 </section>
@@ -582,6 +592,12 @@ function newProjectModal() {
         <label class="field">تاریخ شروع (شمسی)<input name="start_date_jalali" inputmode="numeric" placeholder="۱۴۰۵/۰۷/۰۱"></label>
         <label class="field">تاریخ پایان (شمسی)<input name="end_date_jalali" inputmode="numeric" placeholder="۱۴۰۶/۰۶/۳۱"></label>
         <label class="field full">توضیحات<textarea name="description" placeholder="هدف، دامنه و توضیح کوتاه پروژه"></textarea></label>
+        <div class="integration-box full">
+            <div class="integration-head"><div><strong>اعلان پیام‌رسان بله</strong><small>اختیاری؛ در صورت تکمیل هر دو فیلد فعال می‌شود</small></div></div>
+            <label class="field">توکن ربات بله<input name="bale_bot_token" type="password" autocomplete="new-password" placeholder="123456789:AbCdEf..."></label>
+            <label class="field">شناسه گروه یا کانال<input name="bale_chat_id" dir="ltr" placeholder="-123456789 یا @channelname"></label>
+            <small>ابتدا ربات را به مقصد اضافه کنید و در کانال، دسترسی ارسال پیام را به آن بدهید.</small>
+        </div>
         <div class="alert info full">پس از ایجاد، شما مدیر پروژه خواهید بود و می‌توانید اعضا و فعالیت‌ها را اضافه کنید.</div>
         <div class="button-row full"><button class="button primary">ایجاد پروژه</button><button class="button secondary" type="button" data-close>انصراف</button></div>
     </form>`);
@@ -649,6 +665,26 @@ async function submitAndReload(payload, successMessage) {
     }
 }
 
+async function testBaleConnection() {
+    const form = document.getElementById("projectForm");
+    if (!form) return;
+    const button = document.getElementById("testBale");
+    const values = Object.fromEntries(new FormData(form).entries());
+    try {
+        if (button) button.disabled = true;
+        const result = await request({
+            action: "test_bale",
+            bale_bot_token: values.bale_bot_token || "",
+            bale_chat_id: values.bale_chat_id || "",
+        });
+        showToast(result.message || "پیام آزمایشی ارسال شد.");
+    } catch (error) {
+        showToast(error.message, true);
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
 document.addEventListener("click", event => {
     const button = event.target.closest("button");
     if (!button) return;
@@ -676,6 +712,11 @@ document.addEventListener("click", event => {
     if (button.id === "addExistingMember") return addExistingMemberModal();
     if (button.id === "newUser") return newUserModal();
     if (button.id === "changePassword") return changePasswordModal();
+    if (button.id === "testBale") return testBaleConnection();
+    if (button.id === "removeBale") {
+        if (!window.confirm("توکن و شناسه بله از این پروژه حذف شود؟")) return;
+        return submitAndReload({ action:"remove_bale_config" }, "اتصال بله حذف شد.");
+    }
     if (button.id === "modalClose" || button.hasAttribute("data-close")) return closeModal();
     if (button.id === "menuButton") return document.getElementById("sidebar").classList.toggle("open");
     if (button.id === "retryLoad") return loadData();
