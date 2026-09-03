@@ -125,6 +125,9 @@ try {
         if ($title === '' || $description === '' || !in_array($severity, ['low', 'medium', 'high', 'critical'], true)) {
             json_response(['ok' => false, 'error' => 'عنوان، شرح و شدت اشکال را کامل کنید.'], 422);
         }
+        if ($dueDate !== null && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $dueDate)) {
+            json_response(['ok' => false, 'error' => 'تاریخ مهلت رفع معتبر نیست.'], 422);
+        }
         $statement = $pdo->prepare(
             'INSERT INTO issues (task_id, title, description, severity, reported_by, due_date) VALUES (?, ?, ?, ?, ?, ?)'
         );
@@ -145,6 +148,21 @@ try {
         $statement->execute([$status, $id]);
         log_activity($pdo, (int) $user['id'], 'issue', (string) $id, 'status_change', ['status' => $status]);
         json_response(['ok' => true, 'message' => 'وضعیت اشکال تغییر کرد.']);
+    }
+
+    if ($action === 'delete_issue') {
+        require_role($user, ['manager']);
+        $id = (int) ($input['id'] ?? 0);
+        if ($id < 1) {
+            json_response(['ok' => false, 'error' => 'شناسه اشکال معتبر نیست.'], 422);
+        }
+        $statement = $pdo->prepare('DELETE FROM issues WHERE id = ?');
+        $statement->execute([$id]);
+        if ($statement->rowCount() === 0) {
+            json_response(['ok' => false, 'error' => 'رکورد اشکال پیدا نشد.'], 404);
+        }
+        log_activity($pdo, (int) $user['id'], 'issue', (string) $id, 'delete');
+        json_response(['ok' => true, 'message' => 'رکورد اشکال حذف شد.']);
     }
 
     if ($action === 'create_meeting') {
