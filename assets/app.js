@@ -32,7 +32,7 @@ const labels = {
         manager: "مدیر پروژه",
         contractor: "پیمانکار",
         supervisor: "ناظر",
-        operator: "بهره‌بردار",
+        operator: "کارفرما / بهره‌بردار",
         viewer: "مشاهده‌گر",
     },
     taskStatus: {
@@ -80,7 +80,7 @@ const labels = {
         remove: "حذف دسترسی",
         status_change: "تغییر وضعیت",
         supervisor_approval: "نظر ناظر",
-        operator_approval: "نظر بهره‌بردار",
+        operator_approval: "نظر کارفرما / بهره‌بردار",
         change_password: "تغییر رمز عبور",
         remove_bale_config: "حذف اتصال بله",
     },
@@ -401,7 +401,7 @@ function tasksView() {
             </div>
         </div>
         <section class="panel">
-            <div class="table-wrap"><table class="data-table"><thead><tr><th>شناسه / WBS ${helpTooltip("WBS ساختار شکست کار است؛ عدد قبل از نقطه مرحله اصلی و عدد بعد از نقطه شماره فعالیت در آن مرحله است.", "؟")}</th><th>فعالیت</th><th>وضعیت</th><th>پیشرفت</th><th>ددلاین</th><th>ناظر</th><th>بهره‌بردار</th><th>عملیات</th></tr></thead>
+            <div class="table-wrap"><table class="data-table"><thead><tr><th>شناسه / WBS ${helpTooltip("WBS ساختار شکست کار است؛ عدد قبل از نقطه مرحله اصلی و عدد بعد از نقطه شماره فعالیت در آن مرحله است.", "؟")}</th><th>فعالیت</th><th>وضعیت</th><th>پیشرفت</th><th>ددلاین</th><th>ناظر</th><th>کارفرما / بهره‌بردار</th><th>عملیات</th></tr></thead>
             <tbody>${rows.map(task => `<tr>
                 <td><span class="code">${esc(task.id)}</span><br><small class="wbs-code">WBS: ${esc(task.wbs)}${wbsStageDescription(task.wbs) ? helpTooltip(wbsStageDescription(task.wbs), "ⓘ") : ""}</small></td>
                 <td class="title-cell"><strong>${esc(task.title)}</strong><small>${esc(task.domain)} · اولویت ${esc(task.priority)}</small></td>
@@ -450,7 +450,7 @@ function taskModal(taskId) {
         </form>
         <div class="approval-grid" style="margin-top:18px">
             ${approvalCard("تأیید ناظر", "supervisor", task.supervisor_approval, canSupervisor)}
-            ${approvalCard("تأیید بهره‌بردار", "operator", task.operator_approval, canOperator)}
+            ${approvalCard("تأیید کارفرما / بهره‌بردار", "operator", task.operator_approval, canOperator)}
         </div>`);
 }
 
