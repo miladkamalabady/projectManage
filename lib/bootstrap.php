@@ -91,15 +91,38 @@ function verify_csrf(): void
     }
 }
 
+function database_column_exists(PDO $pdo, string $table, string $column): bool
+{
+    static $cache = [];
+    $key = $table . '.' . $column;
+    if (!array_key_exists($key, $cache)) {
+        $statement = $pdo->prepare(
+            'SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?'
+        );
+        $statement->execute([$table, $column]);
+        $cache[$key] = (int) $statement->fetchColumn() > 0;
+    }
+    return $cache[$key];
+}
+
 function current_user(): ?array
 {
     if (empty($_SESSION['user_id'])) {
         return null;
     }
 
-    $statement = db()->prepare('SELECT id, email, display_name, role FROM users WHERE id = ? AND active = 1');
+    $pdo = db();
+    $statement = $pdo->prepare('SELECT id, email, display_name, role FROM users WHERE id = ? AND active = 1');
     $statement->execute([(int) $_SESSION['user_id']]);
     $user = $statement->fetch();
+    if ($user && database_column_exists($pdo, 'users', 'must_change_password')) {
+        $passwordFlag = $pdo->prepare('SELECT must_change_password FROM users WHERE id = ?');
+        $passwordFlag->execute([(int) $user['id']]);
+        $user['must_change_password'] = (int) $passwordFlag->fetchColumn();
+    } elseif ($user) {
+        $user['must_change_password'] = 0;
+    }
     return $user ?: null;
 }
 
@@ -265,7 +288,7 @@ function bale_notification_text(
     $actionLabels = [
         'create' => 'ایجاد شد', 'update' => 'ویرایش شد', 'delete' => 'حذف شد',
         'status_change' => 'تغییر وضعیت', 'supervisor_approval' => 'ثبت نظر ناظر',
-        'operator_approval' => 'ثبت نظر بهره‌بردار', 'set_access' => 'تغییر دسترسی',
+        'operator_approval' => 'ثبت نظر کارفرما / بهره‌بردار', 'set_access' => 'تغییر دسترسی',
         'remove' => 'حذف دسترسی', 'install' => 'نصب', 'migrate' => 'ارتقا',
     ];
     $valueLabels = [
@@ -275,7 +298,7 @@ function bale_notification_text(
         'resolved' => 'رفع‌شده', 'closed' => 'بسته', 'low' => 'کم', 'medium' => 'متوسط',
         'high' => 'زیاد', 'critical' => 'بحرانی', 'project_manager' => 'مدیر پروژه',
         'editor' => 'ویرایشگر', 'viewer' => 'مشاهده‌گر', 'manager' => 'مدیر سامانه',
-        'contractor' => 'پیمانکار', 'supervisor' => 'ناظر', 'operator' => 'بهره‌بردار',
+        'contractor' => 'پیمانکار', 'supervisor' => 'ناظر', 'operator' => 'کارفرما / بهره‌بردار',
         'active' => 'فعال', 'paused' => 'متوقف موقت', 'completed' => 'تکمیل‌شده', 'archived' => 'بایگانی',
     ];
 
