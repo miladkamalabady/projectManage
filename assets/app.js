@@ -70,6 +70,28 @@ const labels = {
         completed: "تکمیل‌شده",
         archived: "بایگانی",
     },
+    logAction: {
+        create: "ایجاد",
+        update: "ویرایش",
+        delete: "حذف",
+        install: "نصب سامانه",
+        migrate: "ارتقای سامانه",
+        set_access: "تغییر دسترسی",
+        remove: "حذف دسترسی",
+        status_change: "تغییر وضعیت",
+        supervisor_approval: "نظر ناظر",
+        operator_approval: "نظر بهره‌بردار",
+        change_password: "تغییر رمز عبور",
+    },
+    entityType: {
+        task: "فعالیت",
+        issue: "اشکال",
+        meeting: "صورت‌جلسه",
+        project: "پروژه",
+        project_member: "عضو پروژه",
+        user: "کاربر",
+        system: "سامانه",
+    },
 };
 
 const sampadWbsStages = {
@@ -335,7 +357,7 @@ function dashboard() {
         <section class="panel" style="margin-top:18px">
             <div class="panel-head"><div><h3>آخرین تغییرات</h3><p>ردپای فعالیت کاربران</p></div></div>
             <div class="activity-list">
-                ${appState.data.logs.slice(0, 8).map(log => `<div class="activity-item"><span class="activity-dot"></span><div><strong>${esc(log.display_name || "سامانه")} — ${esc(log.action)}</strong><p>${esc(log.entity_type)} / <span class="code">${esc(log.entity_id)}</span></p></div><time>${formatDate(log.created_at, true)}</time></div>`).join("") || empty("تغییری ثبت نشده است.")}
+                ${appState.data.logs.slice(0, 8).map(log => `<div class="activity-item"><span class="activity-dot"></span><div><strong>${esc(log.display_name || "سامانه")} — ${esc(labels.logAction[log.action] || log.action)}</strong><p>${esc(labels.entityType[log.entity_type] || log.entity_type)} / <span class="code">${esc(log.entity_id)}</span></p></div><time>${formatDate(log.created_at, true)}</time></div>`).join("") || empty("تغییری در این پروژه ثبت نشده است.")}
             </div>
         </section>`;
 }
@@ -588,6 +610,16 @@ function newUserModal() {
     </form>`);
 }
 
+function changePasswordModal() {
+    openModal("تغییر رمز عبور", `<form id="passwordForm" class="form-grid">
+        <label class="field full">رمز عبور فعلی<input name="current_password" type="password" autocomplete="current-password" required></label>
+        <label class="field">رمز عبور جدید<input name="new_password" type="password" minlength="10" autocomplete="new-password" required></label>
+        <label class="field">تکرار رمز عبور جدید<input name="confirm_password" type="password" minlength="10" autocomplete="new-password" required></label>
+        <div class="alert info full">رمز عبور جدید باید حداقل ۱۰ نویسه داشته باشد و با رمز فعلی متفاوت باشد.</div>
+        <div class="button-row full"><button class="button primary">ذخیره رمز جدید</button><button class="button secondary" type="button" data-close>انصراف</button></div>
+    </form>`);
+}
+
 function empty(message) {
     return `<div class="empty"><strong>اطلاعاتی موجود نیست</strong><span>${esc(message)}</span></div>`;
 }
@@ -643,6 +675,7 @@ document.addEventListener("click", event => {
     if (button.id === "newTask") return newTaskModal();
     if (button.id === "addExistingMember") return addExistingMemberModal();
     if (button.id === "newUser") return newUserModal();
+    if (button.id === "changePassword") return changePasswordModal();
     if (button.id === "modalClose" || button.hasAttribute("data-close")) return closeModal();
     if (button.id === "menuButton") return document.getElementById("sidebar").classList.toggle("open");
     if (button.id === "retryLoad") return loadData();
@@ -705,9 +738,15 @@ document.addEventListener("change", event => {
 
 document.addEventListener("submit", event => {
     const form = event.target;
-    if (!["taskForm","newTaskForm","issueForm","issueStatusForm","meetingForm","projectForm","newProjectForm","memberForm","userForm"].includes(form.id)) return;
+    if (!["taskForm","newTaskForm","issueForm","issueStatusForm","meetingForm","projectForm","newProjectForm","memberForm","userForm","passwordForm"].includes(form.id)) return;
     event.preventDefault();
     const values = Object.fromEntries(new FormData(form).entries());
+    if (form.id === "passwordForm") {
+        if (values.new_password !== values.confirm_password) {
+            return showToast("رمز عبور جدید و تکرار آن یکسان نیستند.", true);
+        }
+        return submitAndReload({ action:"change_password", ...values }, "رمز عبور تغییر کرد.");
+    }
     if (form.id === "taskForm") {
         const jalaliDeadline = String(values.contractor_deadline_jalali || "").trim();
         values.contractor_deadline = jalaliDeadline ? jalaliDateToIso(jalaliDeadline) : "";
