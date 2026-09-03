@@ -359,8 +359,14 @@ try {
         }
         $statement = $pdo->prepare("UPDATE tasks SET {$field} = ? WHERE id = ? AND project_id = ?");
         $statement->execute([$decision, $id, $projectId]);
+        if ($statement->rowCount() === 0) {
+            json_response(['ok' => false, 'error' => 'فعالیت در این پروژه پیدا نشد یا وضعیت آن تغییری نکرد.'], 404);
+        }
         log_activity($pdo, (int) $user['id'], 'task', $id, $kind . '_approval', ['decision' => $decision], $projectId);
-        json_response(['ok' => true, 'message' => 'نظر تأیید ثبت شد.']);
+        json_response([
+            'ok' => true,
+            'message' => $decision === 'pending' ? 'تأیید لغو و وضعیت به «در انتظار» بازگردانده شد.' : 'نظر تأیید ثبت شد.',
+        ]);
     }
 
     if ($action === 'create_issue') {
