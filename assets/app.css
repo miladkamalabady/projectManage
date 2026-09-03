@@ -301,6 +301,13 @@ code { direction: ltr; display: inline-block; background: #edf2f5; border-radius
 .settings-stat strong { display:block; font-size:21px; margin-bottom:4px; }
 .settings-stat span { color:var(--muted); font-size:11px; }
 .member-access { min-height:36px; border:1px solid var(--line); border-radius:9px; padding:6px 8px; background:white; }
+.integration-box { display:grid; gap:10px; margin:18px 0; padding:15px; border:1px solid #cfe3e7; border-radius:14px; background:#f7fbfc; }
+.integration-box .field { margin-bottom:4px; }
+.integration-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:3px; }
+.integration-head strong, .integration-head small { display:block; }
+.integration-head small { margin-top:4px; color:var(--muted); font-size:10px; }
+.connection-status { padding:5px 9px; border-radius:99px; background:#edf1f4; color:var(--muted); font-size:10px; font-weight:800; }
+.connection-status.active { background:#e9f8f0; color:var(--success); }
 .wbs-stage-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:9px; }
 .wbs-stage-grid > div { display:flex; align-items:flex-start; gap:8px; padding:10px; border:1px solid var(--line); border-radius:11px; background:#f8fafb; }
 .wbs-stage-grid strong { display:grid; place-items:center; flex:0 0 25px; height:25px; border-radius:8px; background:#e6f5f4; color:var(--cyan-dark); }
