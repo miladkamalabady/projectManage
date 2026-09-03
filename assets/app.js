@@ -69,7 +69,9 @@ function formatDate(value, includeTime = false) {
     const normalized = String(value).includes("T") ? value : String(value).replace(" ", "T");
     const date = new Date(normalized);
     if (Number.isNaN(date.getTime())) return esc(value);
-    return date.toLocaleDateString("fa-IR", includeTime ? { dateStyle: "medium", timeStyle: "short" } : { dateStyle: "medium" });
+    return includeTime
+        ? date.toLocaleString("fa-IR", { dateStyle: "medium", timeStyle: "short" })
+        : date.toLocaleDateString("fa-IR", { dateStyle: "medium" });
 }
 
 function showToast(message, error = false) {
