@@ -60,7 +60,7 @@ if (!$configMissing) {
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="سامانه یکپارچه مدیریت و کنترل پروژه‌ها">
     <title>سامانه مدیریت پروژه</title>
-    <link rel="stylesheet" href="assets/app.css?v=2.0.1">
+    <link rel="stylesheet" href="assets/app.css?v=2.0.2">
 </head>
 <body>
 <?php if ($configMissing): ?>
@@ -115,6 +115,7 @@ if (!$configMissing) {
                 <div class="user-menu">
                     <div class="avatar"><?= htmlspecialchars(mb_substr($user['display_name'], 0, 1), ENT_QUOTES, 'UTF-8') ?></div>
                     <div><strong><?= htmlspecialchars($user['display_name'], ENT_QUOTES, 'UTF-8') ?></strong><small id="roleLabel"></small></div>
+                    <button class="account-action" id="changePassword" type="button" title="تغییر رمز عبور">تغییر رمز</button>
                     <form method="post"><input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token(), ENT_QUOTES, 'UTF-8') ?>"><button class="logout" name="logout" value="1">خروج</button></form>
                 </div>
             </header>
@@ -129,7 +130,7 @@ if (!$configMissing) {
             'user' => $user,
         ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
     </script>
-    <script src="assets/app.js?v=2.0.2"></script>
+    <script src="assets/app.js?v=2.0.3"></script>
 <?php endif; ?>
 </body>
 </html>
