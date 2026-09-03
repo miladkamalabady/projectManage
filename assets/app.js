@@ -114,6 +114,13 @@ function parseJalaliDate(value) {
     return jalaliToGregorian(jy, jm, jd);
 }
 
+function jalaliDateToIso(value) {
+    const gregorian = parseJalaliDate(value);
+    if (!gregorian) return null;
+    const [year, month, day] = gregorian;
+    return `${year}-${pad2(month)}-${pad2(day)}`;
+}
+
 function currentJalaliDate() {
     const parts = new Intl.DateTimeFormat("en-US-u-ca-persian", {
         year: "numeric",
@@ -341,10 +348,11 @@ function issuesView() {
 
 function issueModal(issue) {
     const canEdit = ["manager","contractor","supervisor","operator"].includes(boot.user.role);
+    const canDelete = boot.user.role === "manager";
     openModal("اشکال شماره " + issue.id, `
         <div class="detail-grid"><div class="detail-box"><small>شدت</small><strong>${labels.severity[issue.severity]}</strong></div><div class="detail-box"><small>گزارش‌دهنده</small><strong>${esc(issue.reporter_name)}</strong></div><div class="detail-box"><small>ددلاین رفع</small><strong>${formatDate(issue.due_date)}</strong></div></div>
         <h3>${esc(issue.title)}</h3><p style="line-height:1.9;color:var(--muted)">${esc(issue.description)}</p>
-        ${canEdit ? `<form id="issueStatusForm"><input type="hidden" name="id" value="${issue.id}"><label class="field">وضعیت<select name="status">${Object.entries(labels.issueStatus).map(([key,value]) => `<option value="${key}" ${issue.status === key ? "selected" : ""}>${value}</option>`).join("")}</select></label><button class="button primary">ثبت وضعیت</button></form>` : ""}
+        ${canEdit ? `<form id="issueStatusForm"><input type="hidden" name="id" value="${issue.id}"><label class="field">وضعیت<select name="status">${Object.entries(labels.issueStatus).map(([key,value]) => `<option value="${key}" ${issue.status === key ? "selected" : ""}>${value}</option>`).join("")}</select></label><div class="button-row"><button class="button primary">ثبت وضعیت</button>${canDelete ? `<button class="button danger issue-delete" data-issue="${issue.id}" type="button">حذف رکورد اشکال</button>` : ""}</div></form>` : ""}
     `);
 }
 
@@ -353,7 +361,7 @@ function newIssueModal() {
         <label class="field full">عنوان اشکال<input name="title" required></label>
         <label class="field">فعالیت مرتبط<select name="task_id"><option value="">بدون فعالیت مشخص</option>${appState.data.tasks.map(task => `<option value="${esc(task.id)}">${esc(task.id)} — ${esc(task.title.slice(0,55))}</option>`).join("")}</select></label>
         <label class="field">شدت<select name="severity"><option value="low">کم</option><option value="medium" selected>متوسط</option><option value="high">زیاد</option><option value="critical">بحرانی</option></select></label>
-        <label class="field">مهلت رفع<input name="due_date" type="date"></label>
+        <label class="field">مهلت رفع (شمسی)<input name="due_date_jalali" inputmode="numeric" placeholder="۱۴۰۵/۰۶/۱۲"><small>با قالب سال/ماه/روز وارد کنید.</small></label>
         <label class="field full">شرح کامل<textarea name="description" required></textarea></label>
         <div class="button-row full"><button class="button primary">ثبت اشکال</button><button class="button secondary" type="button" data-close>انصراف</button></div>
     </form>`);
@@ -446,6 +454,10 @@ document.addEventListener("click", event => {
     if (button.id === "menuButton") return document.getElementById("sidebar").classList.toggle("open");
     if (button.id === "retryLoad") return loadData();
     if (button.dataset.page) { appState.taskPage = Number(button.dataset.page); render(); return; }
+    if (button.classList.contains("issue-delete")) {
+        if (!window.confirm("این رکورد اشکال برای همیشه حذف شود؟ این عملیات قابل بازگشت نیست.")) return;
+        return submitAndReload({ action:"delete_issue", id:Number(button.dataset.issue) }, "رکورد اشکال حذف شد.");
+    }
     if (button.classList.contains("approval-action")) {
         const id = document.querySelector("#taskForm [name=id]").value;
         return submitAndReload({ action:"approve_task", id, kind:button.dataset.kind, decision:button.dataset.decision }, "نظر تأیید ثبت شد.");
@@ -480,7 +492,19 @@ document.addEventListener("submit", event => {
     event.preventDefault();
     const values = Object.fromEntries(new FormData(form).entries());
     if (form.id === "taskForm") return submitAndReload({ action:"update_task", ...values }, "فعالیت ذخیره شد.");
-    if (form.id === "issueForm") return submitAndReload({ action:"create_issue", ...values }, "اشکال ثبت شد.");
+    if (form.id === "issueForm") {
+        const jalaliDueDate = String(values.due_date_jalali || "").trim();
+        if (jalaliDueDate) {
+            values.due_date = jalaliDateToIso(jalaliDueDate);
+            if (!values.due_date) {
+                return showToast("تاریخ مهلت رفع معتبر نیست. نمونه صحیح: ۱۴۰۵/۰۶/۱۲", true);
+            }
+        } else {
+            values.due_date = "";
+        }
+        delete values.due_date_jalali;
+        return submitAndReload({ action:"create_issue", ...values }, "اشکال ثبت شد.");
+    }
     if (form.id === "issueStatusForm") return submitAndReload({ action:"update_issue", ...values }, "وضعیت اشکال ثبت شد.");
     if (form.id === "meetingForm") {
         const gregorian = parseJalaliDate(values.meeting_date_jalali);
