@@ -119,12 +119,21 @@ function require_role(array $user, array $roles): void
     }
 }
 
-function log_activity(PDO $pdo, ?int $userId, string $entityType, string $entityId, string $action, array $details = []): void
+function log_activity(
+    PDO $pdo,
+    ?int $userId,
+    string $entityType,
+    string $entityId,
+    string $action,
+    array $details = [],
+    ?int $projectId = null
+): void
 {
     $statement = $pdo->prepare(
-        'INSERT INTO activity_logs (user_id, entity_type, entity_id, action, details_json) VALUES (?, ?, ?, ?, ?)'
+        'INSERT INTO activity_logs (project_id, user_id, entity_type, entity_id, action, details_json) VALUES (?, ?, ?, ?, ?, ?)'
     );
     $statement->execute([
+        $projectId,
         $userId,
         $entityType,
         $entityId,
