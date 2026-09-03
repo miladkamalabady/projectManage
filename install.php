@@ -50,17 +50,34 @@ if ($configExists) {
             $userStatement->execute([$email, password_hash($password, PASSWORD_DEFAULT), $name]);
             $adminId = (int) $pdo->lastInsertId();
 
+            $projectStatement = $pdo->prepare(
+                "INSERT INTO projects (name, code, description, status, created_by)
+                 VALUES (?, ?, ?, 'active', ?)"
+            );
+            $projectStatement->execute([
+                'سامانه جامع سمپاد',
+                'SAMPAD',
+                'پروژه اولیه شامل ۱۵۹ فعالیت استخراج‌شده از صفحات ۶ تا ۱۶ RFP',
+                $adminId,
+            ]);
+            $projectId = (int) $pdo->lastInsertId();
+            $memberStatement = $pdo->prepare(
+                "INSERT INTO project_users (project_id, user_id, access_role) VALUES (?, ?, 'project_manager')"
+            );
+            $memberStatement->execute([$projectId, $adminId]);
+
             $items = json_decode((string) file_get_contents(__DIR__ . '/data/requirements.json'), true, 512, JSON_THROW_ON_ERROR);
             if (count($items) !== 159) {
                 throw new RuntimeException('فهرست اولیه فعالیت‌ها کامل نیست.');
             }
             $taskStatement = $pdo->prepare(
-                'INSERT INTO tasks (id, wbs, domain, title, acceptance_criteria, source_page, priority, owner_type)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+                'INSERT INTO tasks (id, project_id, wbs, domain, title, acceptance_criteria, source_page, priority, owner_type)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             foreach ($items as $item) {
                 $taskStatement->execute([
                     $item['id'],
+                    $projectId,
                     $item['wbs'],
                     $item['domain'],
                     $item['title'],
@@ -70,7 +87,7 @@ if ($configExists) {
                     $item['ownerType'],
                 ]);
             }
-            log_activity($pdo, $adminId, 'system', 'installation', 'install', ['task_count' => count($items)]);
+            log_activity($pdo, $adminId, 'system', 'installation', 'install', ['task_count' => count($items)], $projectId);
             $pdo->commit();
             $installed = true;
             $success = true;
