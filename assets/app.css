@@ -94,6 +94,7 @@ code { direction: ltr; display: inline-block; background: #edf2f5; border-radius
 }
 .field textarea { min-height: 110px; resize: vertical; line-height: 1.8; }
 .login-help { display: block; text-align: center; margin-top: 15px; font-size: 12px; }
+.password-gate .login-intro { background: linear-gradient(145deg, #061a32 0%, #123f62 58%, #6d5412 100%); }
 
 .button {
     min-height: 42px;
@@ -125,6 +126,17 @@ code { direction: ltr; display: inline-block; background: #edf2f5; border-radius
 .install-card.centered { margin: 8vh auto; }
 .install-card h1 { margin: 10px 0; font-size: 25px; }
 .form-stack { margin-top: 22px; }
+.migration-wide { width:min(1180px,100%); }
+.migration-table { margin:20px 0; }
+.migration-table .data-table { min-width:1300px; }
+.migration-actions { margin:18px 0; }
+@media print {
+    .migration-actions, .migration-wide > .alert.error { display:none; }
+    .install-page { padding:0; display:block; }
+    .migration-wide { width:100%; max-width:none; border:0; box-shadow:none; padding:10px; }
+    .migration-table { overflow:visible; }
+    .migration-table .data-table { min-width:0; font-size:8px; }
+}
 
 .app-shell { display: grid; grid-template-columns: 255px minmax(0,1fr); min-height: 100vh; }
 .sidebar {
