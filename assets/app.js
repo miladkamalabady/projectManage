@@ -72,6 +72,21 @@ const labels = {
     },
 };
 
+const sampadWbsStages = {
+    "1": "اهداف، ظرفیت، زیرساخت و الزامات کلان",
+    "2": "کارسوق‌ها و اجرای برنامه‌های آموزشی",
+    "3": "جشنواره خوارزمی و دبیرخانه‌های علمی و اجرایی",
+    "4": "گروه شرکت‌کنندگان و گروه‌بندی کارسوق",
+    "5": "ثبت‌نام، هویت و ورود انواع کاربران",
+    "6": "درخت سازمانی، نقش‌ها و دسترسی‌ها",
+    "7": "فرایند داوری، تخصیص داور و مصاحبه",
+    "8": "چت، پشتیبانی، پیام‌رسانی و امتیازدهی",
+    "9": "مدیریت کاربران، مهلت‌ها و شکایات",
+    "10": "یکپارچه‌سازی، مستندات و کارتابل‌ها",
+    "11": "نقش‌های سازمانی و پنل‌های کاربری",
+    "12": "پیکربندی رویداد، موارد کاربرد و تحلیل تکمیلی",
+};
+
 document.getElementById("roleLabel").textContent = labels.role[boot.user.role] || boot.user.role;
 
 function esc(value) {
@@ -81,6 +96,18 @@ function esc(value) {
         .replaceAll(">", "&gt;")
         .replaceAll('"', "&quot;")
         .replaceAll("'", "&#039;");
+}
+
+function helpTooltip(text, label = "راهنما") {
+    return `<span class="help-tooltip" tabindex="0" title="${esc(text)}" aria-label="${esc(text)}" data-tooltip="${esc(text)}">${esc(label)}</span>`;
+}
+
+function wbsStageDescription(wbs) {
+    const parts = String(wbs || "").split(".");
+    const stage = sampadWbsStages[en(parts[0])];
+    if (!stage || appState.data.current_project?.code !== "SAMPAD") return "";
+    const activity = parts.length > 1 ? `؛ فعالیت ${fa(en(parts.slice(1).join(".")))} از این مرحله` : "";
+    return `مرحله ${fa(en(parts[0]))}: ${stage}${activity}`;
 }
 
 function fa(value) {
@@ -351,9 +378,9 @@ function tasksView() {
             </div>
         </div>
         <section class="panel">
-            <div class="table-wrap"><table class="data-table"><thead><tr><th>شناسه</th><th>فعالیت</th><th>وضعیت</th><th>پیشرفت</th><th>ددلاین</th><th>ناظر</th><th>بهره‌بردار</th><th>عملیات</th></tr></thead>
+            <div class="table-wrap"><table class="data-table"><thead><tr><th>شناسه / WBS ${helpTooltip("WBS ساختار شکست کار است؛ عدد قبل از نقطه مرحله اصلی و عدد بعد از نقطه شماره فعالیت در آن مرحله است.", "؟")}</th><th>فعالیت</th><th>وضعیت</th><th>پیشرفت</th><th>ددلاین</th><th>ناظر</th><th>بهره‌بردار</th><th>عملیات</th></tr></thead>
             <tbody>${rows.map(task => `<tr>
-                <td><span class="code">${esc(task.id)}</span><br><small>${esc(task.wbs)}</small></td>
+                <td><span class="code">${esc(task.id)}</span><br><small class="wbs-code">WBS: ${esc(task.wbs)}${wbsStageDescription(task.wbs) ? helpTooltip(wbsStageDescription(task.wbs), "ⓘ") : ""}</small></td>
                 <td class="title-cell"><strong>${esc(task.title)}</strong><small>${esc(task.domain)} · اولویت ${esc(task.priority)}</small></td>
                 <td>${statusBadge(task.status)}</td>
                 <td><div class="progress-label"><span>${fa(task.progress)}٪</span><div class="progress"><span style="width:${Number(task.progress)}%"></span></div></div></td>
@@ -382,7 +409,7 @@ function taskModal(taskId) {
     openModal("فعالیت " + task.id, `
         <div class="detail-grid">
             <div class="detail-box"><small>حوزه</small><strong>${esc(task.domain)}</strong></div>
-            <div class="detail-box"><small>WBS</small><strong>${esc(task.wbs)}</strong></div>
+            <div class="detail-box"><small>WBS</small><strong class="wbs-code">${esc(task.wbs)}${wbsStageDescription(task.wbs) ? helpTooltip(wbsStageDescription(task.wbs), "ⓘ") : ""}</strong></div>
             <div class="detail-box"><small>صفحه منبع</small><strong>${esc(task.source_page)}</strong></div>
             <div class="detail-box"><small>اولویت</small><strong>${esc(task.priority)}</strong></div>
             <div class="detail-box"><small>مسئول اصلی</small><strong>${esc(task.owner_type)}</strong></div>
@@ -420,7 +447,7 @@ function newTaskModal() {
     openModal("افزودن فعالیت به پروژه", `<form id="newTaskForm" class="form-grid">
         <div class="alert info full">شناسه فعالیت به‌صورت خودکار از کد پروژه ساخته می‌شود.</div>
         <label class="field full">عنوان فعالیت<input name="title" required></label>
-        <label class="field">کد WBS<input name="wbs" value="${nextWbs}" required></label>
+        <label class="field">کد WBS ${helpTooltip("برای نمونه، 3.2 یعنی فعالیت دوم از مرحله سوم پروژه. این کد برای دسته‌بندی و مرتب‌سازی فعالیت‌هاست.", "؟")}<input name="wbs" value="${nextWbs}" required><small>عدد مرحله اصلی و شماره فعالیت را با نقطه جدا کنید؛ مانند ۳.۲.</small></label>
         <label class="field">حوزه فعالیت<input name="domain" placeholder="تحلیل، توسعه، آموزش…" required></label>
         <label class="field">اولویت<select name="priority"><option>کم</option><option selected>متوسط</option><option>بالا</option><option>بحرانی</option></select></label>
         <label class="field">مسئول اصلی<input name="owner_type" value="پیمانکار" required></label>
@@ -517,6 +544,11 @@ function settingsView() {
                 <div class="table-wrap"><table class="data-table"><thead><tr><th>کاربر</th><th>نقش سازمانی</th><th>دسترسی در پروژه</th><th>عملیات</th></tr></thead><tbody>
                     ${appState.data.project_members.map(member => `<tr><td><strong>${esc(member.display_name)}</strong><br><small class="code">${esc(member.email)}</small></td><td>${esc(labels.role[member.role] || member.role)}</td><td><select class="member-access" data-member-access="${member.id}">${Object.entries(labels.projectAccess).map(([key,value]) => `<option value="${key}" ${member.access_role === key ? "selected" : ""}>${value}</option>`).join("")}</select></td><td><div class="button-row"><button class="action-link save-member" data-member="${member.id}">ذخیره</button><button class="action-link remove-member" data-member="${member.id}" style="color:var(--danger)">حذف دسترسی</button></div></td></tr>`).join("")}
                 </tbody></table></div>
+            </section>
+            <section class="panel">
+                <div class="panel-head"><div><h3>راهنمای کد WBS</h3><p>ساختار شکست کار برای دسته‌بندی و مرتب‌سازی فعالیت‌های پروژه</p></div></div>
+                <div class="alert info"><strong>نمونه:</strong> کد <span class="code">3.2</span> یعنی فعالیت دوم از مرحله سوم پروژه. در پروژه‌های جدید می‌توانید مرحله‌های متناسب با ساختار همان پروژه را تعریف کنید.</div>
+                ${project.code === "SAMPAD" ? `<div class="wbs-stage-grid">${Object.entries(sampadWbsStages).map(([number,title]) => `<div><strong>${fa(number)}</strong><span>${esc(title)}</span></div>`).join("")}</div>` : ""}
             </section>
         </div>`;
 }
