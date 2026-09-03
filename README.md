@@ -21,10 +21,14 @@
 ## راه‌اندازی
 
 ```bash
-npm install
+npm ci
 npx wrangler login
 npx wrangler d1 create project-manage
 ```
+
+دستورهای اصلی پروژه مستقل از Bash نوشته شده‌اند و در PowerShell ویندوز،
+Linux و macOS قابل اجرا هستند. در ویندوز دستورات را مستقیماً در PowerShell
+اجرا کنید و نیازی به اجرای فایل‌های پوشه `scripts` ندارید.
 
 شناسه پایگاه داده ساخته‌شده را در فایل `wrangler.jsonc` به‌جای
 `REPLACE_WITH_YOUR_D1_DATABASE_ID` قرار دهید. سپس migration را اجرا کنید:
@@ -53,6 +57,12 @@ Access ایمیل کاربر را در هدر `Cf-Access-Authenticated-User-Emai
 
 ```bash
 npm run build
+```
+
+اجرای محیط توسعه:
+
+```bash
+npm run dev
 ```
 
 فایل‌های schema در `db/schema.ts` و migrationهای قابل اجرا در پوشه `drizzle` قرار دارند.
