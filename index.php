@@ -60,7 +60,7 @@ if (!$configMissing) {
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="سامانه یکپارچه مدیریت و کنترل پروژه‌ها">
     <title>سامانه مدیریت پروژه</title>
-    <link rel="stylesheet" href="assets/app.css?v=2.0.2">
+    <link rel="stylesheet" href="assets/app.css?v=2.1.0">
 </head>
 <body>
 <?php if ($configMissing): ?>
@@ -130,7 +130,7 @@ if (!$configMissing) {
             'user' => $user,
         ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
     </script>
-    <script src="assets/app.js?v=2.0.3"></script>
+    <script src="assets/app.js?v=2.1.0"></script>
 <?php endif; ?>
 </body>
 </html>
