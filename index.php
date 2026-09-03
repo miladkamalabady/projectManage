@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 $configMissing = !is_file(__DIR__ . '/config.php');
 $loginError = null;
+$passwordChangeError = null;
 $user = null;
 
 if (!$configMissing) {
@@ -48,6 +49,28 @@ if (!$configMissing) {
             }
         }
         $user = current_user();
+        if ($user && !empty($user['must_change_password']) && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['set_initial_password'])) {
+            if (!hash_equals(csrf_token(), (string) ($_POST['csrf_token'] ?? ''))) {
+                $passwordChangeError = 'درخواست نامعتبر است. صفحه را تازه‌سازی کنید.';
+            } else {
+                $newPassword = (string) ($_POST['new_password'] ?? '');
+                $confirmPassword = (string) ($_POST['confirm_password'] ?? '');
+                if (mb_strlen($newPassword) < 10) {
+                    $passwordChangeError = 'رمز جدید باید حداقل ۱۰ نویسه داشته باشد.';
+                } elseif (!hash_equals($newPassword, $confirmPassword)) {
+                    $passwordChangeError = 'رمز جدید و تکرار آن یکسان نیستند.';
+                } elseif (strcasecmp($newPassword, (string) $user['email']) === 0) {
+                    $passwordChangeError = 'رمز جدید نباید همان ایمیل یا رمز اولیه باشد.';
+                } else {
+                    $statement = $pdo->prepare('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?');
+                    $statement->execute([password_hash($newPassword, PASSWORD_DEFAULT), (int) $user['id']]);
+                    session_regenerate_id(true);
+                    log_activity($pdo, (int) $user['id'], 'user', (string) $user['id'], 'change_password');
+                    header('Location: index.php');
+                    exit;
+                }
+            }
+        }
     } catch (Throwable $exception) {
         $loginError = 'ارتباط با پایگاه داده برقرار نشد. تنظیمات config.php را بررسی کنید.';
     }
@@ -60,7 +83,7 @@ if (!$configMissing) {
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="سامانه یکپارچه مدیریت و کنترل پروژه‌ها">
     <title>سامانه مدیریت پروژه</title>
-    <link rel="stylesheet" href="assets/app.css?v=2.1.0">
+    <link rel="stylesheet" href="assets/app.css?v=2.2.0">
 </head>
 <body>
 <?php if ($configMissing): ?>
@@ -91,6 +114,31 @@ if (!$configMissing) {
                 <label>رمز عبور<input name="password" type="password" required autocomplete="current-password"></label>
                 <button class="button primary wide" name="login" value="1" type="submit">ورود به سامانه</button>
                 <a class="login-help" href="install.php">راهنمای نصب و حساب مدیر</a>
+            </form>
+        </section>
+    </main>
+<?php elseif (!empty($user['must_change_password'])): ?>
+    <main class="login-layout password-gate">
+        <section class="login-intro">
+            <div class="brand-lockup"><div class="brand-mark">م</div><div><strong>مدیریت پروژه</strong><small>ایمن‌سازی حساب کاربری</small></div></div>
+            <div>
+                <p class="eyebrow light">ورود نخست</p>
+                <h1>رمز اولیه خود را تغییر دهید</h1>
+                <p>برای حفاظت از اطلاعات پروژه، پیش از ورود به داشبورد یک رمز شخصی و غیرقابل حدس انتخاب کنید.</p>
+            </div>
+            <div class="login-stats"><span><strong>✓</strong> حداقل ۱۰ نویسه</span><span><strong>✓</strong> متفاوت از ایمیل</span></div>
+        </section>
+        <section class="login-panel">
+            <form method="post" class="login-form">
+                <p class="eyebrow">فعال‌سازی حساب</p>
+                <h2>تعیین رمز شخصی</h2>
+                <p>حساب: <span class="code"><?= htmlspecialchars((string) $user['email'], ENT_QUOTES, 'UTF-8') ?></span></p>
+                <?php if ($passwordChangeError): ?><div class="alert error"><?= htmlspecialchars($passwordChangeError, ENT_QUOTES, 'UTF-8') ?></div><?php endif; ?>
+                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token(), ENT_QUOTES, 'UTF-8') ?>">
+                <label>رمز عبور جدید<input name="new_password" type="password" minlength="10" required autocomplete="new-password" autofocus></label>
+                <label>تکرار رمز عبور جدید<input name="confirm_password" type="password" minlength="10" required autocomplete="new-password"></label>
+                <button class="button primary wide" name="set_initial_password" value="1" type="submit">ذخیره رمز و ورود</button>
+                <button class="button secondary wide" name="logout" value="1" type="submit" formnovalidate>خروج از این حساب</button>
             </form>
         </section>
     </main>
@@ -130,7 +178,7 @@ if (!$configMissing) {
             'user' => $user,
         ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
     </script>
-    <script src="assets/app.js?v=2.1.0"></script>
+    <script src="assets/app.js?v=2.2.0"></script>
 <?php endif; ?>
 </body>
 </html>
