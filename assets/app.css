@@ -185,6 +185,7 @@ code { direction: ltr; display: inline-block; background: #edf2f5; border-radius
 .avatar { width: 42px; height: 42px; border-radius: 14px; display: grid; place-items: center; background: linear-gradient(135deg,var(--cyan),#28bfc2); color: white; font-weight: 900; }
 .user-menu strong { display: block; font-size: 13px; }
 .user-menu small { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
+.account-action { min-height:34px; border:1px solid var(--line); border-radius:9px; padding:0 10px; background:#f6fafb; color:var(--cyan-dark); font-size:10px; font-weight:800; white-space:nowrap; }
 .logout { border: 0; background: transparent; color: var(--danger); font-size: 11px; margin-right: 6px; }
 .content { padding: 27px 32px 45px; max-width: 1600px; margin: auto; }
 .loading { min-height: 350px; display: grid; place-items: center; color: var(--muted); }
@@ -324,6 +325,8 @@ code { direction: ltr; display: inline-block; background: #edf2f5; border-radius
     .project-switcher { min-width:0; width:145px; margin:0 8px; }
     .project-switcher span { display:none; }
     .user-menu > div:not(.avatar), .logout { display:none; }
+    .account-action { width:36px; padding:0; font-size:0; }
+    .account-action::before { content:"🔑"; font-size:15px; }
     .content { padding:19px 14px 35px; }
     .hero { padding:22px; }
     .hero-score { width:88px; height:88px; flex-basis:88px; }
