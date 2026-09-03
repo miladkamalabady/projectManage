@@ -58,8 +58,8 @@ if (!$configMissing) {
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="سامانه مدیریت و کنترل پروژه سمپاد">
-    <title>سامانه مدیریت پروژه سمپاد</title>
+    <meta name="description" content="سامانه یکپارچه مدیریت و کنترل پروژه‌ها">
+    <title>سامانه مدیریت پروژه</title>
     <link rel="stylesheet" href="assets/app.css?v=2.0.1">
 </head>
 <body>
@@ -72,13 +72,13 @@ if (!$configMissing) {
 <?php elseif (!$user): ?>
     <main class="login-layout">
         <section class="login-intro">
-            <div class="brand-lockup"><div class="brand-mark">س</div><div><strong>سمپاد</strong><small>کنترل و نظارت پروژه</small></div></div>
+            <div class="brand-lockup"><div class="brand-mark">م</div><div><strong>مدیریت پروژه</strong><small>کنترل و نظارت یکپارچه</small></div></div>
             <div>
-                <p class="eyebrow light">سامانه یکپارچه مدیریت تعهدات</p>
-                <h1>از برنامه تا تحویل نهایی، همه‌چیز شفاف و قابل پیگیری</h1>
-                <p>پیگیری ۱۵۹ فعالیت RFP، ددلاین پیمانکار، تأیید ناظر و بهره‌بردار، اشکالات و مصوبات جلسات.</p>
+                <p class="eyebrow light">سامانه چندپروژه‌ای کنترل و نظارت</p>
+                <h1>مدیریت پروژه، از برنامه‌ریزی تا تحویل نهایی</h1>
+                <p>فعالیت‌ها، ددلاین‌ها، تأیید ناظر و بهره‌بردار، اشکالات و مصوبات هر پروژه را شفاف و یکپارچه پیگیری کنید.</p>
             </div>
-            <div class="login-stats"><span><strong>۱۵۹</strong> فعالیت</span><span><strong>۲</strong> مرحله تأیید</span><span><strong>۱</strong> تاریخچه متمرکز</span></div>
+            <div class="login-stats"><span><strong>✓</strong> فعالیت و ددلاین</span><span><strong>✓</strong> تأیید و اشکال</span><span><strong>✓</strong> گزارش و تاریخچه</span></div>
         </section>
         <section class="login-panel">
             <form method="post" class="login-form">
