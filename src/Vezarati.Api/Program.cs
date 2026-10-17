@@ -101,13 +101,18 @@ app.MapGet("/api/users/search", async (string? q, AppDb db) =>
         .Trim().ToLowerInvariant();
     var normalized = Normalize(term);
     var digits = new string(term.Where(char.IsDigit).ToArray());
+    var groupTitles = await db.GroupMembers.AsNoTracking()
+        .Where(member => !string.IsNullOrWhiteSpace(member.Title))
+        .GroupBy(member => member.NationalId)
+        .Select(group => new { NationalId = group.Key, Title = group.Select(member => member.Title).First() })
+        .ToDictionaryAsync(item => item.NationalId, item => item.Title);
     var directory = await db.Directory.AsNoTracking().ToListAsync();
     var people = directory
         .Where(person => Normalize(person.DisplayName).Contains(normalized) ||
             (digits.Length >= 2 && person.NationalId.Contains(digits)))
         .OrderBy(person => person.DisplayName)
         .Take(30)
-        .Select(person => new { person.NationalId, person.DisplayName, person.Title })
+        .Select(person => new { person.NationalId, person.DisplayName, Title = !string.IsNullOrWhiteSpace(person.Title) ? person.Title : groupTitles.GetValueOrDefault(person.NationalId, "") })
         .ToList();
     return Results.Ok(people);
 });
