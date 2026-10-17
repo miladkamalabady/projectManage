@@ -27,8 +27,7 @@ app.MapGet("/api/dashboard", async (string? userId, HttpRequest request, AppDb d
 {
     var id = userId ?? request.Headers["X-User-Id"].FirstOrDefault() ?? "admin";
     var groups = await db.Groups.Include(g => g.Members).ToListAsync();
-    var records = await db.Resolutions.Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Attachments).Include(r => r.Events).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).OrderByDescending(r => r.MeetingDate).ToListAsync();
-    if (id != "admin") foreach (var resolution in records) resolution.Attachments.RemoveAll(attachment => !attachment.ApprovedForAll);
+    var records = await db.Resolutions.AsNoTracking().Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Attachments.Where(attachment => id == "admin" || attachment.ApprovedForAll)).Include(r => r.Events).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).OrderByDescending(r => r.MeetingDate).ToListAsync();
     var groupIds = groups.Where(g => g.Members.Any(m => m.NationalId == id)).Select(g => g.Id).ToHashSet();
     var mine = id == "admin" ? records : records.Where(r => r.PublishToAll || (r.GroupId.HasValue && groupIds.Contains(r.GroupId.Value)) || r.GroupAssignments.Any(a => groupIds.Contains(a.GroupId)) || r.Assignments.Any(a => a.NationalId == id)).ToList();
     object? currentUser;
@@ -50,8 +49,7 @@ app.MapGet("/api/dashboard", async (string? userId, HttpRequest request, AppDb d
 app.MapGet("/api/resolutions", async (string? userId, AppDb db) =>
 {
     var id = userId ?? "admin";
-    var records = await db.Resolutions.Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Attachments).Include(r => r.Events).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).OrderByDescending(r => r.MeetingDate).ToListAsync();
-    if (id != "admin") foreach (var resolution in records) resolution.Attachments.RemoveAll(attachment => !attachment.ApprovedForAll);
+    var records = await db.Resolutions.AsNoTracking().Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Attachments.Where(attachment => id == "admin" || attachment.ApprovedForAll)).Include(r => r.Events).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).OrderByDescending(r => r.MeetingDate).ToListAsync();
     return Results.Ok(records);
 });
 app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpRequest http) =>
