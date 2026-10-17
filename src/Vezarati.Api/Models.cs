@@ -12,6 +12,7 @@ public sealed class Resolution
     public string Text { get; set; } = "";
     public string Notes { get; set; } = "";
     public string Status { get; set; } = "before";
+    public bool PublishToAll { get; set; }
     public string? SourceKey { get; set; }
     public int? GroupId { get; set; }
     public ResolutionGroup? Group { get; set; }
@@ -19,6 +20,7 @@ public sealed class Resolution
     public List<ResolutionAssignment> Assignments { get; set; } = [];
     public List<ResolutionProgress> Progress { get; set; } = [];
     public List<ResolutionAttachment> Attachments { get; set; } = [];
+    public List<ResolutionEvent> Events { get; set; } = [];
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? UpdatedAt { get; set; }
     public string CreatedBy { get; set; } = "";
@@ -73,6 +75,18 @@ public sealed class ResolutionProgress
     public DateTimeOffset UpdatedAt { get; set; }
 }
 
+public sealed class ResolutionEvent
+{
+    public int Id { get; set; }
+    public int ResolutionId { get; set; }
+    [JsonIgnore]
+    public Resolution? Resolution { get; set; }
+    public string NationalId { get; set; } = "";
+    public string UserName { get; set; } = "";
+    public string Text { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
 public sealed class ResolutionAttachment
 {
     public int Id { get; set; }
@@ -84,6 +98,7 @@ public sealed class ResolutionAttachment
     public string ContentType { get; set; } = "application/octet-stream";
     public long Size { get; set; }
     public string UploadedBy { get; set; } = "";
+    public string UploaderName { get; set; } = "";
     public DateTimeOffset UploadedAt { get; set; }
 }
 
@@ -112,6 +127,7 @@ public sealed class AppDb(DbContextOptions<AppDb> options) : DbContext(options)
     public DbSet<ResolutionAssignment> Assignments => Set<ResolutionAssignment>();
     public DbSet<ResolutionProgress> Progress => Set<ResolutionProgress>();
     public DbSet<ResolutionAttachment> Attachments => Set<ResolutionAttachment>();
+    public DbSet<ResolutionEvent> Events => Set<ResolutionEvent>();
     public DbSet<DirectoryUser> Directory => Set<DirectoryUser>();
     public DbSet<AppUser> Users => Set<AppUser>();
 
@@ -125,6 +141,8 @@ public sealed class AppDb(DbContextOptions<AppDb> options) : DbContext(options)
         model.Entity<ResolutionAssignment>().HasOne(x => x.Resolution).WithMany(x => x.Assignments).HasForeignKey(x => x.ResolutionId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<ResolutionProgress>().ToTable("ResolutionProgress");
         model.Entity<ResolutionAttachment>().ToTable("ResolutionAttachments");
+        model.Entity<ResolutionEvent>().ToTable("ResolutionEvents");
+        model.Entity<ResolutionEvent>().HasOne(x => x.Resolution).WithMany(x => x.Events).HasForeignKey(x => x.ResolutionId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<ResolutionAttachment>().HasOne(x => x.Resolution).WithMany(x => x.Attachments).HasForeignKey(x => x.ResolutionId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<ResolutionProgress>().HasIndex(x => new { x.ResolutionId, x.NationalId }).IsUnique();
         model.Entity<ResolutionProgress>().HasOne<Resolution>().WithMany(x => x.Progress).HasForeignKey(x => x.ResolutionId).OnDelete(DeleteBehavior.Cascade);
@@ -254,13 +272,18 @@ public static class SchemaCompatibility
         var columns = await ReadColumns(db, "Resolutions");
         if (columns.Count > 0 && !columns.Contains("MeetingDateJalali")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN MeetingDateJalali TEXT NOT NULL DEFAULT '';");
         if (columns.Count > 0 && !columns.Contains("SourceKey")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN SourceKey TEXT NULL;");
+        if (columns.Count > 0 && !columns.Contains("PublishToAll")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN PublishToAll INTEGER NOT NULL DEFAULT 0;");
         await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_Resolutions_SourceKey ON Resolutions (SourceKey);");
         var directoryColumns = await ReadColumns(db, "Directory");
         if (directoryColumns.Count > 0 && !directoryColumns.Contains("Title")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Directory ADD COLUMN Title TEXT NOT NULL DEFAULT '';");
         await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS ResolutionGroups (ResolutionId INTEGER NOT NULL, GroupId INTEGER NOT NULL, CONSTRAINT PK_ResolutionGroups PRIMARY KEY (ResolutionId, GroupId), CONSTRAINT FK_ResolutionGroups_Resolutions_ResolutionId FOREIGN KEY (ResolutionId) REFERENCES Resolutions (Id) ON DELETE CASCADE, CONSTRAINT FK_ResolutionGroups_Groups_GroupId FOREIGN KEY (GroupId) REFERENCES Groups (Id) ON DELETE CASCADE);");
         await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS ResolutionProgress (Id INTEGER NOT NULL CONSTRAINT PK_ResolutionProgress PRIMARY KEY AUTOINCREMENT, ResolutionId INTEGER NOT NULL, NationalId TEXT NOT NULL, Status TEXT NOT NULL DEFAULT 'before', Notes TEXT NOT NULL DEFAULT '', UpdatedAt TEXT NOT NULL, CONSTRAINT FK_ResolutionProgress_Resolutions_ResolutionId FOREIGN KEY (ResolutionId) REFERENCES Resolutions (Id) ON DELETE CASCADE);");
         await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_ResolutionProgress_ResolutionId_NationalId ON ResolutionProgress (ResolutionId, NationalId);");
-        await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS ResolutionAttachments (Id INTEGER NOT NULL CONSTRAINT PK_ResolutionAttachments PRIMARY KEY AUTOINCREMENT, ResolutionId INTEGER NOT NULL, OriginalName TEXT NOT NULL, StoredName TEXT NOT NULL, ContentType TEXT NOT NULL DEFAULT 'application/octet-stream', Size INTEGER NOT NULL, UploadedBy TEXT NOT NULL, UploadedAt TEXT NOT NULL, CONSTRAINT FK_ResolutionAttachments_Resolutions_ResolutionId FOREIGN KEY (ResolutionId) REFERENCES Resolutions (Id) ON DELETE CASCADE);");
+        await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS ResolutionAttachments (Id INTEGER NOT NULL CONSTRAINT PK_ResolutionAttachments PRIMARY KEY AUTOINCREMENT, ResolutionId INTEGER NOT NULL, OriginalName TEXT NOT NULL, StoredName TEXT NOT NULL, ContentType TEXT NOT NULL DEFAULT 'application/octet-stream', Size INTEGER NOT NULL, UploadedBy TEXT NOT NULL, UploaderName TEXT NOT NULL DEFAULT '', UploadedAt TEXT NOT NULL, CONSTRAINT FK_ResolutionAttachments_Resolutions_ResolutionId FOREIGN KEY (ResolutionId) REFERENCES Resolutions (Id) ON DELETE CASCADE);");
+        var attachmentColumns = await ReadColumns(db, "ResolutionAttachments");
+        if (attachmentColumns.Count > 0 && !attachmentColumns.Contains("UploaderName")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE ResolutionAttachments ADD COLUMN UploaderName TEXT NOT NULL DEFAULT '';");
+        await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS ResolutionEvents (Id INTEGER NOT NULL CONSTRAINT PK_ResolutionEvents PRIMARY KEY AUTOINCREMENT, ResolutionId INTEGER NOT NULL, NationalId TEXT NOT NULL, UserName TEXT NOT NULL, Text TEXT NOT NULL, CreatedAt TEXT NOT NULL, CONSTRAINT FK_ResolutionEvents_Resolutions_ResolutionId FOREIGN KEY (ResolutionId) REFERENCES Resolutions (Id) ON DELETE CASCADE);");
+        await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS IX_ResolutionEvents_ResolutionId_CreatedAt ON ResolutionEvents (ResolutionId, CreatedAt);");
     }
 
     private static async Task<HashSet<string>> ReadColumns(AppDb db, string table)
