@@ -56,6 +56,12 @@ app.MapPost("/api/groups", async (GroupCreate request, AppDb db) =>
     var group = new ResolutionGroup { Name = name }; db.Groups.Add(group); await db.SaveChangesAsync();
     return Results.Created($"/api/groups/{group.Id}", group);
 });
+app.MapGet("/api/users/search", async (string q, AppDb db) => {
+    var term = q.Trim(); if (term.Length < 2) return Results.Ok(Array.Empty<object>());
+    var digits = new string(term.Where(char.IsDigit).ToArray());
+    var people = await db.Directory.Where(u => EF.Functions.Like(u.DisplayName, $"%{term}%") || (digits.Length >= 2 && EF.Functions.Like(u.NationalId, $"%{digits}%"))).OrderBy(u => u.DisplayName).Take(30).Select(u => new { u.NationalId, u.DisplayName }).ToListAsync();
+    return Results.Ok(people);
+});
 app.MapPost("/api/groups/{id:int}/members/lookup", async (int id, MemberLookupRequest request, AppDb db, NationalIdLookup lookup) =>
 {
     var group = await db.Groups.Include(g => g.Members).FirstOrDefaultAsync(g => g.Id == id); if (group is null) return Results.NotFound();
