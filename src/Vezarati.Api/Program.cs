@@ -28,6 +28,7 @@ app.MapGet("/api/dashboard", async (string? userId, HttpRequest request, AppDb d
     var id = userId ?? request.Headers["X-User-Id"].FirstOrDefault() ?? "admin";
     var groups = await db.Groups.Include(g => g.Members).ToListAsync();
     var records = await db.Resolutions.Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Attachments).Include(r => r.Events).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).OrderByDescending(r => r.MeetingDate).ToListAsync();
+    if (id != "admin") foreach (var resolution in records) resolution.Attachments.RemoveAll(attachment => !attachment.ApprovedForAll);
     var groupIds = groups.Where(g => g.Members.Any(m => m.NationalId == id)).Select(g => g.Id).ToHashSet();
     var mine = id == "admin" ? records : records.Where(r => r.PublishToAll || (r.GroupId.HasValue && groupIds.Contains(r.GroupId.Value)) || r.GroupAssignments.Any(a => groupIds.Contains(a.GroupId)) || r.Assignments.Any(a => a.NationalId == id)).ToList();
     object? currentUser;
@@ -46,7 +47,13 @@ app.MapGet("/api/dashboard", async (string? userId, HttpRequest request, AppDb d
     return Results.Ok(new { currentUser, groups, resolutions = mine });
 });
 
-app.MapGet("/api/resolutions", async (AppDb db) => Results.Ok(await db.Resolutions.Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Attachments).Include(r => r.Events).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).OrderByDescending(r => r.MeetingDate).ToListAsync()));
+app.MapGet("/api/resolutions", async (string? userId, AppDb db) =>
+{
+    var id = userId ?? "admin";
+    var records = await db.Resolutions.Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Attachments).Include(r => r.Events).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).OrderByDescending(r => r.MeetingDate).ToListAsync();
+    if (id != "admin") foreach (var resolution in records) resolution.Attachments.RemoveAll(attachment => !attachment.ApprovedForAll);
+    return Results.Ok(records);
+});
 app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpRequest http) =>
 {
     if (string.IsNullOrWhiteSpace(request.Number) || string.IsNullOrWhiteSpace(request.Text)) return Results.BadRequest(new { error = "شماره و متن مصوبه الزامی است." });
@@ -187,24 +194,28 @@ app.MapPost("/api/resolutions/{id:int}/attachments", async (int id, HttpRequest 
     db.Attachments.Add(attachment);
     try { await db.SaveChangesAsync(); }
     catch { System.IO.File.Delete(destination); throw; }
-    return Results.Created($"/api/attachments/{attachment.Id}", new { attachment.Id, attachment.OriginalName, attachment.ContentType, attachment.Size, attachment.UploadedBy, attachment.UploaderName, attachment.UploadedAt });
+    return Results.Created($"/api/attachments/{attachment.Id}", new { attachment.Id, attachment.OriginalName, attachment.ContentType, attachment.Size, attachment.UploadedBy, attachment.UploaderName, attachment.ApprovedForAll, attachment.UploadedAt });
 });
 
 app.MapGet("/api/attachments/{id:int}", async (int id, string nationalId, AppDb db, IWebHostEnvironment environment) =>
 {
     var attachment = await db.Attachments.AsNoTracking().Include(a => a.Resolution).FirstOrDefaultAsync(a => a.Id == id);
     if (attachment is null) return Results.NotFound();
-    if (nationalId != "admin" && !attachment.Resolution!.PublishToAll)
-    {
-        var direct = await db.Assignments.AnyAsync(a => a.ResolutionId == attachment.ResolutionId && a.NationalId == nationalId);
-        var inGroup = await db.GroupMembers.AnyAsync(m => m.NationalId == nationalId &&
-            ((attachment.Resolution!.GroupId.HasValue && m.GroupId == attachment.Resolution.GroupId.Value) ||
-             db.ResolutionGroups.Any(rg => rg.ResolutionId == attachment.ResolutionId && rg.GroupId == m.GroupId)));
-        if (!direct && !inGroup) return Results.StatusCode(StatusCodes.Status403Forbidden);
-    }
+    if (nationalId != "admin" && !attachment.ApprovedForAll) return Results.StatusCode(StatusCodes.Status403Forbidden);
     var path = Path.Combine(environment.ContentRootPath, "data", "uploads", attachment.StoredName);
     if (!System.IO.File.Exists(path)) return Results.NotFound();
     return Results.File(path, attachment.ContentType, attachment.OriginalName, enableRangeProcessing: true);
+});
+
+
+app.MapPatch("/api/attachments/{id:int}/approval", async (int id, AttachmentApprovalRequest request, AppDb db) =>
+{
+    if (request.NationalId != "admin") return Results.StatusCode(StatusCodes.Status403Forbidden);
+    var attachment = await db.Attachments.FirstOrDefaultAsync(item => item.Id == id);
+    if (attachment is null) return Results.NotFound();
+    attachment.ApprovedForAll = request.ApprovedForAll;
+    await db.SaveChangesAsync();
+    return Results.Ok(new { attachment.Id, attachment.ApprovedForAll });
 });
 
 app.MapGet("/api/groups", async (AppDb db) => Results.Ok(await db.Groups.Include(g => g.Members).OrderBy(g => g.Name).ToListAsync()));
@@ -326,6 +337,7 @@ record ResolutionCreate(DateOnly MeetingDate, string? MeetingDateJalali, string 
 record ResolutionStatusUpdate(string Status, string? Notes, string? NationalId);
 record GroupCreate(string Name);
 record ResolutionEventCreate(string Text, string NationalId, string? UserName);
+record AttachmentApprovalRequest(string NationalId, bool ApprovedForAll);
 record MemberLookupRequest(string NationalId, string? Title);
 static class ResolutionStatuses { public static readonly string[] All = ["before", "in_progress", "completed", "delayed"]; }
 static class AttachmentFileTypes
