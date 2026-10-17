@@ -9,7 +9,7 @@ type Group = { id: number; name: string; members: Member[] };
 type ResolutionProgress = { nationalId: string; status: string; notes: string; updatedAt: string };
 type ResolutionAttachment = { id: number; originalName: string; contentType: string; size: number; uploadedBy: string; uploadedAt: string };
 type Resolution = { id: number; meetingDate: string; meetingDateJalali?: string; number: string; text: string; notes: string; status: string; groupId: number | null; groupAssignments?: { groupId: number; group?: { name: string } }[]; assignments: { nationalId: string }[]; progress?: ResolutionProgress[]; attachments?: ResolutionAttachment[] };
-type DirectoryUser = { nationalId: string; displayName: string; title?: string };
+type DirectoryUser = { nationalId: string; displayName: string; title?: string; province?: string | null };
 type Dashboard = { currentUser: { displayName: string; role: string }; groups: Group[]; resolutions: Resolution[] };
 type Report = { total: number; completed: number; delayed: number; pending: number; people: { nationalId: string; displayName: string; total: number; completed: number; delayed: number; pending: number; title?: string }[] };
 
@@ -35,7 +35,7 @@ export default function App() {
   const [resolutions, setResolutions] = useState<Resolution[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [reports, setReports] = useState<Report | null>(null);
-  const [users, setUsers] = useState<{ nationalId: string; displayName: string; title?: string }[]>([]);
+  const [users, setUsers] = useState<{ nationalId: string; displayName: string; title?: string; province?: string | null }[]>([]);
   const [query, setQuery] = useState("");
   const [reportQuery, setReportQuery] = useState("");
   const [reportPage, setReportPage] = useState(1);
@@ -166,7 +166,7 @@ export default function App() {
   return <div className="shell">
     <aside className="sidebar">
       <div className="brand"><span className="brand-icon"><ShieldCheck /></span><div><b>دفتر وزارتی</b><small>سامانه پیگیری مصوبات</small></div></div>
-      <div className="profile"><div className="avatar">{dashboard?.currentUser.displayName?.[0] || "م"}</div><div><b>{dashboard?.currentUser.displayName || "مدیر دفتر وزارتی"}</b><small>دسترسی: {dashboard?.currentUser.role || "ادمین"}</small><select aria-label="کاربر آزمایشی" value={viewerId} onChange={event => { localStorage.setItem("vezarati.userId", event.target.value); setViewerId(event.target.value); }}><option value="admin">مدیر</option>{users.map(user => <option key={user.nationalId} value={user.nationalId}>{user.displayName}</option>)}</select></div></div>
+      <div className="profile"><div className="avatar">{dashboard?.currentUser.displayName?.[0] || "م"}</div><div><b>{dashboard?.currentUser.displayName || "مدیر دفتر وزارتی"}</b><small>دسترسی: {dashboard?.currentUser.role || "ادمین"}</small><select aria-label="کاربر آزمایشی" value={viewerId} onChange={event => { localStorage.setItem("vezarati.userId", event.target.value); setViewerId(event.target.value); }}><option value="admin">مدیر</option>{users.map(user => <option key={user.nationalId} value={user.nationalId}>{user.displayName}{user.title ? ` — ${user.title}` : ""}{user.province ? ` (${user.province})` : ""}</option>)}</select></div></div>
       <nav>{[["wall", LayoutDashboard, "دیواره من"], ["resolutions", ClipboardList, "مصوبات"], ...(viewerId === "admin" ? [["groups", Users, "گروه‌ها و اعضا"], ["reports", FileText, "گزارش‌ها"]] : [])].map(([key, Icon, title]: any) => <button key={key} className={`nav ${tab === key ? "active" : ""}`} onClick={() => setTab(key)}><Icon size={18} />{title}</button>)}</nav>
       <div className="sidebar-foot">محیط پیگیری اجرایی<br /><span>دفتر وزارتی</span></div>
     </aside>
