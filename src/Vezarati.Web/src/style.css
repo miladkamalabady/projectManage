@@ -13,3 +13,5 @@
 .add-directory-person{margin-top:15px}.person-name-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px}.person-name-fields label{margin:12px 0}@media(max-width:700px){.person-name-fields{grid-template-columns:1fr}}
 
 .report-table+.pagination{margin-top:0}.individual-report>.pagination{border-top:1px solid #edf0f1;margin-top:12px}
+
+.person-title{font-size:9px!important;color:#839096!important;margin-top:2px}.person-option>span{display:grid;gap:2px}
