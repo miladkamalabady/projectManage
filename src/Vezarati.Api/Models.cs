@@ -129,6 +129,8 @@ public static class SeedData
         if (!File.Exists(dataPath)) dataPath = Path.Combine(AppContext.BaseDirectory, "Data", "seed.json");
         if (File.Exists(dataPath))
         {
+            // IDs shared across groups must be inserted only once, including unsaved tracked entities.
+            var directoryUsers = await db.Directory.ToDictionaryAsync(x => x.NationalId, StringComparer.Ordinal);
             var seed = System.Text.Json.JsonSerializer.Deserialize<SeedDocument>(await File.ReadAllTextAsync(dataPath), new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             if (seed is not null)
             {
@@ -137,8 +139,12 @@ public static class SeedData
                     if (!groups.TryGetValue(groupName, out var group)) continue;
                     foreach (var member in members)
                     {
-                        var directory = await db.Directory.FirstOrDefaultAsync(x => x.NationalId == member.NationalId);
-                        if (directory is null) db.Directory.Add(new DirectoryUser { NationalId = member.NationalId, DisplayName = member.DisplayName });
+                        if (!directoryUsers.TryGetValue(member.NationalId, out var directory))
+                        {
+                            directory = new DirectoryUser { NationalId = member.NationalId, DisplayName = member.DisplayName };
+                            db.Directory.Add(directory);
+                            directoryUsers.Add(member.NationalId, directory);
+                        }
                         else directory.DisplayName = member.DisplayName;
                         var groupMember = group.Members.FirstOrDefault(x => x.NationalId == member.NationalId);
                         if (groupMember is null) group.Members.Add(new GroupMember { NationalId = member.NationalId, DisplayName = member.DisplayName, Title = member.Title });
