@@ -25,7 +25,20 @@ app.MapGet("/api/dashboard", async (string? userId, HttpRequest request, AppDb d
     var records = await db.Resolutions.Include(r => r.Assignments).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).OrderByDescending(r => r.MeetingDate).ToListAsync();
     var groupIds = groups.Where(g => g.Members.Any(m => m.NationalId == id)).Select(g => g.Id).ToHashSet();
     var mine = id == "admin" ? records : records.Where(r => (r.GroupId.HasValue && groupIds.Contains(r.GroupId.Value)) || r.GroupAssignments.Any(a => groupIds.Contains(a.GroupId)) || r.Assignments.Any(a => a.NationalId == id)).ToList();
-    return Results.Ok(new { currentUser = await db.Users.FirstOrDefaultAsync(u => u.NationalId == id), groups, resolutions = mine });
+    object? currentUser;
+    if (id == "admin")
+    {
+        var admin = await db.Users.FirstOrDefaultAsync(u => u.NationalId == id);
+        currentUser = new { nationalId = id, displayName = admin?.DisplayName ?? "مدیر دفتر وزارتی", role = admin?.Role ?? "ادمین" };
+    }
+    else
+    {
+        var person = await db.Directory.AsNoTracking().FirstOrDefaultAsync(u => u.NationalId == id);
+        var titles = groups.SelectMany(g => g.Members).Where(m => m.NationalId == id && !string.IsNullOrWhiteSpace(m.Title)).Select(m => m.Title).Distinct().ToList();
+        var role = titles.Count > 0 ? string.Join("، ", titles) : person?.Title ?? "کاربر";
+        currentUser = person is null ? null : new { nationalId = person.NationalId, displayName = person.DisplayName, role };
+    }
+    return Results.Ok(new { currentUser, groups, resolutions = mine });
 });
 
 app.MapGet("/api/resolutions", async (AppDb db) => Results.Ok(await db.Resolutions.Include(r => r.Assignments).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).OrderByDescending(r => r.MeetingDate).ToListAsync()));
