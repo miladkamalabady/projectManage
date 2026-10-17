@@ -27,9 +27,9 @@ app.MapGet("/api/dashboard", async (string? userId, HttpRequest request, AppDb d
 {
     var id = userId ?? request.Headers["X-User-Id"].FirstOrDefault() ?? "admin";
     var groups = await db.Groups.Include(g => g.Members).ToListAsync();
-    var records = await db.Resolutions.Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Attachments).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).OrderByDescending(r => r.MeetingDate).ToListAsync();
+    var records = await db.Resolutions.Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Attachments).Include(r => r.Events).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).OrderByDescending(r => r.MeetingDate).ToListAsync();
     var groupIds = groups.Where(g => g.Members.Any(m => m.NationalId == id)).Select(g => g.Id).ToHashSet();
-    var mine = id == "admin" ? records : records.Where(r => (r.GroupId.HasValue && groupIds.Contains(r.GroupId.Value)) || r.GroupAssignments.Any(a => groupIds.Contains(a.GroupId)) || r.Assignments.Any(a => a.NationalId == id)).ToList();
+    var mine = id == "admin" ? records : records.Where(r => r.PublishToAll || (r.GroupId.HasValue && groupIds.Contains(r.GroupId.Value)) || r.GroupAssignments.Any(a => groupIds.Contains(a.GroupId)) || r.Assignments.Any(a => a.NationalId == id)).ToList();
     object? currentUser;
     if (id == "admin")
     {
@@ -46,13 +46,13 @@ app.MapGet("/api/dashboard", async (string? userId, HttpRequest request, AppDb d
     return Results.Ok(new { currentUser, groups, resolutions = mine });
 });
 
-app.MapGet("/api/resolutions", async (AppDb db) => Results.Ok(await db.Resolutions.Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Attachments).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).OrderByDescending(r => r.MeetingDate).ToListAsync()));
+app.MapGet("/api/resolutions", async (AppDb db) => Results.Ok(await db.Resolutions.Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Attachments).Include(r => r.Events).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).OrderByDescending(r => r.MeetingDate).ToListAsync()));
 app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpRequest http) =>
 {
     if (string.IsNullOrWhiteSpace(request.Number) || string.IsNullOrWhiteSpace(request.Text)) return Results.BadRequest(new { error = "شماره و متن مصوبه الزامی است." });
     if (request.GroupId.HasValue && !await db.Groups.AnyAsync(g => g.Id == request.GroupId)) return Results.BadRequest(new { error = "گروه انتخاب‌شده پیدا نشد." });
     if (!ResolutionStatuses.All.Contains(request.Status)) return Results.BadRequest(new { error = "وضعیت نامعتبر است." });
-    var record = new Resolution { MeetingDate = request.MeetingDate, MeetingDateJalali = string.IsNullOrWhiteSpace(request.MeetingDateJalali) ? JalaliDate.FromGregorian(request.MeetingDate) : request.MeetingDateJalali, Number = request.Number.Trim(), Text = request.Text.Trim(), Notes = request.Notes?.Trim() ?? "", Status = request.Status, GroupId = request.GroupId, CreatedAt = DateTimeOffset.UtcNow, CreatedBy = http.Headers["X-User-Name"].FirstOrDefault() ?? "ادمین" };
+    var record = new Resolution { PublishToAll = request.PublishToAll, MeetingDate = request.MeetingDate, MeetingDateJalali = string.IsNullOrWhiteSpace(request.MeetingDateJalali) ? JalaliDate.FromGregorian(request.MeetingDate) : request.MeetingDateJalali, Number = request.Number.Trim(), Text = request.Text.Trim(), Notes = request.Notes?.Trim() ?? "", Status = request.Status, GroupId = request.GroupId, CreatedAt = DateTimeOffset.UtcNow, CreatedBy = http.Headers["X-User-Name"].FirstOrDefault() ?? "ادمین" };
     if (request.GroupIds is not null) foreach (var groupId in request.GroupIds.Distinct()) { if (!await db.Groups.AnyAsync(g => g.Id == groupId)) return Results.BadRequest(new { error = "گروه انتخاب‌شده پیدا نشد." }); record.GroupAssignments.Add(new ResolutionGroupAssignment { GroupId = groupId }); }
     foreach (var id in request.People.Distinct()) record.Assignments.Add(new ResolutionAssignment { NationalId = id });
     db.Resolutions.Add(record); await db.SaveChangesAsync();
@@ -67,6 +67,7 @@ app.MapPut("/api/resolutions/{id:int}", async (int id, ResolutionCreate request,
     var groupIds = (request.GroupIds ?? (request.GroupId.HasValue ? [request.GroupId.Value] : [])).Distinct().ToList();
     if (groupIds.Any(groupId => !db.Groups.Any(g => g.Id == groupId))) return Results.BadRequest(new { error = "گروه انتخاب‌شده پیدا نشد." });
     record.MeetingDate = request.MeetingDate;
+    record.PublishToAll = request.PublishToAll;
     record.MeetingDateJalali = string.IsNullOrWhiteSpace(request.MeetingDateJalali) ? JalaliDate.FromGregorian(request.MeetingDate) : request.MeetingDateJalali;
     record.Number = request.Number.Trim(); record.Text = request.Text.Trim(); record.Notes = request.Notes?.Trim() ?? "";
     record.Status = request.Status; record.GroupId = request.GroupId; record.UpdatedAt = DateTimeOffset.UtcNow;
@@ -93,7 +94,7 @@ app.MapPatch("/api/resolutions/{id:int}/status", async (int id, ResolutionStatus
         var groupAssignment = await db.GroupMembers.AnyAsync(m => m.NationalId == nationalId &&
             ((record.GroupId.HasValue && m.GroupId == record.GroupId.Value) ||
              db.ResolutionGroups.Any(rg => rg.ResolutionId == id && rg.GroupId == m.GroupId)));
-        if (!directAssignment && !groupAssignment) return Results.StatusCode(StatusCodes.Status403Forbidden);
+        if (!directAssignment && !groupAssignment && !record.PublishToAll) return Results.StatusCode(StatusCodes.Status403Forbidden);
         var progress = record.Progress.FirstOrDefault(p => p.NationalId == nationalId);
         if (progress is null)
         {
@@ -115,11 +116,43 @@ app.MapPatch("/api/resolutions/{id:int}/status", async (int id, ResolutionStatus
 });
 
 
+
+app.MapPost("/api/resolutions/{id:int}/events", async (int id, ResolutionEventCreate request, AppDb db) =>
+{
+    var text = request.Text?.Trim() ?? "";
+    var nationalId = request.NationalId?.Trim() ?? "";
+    if (text.Length == 0) return Results.BadRequest(new { error = "شرح رویداد را وارد کنید." });
+    if (text.Length > 2000) return Results.BadRequest(new { error = "شرح رویداد حداکثر ۲۰۰۰ نویسه باشد." });
+    if (string.IsNullOrWhiteSpace(nationalId)) return Results.BadRequest(new { error = "شناسه کاربر ارسال نشده است." });
+    var resolution = await db.Resolutions.FirstOrDefaultAsync(r => r.Id == id);
+    if (resolution is null) return Results.NotFound();
+    if (nationalId != "admin")
+    {
+        var direct = await db.Assignments.AnyAsync(a => a.ResolutionId == id && a.NationalId == nationalId);
+        var inGroup = await db.GroupMembers.AnyAsync(m => m.NationalId == nationalId &&
+            ((resolution.GroupId.HasValue && m.GroupId == resolution.GroupId.Value) ||
+             db.ResolutionGroups.Any(rg => rg.ResolutionId == id && rg.GroupId == m.GroupId)));
+        if (!direct && !inGroup && !resolution.PublishToAll) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+    var directoryUser = await db.Directory.AsNoTracking().FirstOrDefaultAsync(user => user.NationalId == nationalId);
+    var member = await db.GroupMembers.AsNoTracking().FirstOrDefaultAsync(user => user.NationalId == nationalId);
+    var eventEntry = new ResolutionEvent
+    {
+        ResolutionId = id, NationalId = nationalId,
+        UserName = directoryUser?.DisplayName ?? member?.DisplayName ?? request.UserName?.Trim() ?? nationalId,
+        Text = text, CreatedAt = DateTimeOffset.UtcNow
+    };
+    db.Events.Add(eventEntry);
+    await db.SaveChangesAsync();
+    return Results.Created($"/api/resolutions/{id}/events/{eventEntry.Id}", eventEntry);
+});
+
 app.MapPost("/api/resolutions/{id:int}/attachments", async (int id, HttpRequest request, AppDb db, IWebHostEnvironment environment) =>
 {
     var form = await request.ReadFormAsync();
     var file = form.Files.GetFile("file");
     var nationalId = form["nationalId"].ToString().Trim();
+    var uploaderName = form["uploaderName"].ToString().Trim();
     if (file is null || file.Length == 0) return Results.BadRequest(new { error = "فایل انتخاب‌شده خالی است." });
     if (file.Length > maxAttachmentSize) return Results.BadRequest(new { error = "حداکثر حجم هر فایل ۵۰ مگابایت است." });
     var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
@@ -133,7 +166,7 @@ app.MapPost("/api/resolutions/{id:int}/attachments", async (int id, HttpRequest 
         var inGroup = await db.GroupMembers.AnyAsync(m => m.NationalId == nationalId &&
             ((resolution.GroupId.HasValue && m.GroupId == resolution.GroupId.Value) ||
              db.ResolutionGroups.Any(rg => rg.ResolutionId == id && rg.GroupId == m.GroupId)));
-        if (!direct && !inGroup) return Results.StatusCode(StatusCodes.Status403Forbidden);
+        if (!direct && !inGroup && !resolution.PublishToAll) return Results.StatusCode(StatusCodes.Status403Forbidden);
     }
     var storedName = $"{Guid.NewGuid():N}{extension}";
     var uploadDirectory = Path.Combine(environment.ContentRootPath, "data", "uploads");
@@ -142,22 +175,26 @@ app.MapPost("/api/resolutions/{id:int}/attachments", async (int id, HttpRequest 
     await using (var output = System.IO.File.Create(destination)) await file.CopyToAsync(output);
     var provider = new FileExtensionContentTypeProvider();
     if (!provider.TryGetContentType(file.FileName, out var contentType)) contentType = "application/octet-stream";
+    var directoryPerson = await db.Directory.AsNoTracking().FirstOrDefaultAsync(person => person.NationalId == nationalId);
+    var memberPerson = await db.GroupMembers.AsNoTracking().FirstOrDefaultAsync(person => person.NationalId == nationalId);
+    var resolvedUploaderName = directoryPerson?.DisplayName ?? memberPerson?.DisplayName ?? uploaderName;
+
     var attachment = new ResolutionAttachment
     {
         ResolutionId = id, OriginalName = Path.GetFileName(file.FileName), StoredName = storedName,
-        ContentType = contentType, Size = file.Length, UploadedBy = nationalId, UploadedAt = DateTimeOffset.UtcNow
+        ContentType = contentType, Size = file.Length, UploadedBy = nationalId, UploaderName = string.IsNullOrWhiteSpace(resolvedUploaderName) ? nationalId : resolvedUploaderName, UploadedAt = DateTimeOffset.UtcNow
     };
     db.Attachments.Add(attachment);
     try { await db.SaveChangesAsync(); }
     catch { System.IO.File.Delete(destination); throw; }
-    return Results.Created($"/api/attachments/{attachment.Id}", new { attachment.Id, attachment.OriginalName, attachment.ContentType, attachment.Size, attachment.UploadedBy, attachment.UploadedAt });
+    return Results.Created($"/api/attachments/{attachment.Id}", new { attachment.Id, attachment.OriginalName, attachment.ContentType, attachment.Size, attachment.UploadedBy, attachment.UploaderName, attachment.UploadedAt });
 });
 
 app.MapGet("/api/attachments/{id:int}", async (int id, string nationalId, AppDb db, IWebHostEnvironment environment) =>
 {
     var attachment = await db.Attachments.AsNoTracking().Include(a => a.Resolution).FirstOrDefaultAsync(a => a.Id == id);
     if (attachment is null) return Results.NotFound();
-    if (nationalId != "admin")
+    if (nationalId != "admin" && !attachment.Resolution!.PublishToAll)
     {
         var direct = await db.Assignments.AnyAsync(a => a.ResolutionId == attachment.ResolutionId && a.NationalId == nationalId);
         var inGroup = await db.GroupMembers.AnyAsync(m => m.NationalId == nationalId &&
@@ -276,9 +313,10 @@ app.MapGet("/api/reports", async (AppDb db) =>
 app.MapFallbackToFile("index.html");
 app.Run();
 
-record ResolutionCreate(DateOnly MeetingDate, string? MeetingDateJalali, string Number, string Text, string? Notes, string Status, int? GroupId, List<int>? GroupIds, List<string> People);
+record ResolutionCreate(DateOnly MeetingDate, string? MeetingDateJalali, string Number, string Text, string? Notes, string Status, int? GroupId, List<int>? GroupIds, List<string> People, bool PublishToAll);
 record ResolutionStatusUpdate(string Status, string? Notes, string? NationalId);
 record GroupCreate(string Name);
+record ResolutionEventCreate(string Text, string NationalId, string? UserName);
 record MemberLookupRequest(string NationalId, string? Title);
 static string? ExtractProvince(string title)
 {
