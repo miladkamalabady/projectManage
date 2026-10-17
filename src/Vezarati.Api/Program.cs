@@ -40,6 +40,29 @@ app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpR
     db.Resolutions.Add(record); await db.SaveChangesAsync();
     return Results.Created($"/api/resolutions/{record.Id}", record);
 });
+app.MapPut("/api/resolutions/{id:int}", async (int id, ResolutionCreate request, AppDb db) =>
+{
+    if (string.IsNullOrWhiteSpace(request.Number) || string.IsNullOrWhiteSpace(request.Text)) return Results.BadRequest(new { error = "شماره و متن مصوبه الزامی است." });
+    if (!ResolutionStatuses.All.Contains(request.Status)) return Results.BadRequest(new { error = "وضعیت نامعتبر است." });
+    var record = await db.Resolutions.Include(r => r.Assignments).Include(r => r.GroupAssignments).FirstOrDefaultAsync(r => r.Id == id);
+    if (record is null) return Results.NotFound();
+    var groupIds = (request.GroupIds ?? (request.GroupId.HasValue ? [request.GroupId.Value] : [])).Distinct().ToList();
+    if (groupIds.Any(groupId => !db.Groups.Any(g => g.Id == groupId))) return Results.BadRequest(new { error = "گروه انتخاب‌شده پیدا نشد." });
+    record.MeetingDate = request.MeetingDate;
+    record.MeetingDateJalali = string.IsNullOrWhiteSpace(request.MeetingDateJalali) ? JalaliDate.FromGregorian(request.MeetingDate) : request.MeetingDateJalali;
+    record.Number = request.Number.Trim(); record.Text = request.Text.Trim(); record.Notes = request.Notes?.Trim() ?? "";
+    record.Status = request.Status; record.GroupId = request.GroupId; record.UpdatedAt = DateTimeOffset.UtcNow;
+    db.ResolutionGroups.RemoveRange(record.GroupAssignments);
+    foreach (var groupId in groupIds) record.GroupAssignments.Add(new ResolutionGroupAssignment { ResolutionId = id, GroupId = groupId });
+    db.Assignments.RemoveRange(record.Assignments);
+    foreach (var personId in request.People.Distinct()) record.Assignments.Add(new ResolutionAssignment { ResolutionId = id, NationalId = personId });
+    await db.SaveChangesAsync(); return Results.Ok(record);
+});
+app.MapDelete("/api/resolutions/{id:int}", async (int id, AppDb db) =>
+{
+    var record = await db.Resolutions.FindAsync(id); if (record is null) return Results.NotFound();
+    db.Resolutions.Remove(record); await db.SaveChangesAsync(); return Results.NoContent();
+});
 app.MapPatch("/api/resolutions/{id:int}/status", async (int id, ResolutionStatusUpdate request, AppDb db) =>
 {
     if (!ResolutionStatuses.All.Contains(request.Status)) return Results.BadRequest(new { error = "وضعیت نامعتبر است." });
