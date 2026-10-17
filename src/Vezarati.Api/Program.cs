@@ -107,7 +107,7 @@ app.MapGet("/api/users/search", async (string? q, AppDb db) =>
             (digits.Length >= 2 && person.NationalId.Contains(digits)))
         .OrderBy(person => person.DisplayName)
         .Take(30)
-        .Select(person => new { person.NationalId, person.DisplayName })
+        .Select(person => new { person.NationalId, person.DisplayName, person.Title })
         .ToList();
     return Results.Ok(people);
 });
