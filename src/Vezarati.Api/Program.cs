@@ -1,7 +1,12 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.StaticFiles;
 using Vezarati.Api.Models;
 
 var builder = WebApplication.CreateBuilder(args);
+const long maxAttachmentSize = 50L * 1024 * 1024;
+builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = maxAttachmentSize);
+builder.Services.Configure<FormOptions>(options => options.MultipartBodyLengthLimit = maxAttachmentSize);
 builder.Services.AddDbContext<AppDb>(options => options.UseSqlite(builder.Configuration.GetConnectionString("Default") ?? "Data Source=data/vezarati.db"));
 builder.Services.AddScoped<NationalIdLookup, LocalNationalIdLookup>();
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy.WithOrigins("http://localhost:5173").AllowAnyHeader().AllowAnyMethod()));
@@ -22,7 +27,7 @@ app.MapGet("/api/dashboard", async (string? userId, HttpRequest request, AppDb d
 {
     var id = userId ?? request.Headers["X-User-Id"].FirstOrDefault() ?? "admin";
     var groups = await db.Groups.Include(g => g.Members).ToListAsync();
-    var records = await db.Resolutions.Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).OrderByDescending(r => r.MeetingDate).ToListAsync();
+    var records = await db.Resolutions.Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Attachments).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).OrderByDescending(r => r.MeetingDate).ToListAsync();
     var groupIds = groups.Where(g => g.Members.Any(m => m.NationalId == id)).Select(g => g.Id).ToHashSet();
     var mine = id == "admin" ? records : records.Where(r => (r.GroupId.HasValue && groupIds.Contains(r.GroupId.Value)) || r.GroupAssignments.Any(a => groupIds.Contains(a.GroupId)) || r.Assignments.Any(a => a.NationalId == id)).ToList();
     object? currentUser;
@@ -41,7 +46,7 @@ app.MapGet("/api/dashboard", async (string? userId, HttpRequest request, AppDb d
     return Results.Ok(new { currentUser, groups, resolutions = mine });
 });
 
-app.MapGet("/api/resolutions", async (AppDb db) => Results.Ok(await db.Resolutions.Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).OrderByDescending(r => r.MeetingDate).ToListAsync()));
+app.MapGet("/api/resolutions", async (AppDb db) => Results.Ok(await db.Resolutions.Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Attachments).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).OrderByDescending(r => r.MeetingDate).ToListAsync()));
 app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpRequest http) =>
 {
     if (string.IsNullOrWhiteSpace(request.Number) || string.IsNullOrWhiteSpace(request.Text)) return Results.BadRequest(new { error = "شماره و متن مصوبه الزامی است." });
@@ -107,6 +112,62 @@ app.MapPatch("/api/resolutions/{id:int}/status", async (int id, ResolutionStatus
     record.UpdatedAt = DateTimeOffset.UtcNow;
     await db.SaveChangesAsync();
     return Results.Ok(record);
+});
+
+
+app.MapPost("/api/resolutions/{id:int}/attachments", async (int id, HttpRequest request, AppDb db, IWebHostEnvironment environment) =>
+{
+    var form = await request.ReadFormAsync();
+    var file = form.Files.GetFile("file");
+    var nationalId = form["nationalId"].ToString().Trim();
+    if (file is null || file.Length == 0) return Results.BadRequest(new { error = "فایل انتخاب‌شده خالی است." });
+    if (file.Length > maxAttachmentSize) return Results.BadRequest(new { error = "حداکثر حجم هر فایل ۵۰ مگابایت است." });
+    var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+    if (!AttachmentFileTypes.Allowed.Contains(extension)) return Results.BadRequest(new { error = "نوع فایل مجاز نیست." });
+    var resolution = await db.Resolutions.Include(r => r.GroupAssignments).FirstOrDefaultAsync(r => r.Id == id);
+    if (resolution is null) return Results.NotFound();
+    if (string.IsNullOrWhiteSpace(nationalId)) return Results.BadRequest(new { error = "شناسه کاربر ارسال نشده است." });
+    if (nationalId != "admin")
+    {
+        var direct = await db.Assignments.AnyAsync(a => a.ResolutionId == id && a.NationalId == nationalId);
+        var inGroup = await db.GroupMembers.AnyAsync(m => m.NationalId == nationalId &&
+            ((resolution.GroupId.HasValue && m.GroupId == resolution.GroupId.Value) ||
+             db.ResolutionGroups.Any(rg => rg.ResolutionId == id && rg.GroupId == m.GroupId)));
+        if (!direct && !inGroup) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+    var storedName = $"{Guid.NewGuid():N}{extension}";
+    var uploadDirectory = Path.Combine(environment.ContentRootPath, "data", "uploads");
+    Directory.CreateDirectory(uploadDirectory);
+    var destination = Path.Combine(uploadDirectory, storedName);
+    await using (var output = System.IO.File.Create(destination)) await file.CopyToAsync(output);
+    var provider = new FileExtensionContentTypeProvider();
+    if (!provider.TryGetContentType(file.FileName, out var contentType)) contentType = "application/octet-stream";
+    var attachment = new ResolutionAttachment
+    {
+        ResolutionId = id, OriginalName = Path.GetFileName(file.FileName), StoredName = storedName,
+        ContentType = contentType, Size = file.Length, UploadedBy = nationalId, UploadedAt = DateTimeOffset.UtcNow
+    };
+    db.Attachments.Add(attachment);
+    try { await db.SaveChangesAsync(); }
+    catch { System.IO.File.Delete(destination); throw; }
+    return Results.Created($"/api/attachments/{attachment.Id}", new { attachment.Id, attachment.OriginalName, attachment.ContentType, attachment.Size, attachment.UploadedBy, attachment.UploadedAt });
+});
+
+app.MapGet("/api/attachments/{id:int}", async (int id, string nationalId, AppDb db, IWebHostEnvironment environment) =>
+{
+    var attachment = await db.Attachments.AsNoTracking().Include(a => a.Resolution).FirstOrDefaultAsync(a => a.Id == id);
+    if (attachment is null) return Results.NotFound();
+    if (nationalId != "admin")
+    {
+        var direct = await db.Assignments.AnyAsync(a => a.ResolutionId == attachment.ResolutionId && a.NationalId == nationalId);
+        var inGroup = await db.GroupMembers.AnyAsync(m => m.NationalId == nationalId &&
+            ((attachment.Resolution!.GroupId.HasValue && m.GroupId == attachment.Resolution.GroupId.Value) ||
+             db.ResolutionGroups.Any(rg => rg.ResolutionId == attachment.ResolutionId && rg.GroupId == m.GroupId)));
+        if (!direct && !inGroup) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+    var path = Path.Combine(environment.ContentRootPath, "data", "uploads", attachment.StoredName);
+    if (!System.IO.File.Exists(path)) return Results.NotFound();
+    return Results.File(path, attachment.ContentType, attachment.OriginalName, enableRangeProcessing: true);
 });
 
 app.MapGet("/api/groups", async (AppDb db) => Results.Ok(await db.Groups.Include(g => g.Members).OrderBy(g => g.Name).ToListAsync()));
@@ -204,5 +265,16 @@ record ResolutionStatusUpdate(string Status, string? Notes, string? NationalId);
 record GroupCreate(string Name);
 record MemberLookupRequest(string NationalId, string? Title);
 static class ResolutionStatuses { public static readonly string[] All = ["before", "in_progress", "completed", "delayed"]; }
+static class AttachmentFileTypes
+{
+    public static readonly HashSet<string> Allowed = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".rtf", ".odt", ".ods", ".odp",
+        ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tif", ".tiff",
+        ".zip", ".rar", ".7z", ".tar", ".gz",
+        ".mp3", ".wav", ".ogg", ".m4a", ".aac", ".flac",
+        ".mp4", ".mov", ".avi", ".mkv", ".webm"
+    };
+}
 
 record CreateDirectoryPerson(string NationalId, string FirstName, string LastName, string? Title);
