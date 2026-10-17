@@ -68,7 +68,7 @@ app.MapDelete("/api/groups/{id:int}/members/{nationalId}", async (int id, string
     var member = await db.GroupMembers.FirstOrDefaultAsync(m => m.GroupId == id && m.NationalId == nationalId); if (member is null) return Results.NotFound();
     db.GroupMembers.Remove(member); await db.SaveChangesAsync(); return Results.NoContent();
 });
-app.MapGet("/api/users", async (AppDb db) => Results.Ok(await db.Users.OrderBy(u => u.DisplayName).ToListAsync()));
+app.MapGet("/api/users", async (AppDb db) => Results.Ok(await db.Directory.OrderBy(u => u.DisplayName).Select(u => new { u.NationalId, u.DisplayName }).ToListAsync()));
 app.MapGet("/api/reports", async (AppDb db) =>
 {
     var records = await db.Resolutions.Include(r => r.Assignments).Include(r => r.Group).ThenInclude(g => g!.Members).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).ThenInclude(g => g!.Members).ToListAsync();
