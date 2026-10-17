@@ -148,11 +148,11 @@ public static class SeedData
                     {
                         if (!directoryUsers.TryGetValue(member.NationalId, out var directory))
                         {
-                            directory = new DirectoryUser { NationalId = member.NationalId, DisplayName = member.DisplayName };
+                            directory = new DirectoryUser { NationalId = member.NationalId, DisplayName = member.DisplayName, Title = member.Title };
                             db.Directory.Add(directory);
                             directoryUsers.Add(member.NationalId, directory);
                         }
-                        else directory.DisplayName = member.DisplayName;
+                        else { directory.DisplayName = member.DisplayName; if (!string.IsNullOrWhiteSpace(member.Title)) directory.Title = member.Title; }
                         var groupMember = group.Members.FirstOrDefault(x => x.NationalId == member.NationalId);
                         if (groupMember is null) group.Members.Add(new GroupMember { NationalId = member.NationalId, DisplayName = member.DisplayName, Title = member.Title });
                         else { groupMember.DisplayName = member.DisplayName; groupMember.Title = member.Title; }
