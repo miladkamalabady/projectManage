@@ -2,9 +2,11 @@
 
 این شاخه یک پیاده‌سازی React و ASP.NET Core 8 برای ثبت و پیگیری مصوبات جلسه‌هاست.
 
-## اجرا در Windows / PowerShell
+## اجرای توسعه در Windows / PowerShell
 
-ترمینال اول:
+دو ترمینال باز کنید.
+
+ترمینال اول برای API:
 
 ```powershell
 cd src/Vezarati.Api
@@ -12,7 +14,9 @@ dotnet restore
 dotnet run
 ```
 
-ترمینال دوم:
+API در حالت اجرای محلی روی `http://localhost:5000` در دسترس است. هشدار نبودن `wwwroot` در حالت توسعه طبیعی است؛ رابط کاربری در ترمینال دوم با Vite اجرا می‌شود.
+
+ترمینال دوم برای React:
 
 ```powershell
 cd src/Vezarati.Web
@@ -20,25 +24,28 @@ npm install
 npm run dev
 ```
 
-برای خطای `vite is not recognized`، حتماً دستورها را داخل `src/Vezarati.Web` اجرا کنید و پیش از آن `npm install` را بزنید. اجرای Vite به‌صورت سراسری لازم نیست.
+آدرس نمایش داده‌شده توسط Vite را باز کنید (معمولاً `http://localhost:5173`). درخواست‌های `/api` از Vite به API روی پورت ۵۰۰۰ هدایت می‌شوند.
 
-## Build و انتشار
+اگر `vite is not recognized` دیدید، مطمئن شوید داخل `src/Vezarati.Web` هستید و ابتدا `npm install` را اجرا کرده‌اید.
+
+## Build و اجرای یکپارچه
 
 ```powershell
 cd src/Vezarati.Web
 npm ci
 npm run build
-cd ../Vezarati.Api
+Copy-Item -Recurse -Force dist\* ..\Vezarati.Api\wwwroot\
+cd ..\Vezarati.Api
 dotnet publish -c Release -o publish
 ```
 
-برای استقرار یکپارچه، محتوای `src/Vezarati.Web/dist` را در `src/Vezarati.Api/wwwroot` قرار دهید. API فایل‌های استاتیک را سرو می‌کند.
+بعد از کپی خروجی React به `wwwroot`، برنامهٔ ASP.NET Core هم API و هم رابط کاربری را از یک آدرس سرو می‌کند.
 
 ## داده‌های اولیه
 
 در اجرای اول، گروه‌های «شورای معاونان» و «مدیران کل» با اعضای فایل‌های ارسالی ساخته می‌شوند و ۶۷ مصوبهٔ یکتا از برگه‌های اصلی اکسل وارد می‌شود. مصوبات مشترک به هر دو گروه ارجاع داده می‌شوند. وضعیت‌های خالی اکسل «قبل از اجرا» ثبت می‌شوند. تاریخ‌های جلسه در دیتابیس با مقدار میلادی برای مرتب‌سازی و مقدار شمسی برای نمایش نگهداری می‌شوند.
 
-SQLite در `src/Vezarati.Api/data/vezarati.db` ایجاد می‌شود. اگر فایل دیتابیس قبلی وجود داشته باشد، ارتقای سادهٔ ساختار جدول‌ها هنگام اجرا انجام می‌شود و داده‌های قبلی حذف نمی‌شوند.
+SQLite در `src/Vezarati.Api/data/vezarati.db` ایجاد می‌شود. اگر فایل دیتابیس قبلی وجود داشته باشد، ارتقای ساختار هنگام اجرا انجام می‌شود و داده‌های قبلی حذف نمی‌شوند.
 
 ## قابلیت‌ها
 
