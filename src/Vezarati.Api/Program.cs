@@ -310,14 +310,6 @@ app.MapGet("/api/reports", async (AppDb db) =>
         .OrderByDescending(x => x.Total).ToList();
     return Results.Ok(new { total = records.Count, completed = records.Count(r => r.Status == "completed"), delayed = records.Count(r => r.Status == "delayed"), pending = records.Count(r => r.Status is "before" or "in_progress"), people = rows });
 });
-app.MapFallbackToFile("index.html");
-app.Run();
-
-record ResolutionCreate(DateOnly MeetingDate, string? MeetingDateJalali, string Number, string Text, string? Notes, string Status, int? GroupId, List<int>? GroupIds, List<string> People, bool PublishToAll);
-record ResolutionStatusUpdate(string Status, string? Notes, string? NationalId);
-record GroupCreate(string Name);
-record ResolutionEventCreate(string Text, string NationalId, string? UserName);
-record MemberLookupRequest(string NationalId, string? Title);
 static string? ExtractProvince(string title)
 {
     var clean = title.Trim();
@@ -327,6 +319,14 @@ static string? ExtractProvince(string title)
     return null;
 }
 
+app.MapFallbackToFile("index.html");
+app.Run();
+
+record ResolutionCreate(DateOnly MeetingDate, string? MeetingDateJalali, string Number, string Text, string? Notes, string Status, int? GroupId, List<int>? GroupIds, List<string> People, bool PublishToAll);
+record ResolutionStatusUpdate(string Status, string? Notes, string? NationalId);
+record GroupCreate(string Name);
+record ResolutionEventCreate(string Text, string NationalId, string? UserName);
+record MemberLookupRequest(string NationalId, string? Title);
 static class ResolutionStatuses { public static readonly string[] All = ["before", "in_progress", "completed", "delayed"]; }
 static class AttachmentFileTypes
 {
