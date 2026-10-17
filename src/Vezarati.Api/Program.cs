@@ -242,7 +242,23 @@ static string NormalizeDigits(string value)
         return character;
     }).ToArray());
 }
-app.MapGet("/api/users", async (AppDb db) => Results.Ok(await db.Directory.OrderBy(u => u.DisplayName).Select(u => new { u.NationalId, u.DisplayName, u.Title }).ToListAsync()));
+app.MapGet("/api/users", async (AppDb db) =>
+{
+    var directory = await db.Directory.AsNoTracking().OrderBy(u => u.DisplayName).ToListAsync();
+    var titlesByUser = await db.GroupMembers.AsNoTracking().Where(member => !string.IsNullOrWhiteSpace(member.Title))
+        .GroupBy(member => member.NationalId)
+        .Select(group => new { NationalId = group.Key, Title = group.Select(member => member.Title).First() })
+        .ToDictionaryAsync(item => item.NationalId, item => item.Title);
+    return Results.Ok(directory.Select(user => new
+    {
+        user.NationalId,
+        user.DisplayName,
+        Title = titlesByUser.GetValueOrDefault(user.NationalId, user.Title),
+        Province = titlesByUser.GetValueOrDefault(user.NationalId, user.Title).Contains("مدیر کل", StringComparison.OrdinalIgnoreCase)
+            ? ExtractProvince(titlesByUser.GetValueOrDefault(user.NationalId, user.Title))
+            : null
+    }));
+});
 app.MapGet("/api/reports", async (AppDb db) =>
 {
     var records = await db.Resolutions.Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Group).ThenInclude(g => g!.Members).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).ThenInclude(g => g!.Members).ToListAsync();
@@ -264,6 +280,15 @@ record ResolutionCreate(DateOnly MeetingDate, string? MeetingDateJalali, string 
 record ResolutionStatusUpdate(string Status, string? Notes, string? NationalId);
 record GroupCreate(string Name);
 record MemberLookupRequest(string NationalId, string? Title);
+static string? ExtractProvince(string title)
+{
+    var clean = title.Trim();
+    foreach (var prefix in new[] { "مدیر کل", "مدیرکل" })
+        if (clean.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            return clean[prefix.Length..].Trim(' ', '،', '-', 'ـ');
+    return null;
+}
+
 static class ResolutionStatuses { public static readonly string[] All = ["before", "in_progress", "completed", "delayed"]; }
 static class AttachmentFileTypes
 {
