@@ -12,33 +12,39 @@
 - .NET 8 SDK
 - Node.js 22.13+ و npm
 
-## اجرا
+## اجرا در Windows PowerShell
 
-ترمینال ۱:
+ابتدا از ریشه مخزن به پوشه وب بروید و وابستگی‌ها را نصب کنید. این مراحل فقط بار اول لازم‌اند:
 
-```bash
-cd src/Vezarati.Api
+```powershell
+Set-Location .\src\Vezarati.Web
+npm ci
+npm run dev
+```
+
+باز کردن ترمینال دوم برای API:
+
+```powershell
+Set-Location .\src\Vezarati.Api
 dotnet restore
 dotnet run
 ```
 
-API در `http://localhost:5080` و دیتابیس در `data/vezarati.db` ساخته می‌شود.
-
-ترمینال ۲:
-
-```bash
-cd src/Vezarati.Web
-npm install
-npm run dev
-```
-
-Vite مسیر `/api` را به API روی پورت 5080 proxy می‌کند.
+API روی `http://localhost:5080` اجرا می‌شود و دیتابیس `data/vezarati.db` را می‌سازد. Vite درخواست‌های `/api` را به API پروکسی می‌کند. برای اجرا از دستور `npm run dev` استفاده کنید؛ اجرای مستقیم `vite` لازم نیست. اگر PowerShell خطای `vite is not recognized` داد، مطمئن شوید در پوشه `src\Vezarati.Web` هستید، `npm ci` با موفقیت تمام شده، و بعد `npm run dev` را اجرا کنید.
 
 ## بیلد
 
-```bash
-cd src/Vezarati.Web && npm ci && npm run build
-cd ../Vezarati.Api && dotnet publish -c Release -o publish
+از ریشه مخزن:
+
+```powershell
+Push-Location .\src\Vezarati.Web
+npm ci
+npm run build
+Pop-Location
+
+Push-Location .\src\Vezarati.Api
+dotnet publish -c Release -o publish
+Pop-Location
 ```
 
 برای استقرار یکپارچه، محتوای `src/Vezarati.Web/dist` را در `src/Vezarati.Api/wwwroot` قرار دهید؛ API فایل‌های استاتیک را سرو می‌کند.
@@ -54,4 +60,3 @@ cd ../Vezarati.Api && dotnet publish -c Release -o publish
 ## احراز هویت و استعلام کد ملی
 
 برای توسعه محلی از هدرهای `X-User-Id` و `X-User-Name` استفاده شده است. این هدرها احراز هویت امن نیستند و باید پیش از استقرار به ورود سازمانی متصل شوند. سرویس استعلام از طریق `NationalIdLookup` قابل جایگزینی است؛ پیاده‌سازی پیش‌فرض فقط فهرست محلی نمونه را جستجو می‌کند.
-
