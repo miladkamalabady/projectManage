@@ -32,7 +32,7 @@ export default function App() {
   const [resolutions, setResolutions] = useState<Resolution[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [reports, setReports] = useState<Report | null>(null);
-  const [users, setUsers] = useState<{ nationalId: string; displayName: string }[]>([]);
+  const [users, setUsers] = useState<{ nationalId: string; displayName: string; title?: string }[]>([]);
   const [query, setQuery] = useState("");
   const [reportQuery, setReportQuery] = useState("");
   const [reportPage, setReportPage] = useState(1);
