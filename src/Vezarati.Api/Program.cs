@@ -22,7 +22,7 @@ app.MapGet("/api/dashboard", async (string? userId, HttpRequest request, AppDb d
 {
     var id = userId ?? request.Headers["X-User-Id"].FirstOrDefault() ?? "admin";
     var groups = await db.Groups.Include(g => g.Members).ToListAsync();
-    var records = await db.Resolutions.Include(r => r.Assignments).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).OrderByDescending(r => r.MeetingDate).ToListAsync();
+    var records = await db.Resolutions.Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).OrderByDescending(r => r.MeetingDate).ToListAsync();
     var groupIds = groups.Where(g => g.Members.Any(m => m.NationalId == id)).Select(g => g.Id).ToHashSet();
     var mine = id == "admin" ? records : records.Where(r => (r.GroupId.HasValue && groupIds.Contains(r.GroupId.Value)) || r.GroupAssignments.Any(a => groupIds.Contains(a.GroupId)) || r.Assignments.Any(a => a.NationalId == id)).ToList();
     object? currentUser;
@@ -41,7 +41,7 @@ app.MapGet("/api/dashboard", async (string? userId, HttpRequest request, AppDb d
     return Results.Ok(new { currentUser, groups, resolutions = mine });
 });
 
-app.MapGet("/api/resolutions", async (AppDb db) => Results.Ok(await db.Resolutions.Include(r => r.Assignments).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).OrderByDescending(r => r.MeetingDate).ToListAsync()));
+app.MapGet("/api/resolutions", async (AppDb db) => Results.Ok(await db.Resolutions.Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).OrderByDescending(r => r.MeetingDate).ToListAsync()));
 app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpRequest http) =>
 {
     if (string.IsNullOrWhiteSpace(request.Number) || string.IsNullOrWhiteSpace(request.Text)) return Results.BadRequest(new { error = "شماره و متن مصوبه الزامی است." });
@@ -79,9 +79,34 @@ app.MapDelete("/api/resolutions/{id:int}", async (int id, AppDb db) =>
 app.MapPatch("/api/resolutions/{id:int}/status", async (int id, ResolutionStatusUpdate request, AppDb db) =>
 {
     if (!ResolutionStatuses.All.Contains(request.Status)) return Results.BadRequest(new { error = "وضعیت نامعتبر است." });
-    var record = await db.Resolutions.FindAsync(id); if (record is null) return Results.NotFound();
-    record.Status = request.Status; record.Notes = request.Notes ?? record.Notes; record.UpdatedAt = DateTimeOffset.UtcNow;
-    await db.SaveChangesAsync(); return Results.Ok(record);
+    var record = await db.Resolutions.Include(r => r.Progress).FirstOrDefaultAsync(r => r.Id == id);
+    if (record is null) return Results.NotFound();
+    var nationalId = request.NationalId?.Trim();
+    if (!string.IsNullOrWhiteSpace(nationalId) && nationalId != "admin")
+    {
+        var directAssignment = await db.Assignments.AnyAsync(a => a.ResolutionId == id && a.NationalId == nationalId);
+        var groupAssignment = await db.GroupMembers.AnyAsync(m => m.NationalId == nationalId &&
+            ((record.GroupId.HasValue && m.GroupId == record.GroupId.Value) ||
+             db.ResolutionGroups.Any(rg => rg.ResolutionId == id && rg.GroupId == m.GroupId)));
+        if (!directAssignment && !groupAssignment) return Results.StatusCode(StatusCodes.Status403Forbidden);
+        var progress = record.Progress.FirstOrDefault(p => p.NationalId == nationalId);
+        if (progress is null)
+        {
+            progress = new ResolutionProgress { ResolutionId = id, NationalId = nationalId };
+            record.Progress.Add(progress);
+        }
+        progress.Status = request.Status;
+        progress.Notes = request.Notes?.Trim() ?? progress.Notes;
+        progress.UpdatedAt = DateTimeOffset.UtcNow;
+        record.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync();
+        return Results.Ok(progress);
+    }
+    record.Status = request.Status;
+    record.Notes = request.Notes ?? record.Notes;
+    record.UpdatedAt = DateTimeOffset.UtcNow;
+    await db.SaveChangesAsync();
+    return Results.Ok(record);
 });
 
 app.MapGet("/api/groups", async (AppDb db) => Results.Ok(await db.Groups.Include(g => g.Members).OrderBy(g => g.Name).ToListAsync()));
@@ -159,13 +184,13 @@ static string NormalizeDigits(string value)
 app.MapGet("/api/users", async (AppDb db) => Results.Ok(await db.Directory.OrderBy(u => u.DisplayName).Select(u => new { u.NationalId, u.DisplayName, u.Title }).ToListAsync()));
 app.MapGet("/api/reports", async (AppDb db) =>
 {
-    var records = await db.Resolutions.Include(r => r.Assignments).Include(r => r.Group).ThenInclude(g => g!.Members).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).ThenInclude(g => g!.Members).ToListAsync();
+    var records = await db.Resolutions.Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Group).ThenInclude(g => g!.Members).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).ThenInclude(g => g!.Members).ToListAsync();
     var directory = await db.Directory.ToDictionaryAsync(u => u.NationalId, u => (DisplayName: u.DisplayName, Title: u.Title));
     var rows = records.SelectMany(r => (r.Group?.Members.Select(m => (NationalId: m.NationalId, DisplayName: m.DisplayName, Title: m.Title)) ?? Enumerable.Empty<(string NationalId, string DisplayName, string Title)>())
         .Concat(r.GroupAssignments.SelectMany(a => a.Group!.Members.Select(m => (NationalId: m.NationalId, DisplayName: m.DisplayName, Title: m.Title))))
         .Concat(r.Assignments.Select(a => (NationalId: a.NationalId, DisplayName: directory.GetValueOrDefault(a.NationalId, (DisplayName: a.NationalId, Title: "")).DisplayName, Title: directory.GetValueOrDefault(a.NationalId, (DisplayName: a.NationalId, Title: "")).Title)))
         .DistinctBy(p => p.NationalId)
-        .Select(p => new { p.NationalId, p.DisplayName, p.Title, r.Status }))
+        .Select(p => new { p.NationalId, p.DisplayName, p.Title, Status = r.Progress.FirstOrDefault(progress => progress.NationalId == p.NationalId)?.Status ?? r.Status }))
         .GroupBy(x => new { x.NationalId, x.DisplayName, x.Title })
         .Select(g => new { g.Key.NationalId, g.Key.DisplayName, g.Key.Title, Total = g.Count(), Completed = g.Count(x => x.Status == "completed"), Delayed = g.Count(x => x.Status == "delayed"), Pending = g.Count(x => x.Status is "before" or "in_progress") })
         .OrderByDescending(x => x.Total).ToList();
@@ -175,7 +200,7 @@ app.MapFallbackToFile("index.html");
 app.Run();
 
 record ResolutionCreate(DateOnly MeetingDate, string? MeetingDateJalali, string Number, string Text, string? Notes, string Status, int? GroupId, List<int>? GroupIds, List<string> People);
-record ResolutionStatusUpdate(string Status, string? Notes);
+record ResolutionStatusUpdate(string Status, string? Notes, string? NationalId);
 record GroupCreate(string Name);
 record MemberLookupRequest(string NationalId, string? Title);
 static class ResolutionStatuses { public static readonly string[] All = ["before", "in_progress", "completed", "delayed"]; }
