@@ -161,4 +161,5 @@ record ResolutionStatusUpdate(string Status, string? Notes);
 record GroupCreate(string Name);
 record MemberLookupRequest(string NationalId, string? Title);
 static class ResolutionStatuses { public static readonly string[] All = ["before", "in_progress", "completed", "delayed"]; }
-\nrecord CreateDirectoryPerson(string NationalId, string FirstName, string LastName, string? Title);
+
+record CreateDirectoryPerson(string NationalId, string FirstName, string LastName, string? Title);
