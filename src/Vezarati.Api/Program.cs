@@ -73,9 +73,9 @@ app.MapGet("/api/reports", async (AppDb db) =>
 {
     var records = await db.Resolutions.Include(r => r.Assignments).Include(r => r.Group).ThenInclude(g => g!.Members).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).ThenInclude(g => g!.Members).ToListAsync();
     var directory = await db.Directory.ToDictionaryAsync(u => u.NationalId, u => u.DisplayName);
-    var rows = records.SelectMany(r => (r.Group?.Members.Select(m => (m.NationalId, m.DisplayName)) ?? Enumerable.Empty<(string NationalId, string DisplayName)>())
-        .Concat(r.GroupAssignments.SelectMany(a => a.Group!.Members.Select(m => (m.NationalId, m.DisplayName))))
-        .Concat(r.Assignments.Select(a => (a.NationalId, directory.GetValueOrDefault(a.NationalId, a.NationalId))))
+    var rows = records.SelectMany(r => (r.Group?.Members.Select(m => (NationalId: m.NationalId, DisplayName: m.DisplayName)) ?? Enumerable.Empty<(string NationalId, string DisplayName)>())
+        .Concat(r.GroupAssignments.SelectMany(a => a.Group!.Members.Select(m => (NationalId: m.NationalId, DisplayName: m.DisplayName))))
+        .Concat(r.Assignments.Select(a => (NationalId: a.NationalId, DisplayName: directory.GetValueOrDefault(a.NationalId, a.NationalId))))
         .DistinctBy(p => p.NationalId)
         .Select(p => new { p.NationalId, p.DisplayName, r.Status }))
         .GroupBy(x => new { x.NationalId, x.DisplayName })
