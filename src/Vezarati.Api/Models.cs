@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json.Serialization;
 
 namespace Vezarati.Api.Models;
 
@@ -26,14 +27,17 @@ public sealed class ResolutionGroup
     public int Id { get; set; }
     public string Name { get; set; } = "";
     public List<GroupMember> Members { get; set; } = [];
+    [JsonIgnore]
     public List<ResolutionGroupAssignment> Resolutions { get; set; } = [];
 }
 
 public sealed class ResolutionGroupAssignment
 {
     public int ResolutionId { get; set; }
+    [JsonIgnore]
     public Resolution? Resolution { get; set; }
     public int GroupId { get; set; }
+    [JsonIgnore]
     public ResolutionGroup? Group { get; set; }
 }
 
@@ -41,6 +45,7 @@ public sealed class GroupMember
 {
     public int Id { get; set; }
     public int GroupId { get; set; }
+    [JsonIgnore]
     public ResolutionGroup? Group { get; set; }
     public string NationalId { get; set; } = "";
     public string DisplayName { get; set; } = "";
@@ -51,6 +56,7 @@ public sealed class ResolutionAssignment
 {
     public int Id { get; set; }
     public int ResolutionId { get; set; }
+    [JsonIgnore]
     public Resolution? Resolution { get; set; }
     public string NationalId { get; set; } = "";
 }
