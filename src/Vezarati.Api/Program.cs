@@ -79,10 +79,23 @@ app.MapPost("/api/groups", async (GroupCreate request, AppDb db) =>
     var group = new ResolutionGroup { Name = name }; db.Groups.Add(group); await db.SaveChangesAsync();
     return Results.Created($"/api/groups/{group.Id}", group);
 });
-app.MapGet("/api/users/search", async (string q, AppDb db) => {
-    var term = q.Trim(); if (term.Length < 2) return Results.Ok(Array.Empty<object>());
+app.MapGet("/api/users/search", async (string? q, AppDb db) =>
+{
+    var term = (q ?? "").Trim();
+    if (term.Length < 2) return Results.Ok(Array.Empty<object>());
+    static string Normalize(string value) => value
+        .Replace("ي", "ی").Replace("ك", "ک").Replace("‌", " ")
+        .Trim().ToLowerInvariant();
+    var normalized = Normalize(term);
     var digits = new string(term.Where(char.IsDigit).ToArray());
-    var people = await db.Directory.Where(u => EF.Functions.Like(u.DisplayName, $"%{term}%") || (digits.Length >= 2 && EF.Functions.Like(u.NationalId, $"%{digits}%"))).OrderBy(u => u.DisplayName).Take(30).Select(u => new { u.NationalId, u.DisplayName }).ToListAsync();
+    var directory = await db.Directory.AsNoTracking().ToListAsync();
+    var people = directory
+        .Where(person => Normalize(person.DisplayName).Contains(normalized) ||
+            (digits.Length >= 2 && person.NationalId.Contains(digits)))
+        .OrderBy(person => person.DisplayName)
+        .Take(30)
+        .Select(person => new { person.NationalId, person.DisplayName })
+        .ToList();
     return Results.Ok(people);
 });
 app.MapPost("/api/groups/{id:int}/members/lookup", async (int id, MemberLookupRequest request, AppDb db, NationalIdLookup lookup) =>
