@@ -110,7 +110,35 @@ app.MapDelete("/api/groups/{id:int}/members/{nationalId}", async (int id, string
     var member = await db.GroupMembers.FirstOrDefaultAsync(m => m.GroupId == id && m.NationalId == nationalId); if (member is null) return Results.NotFound();
     db.GroupMembers.Remove(member); await db.SaveChangesAsync(); return Results.NoContent();
 });
-app.MapGet("/api/users", async (AppDb db) => Results.Ok(await db.Directory.OrderBy(u => u.DisplayName).Select(u => new { u.NationalId, u.DisplayName }).ToListAsync()));
+app.MapPost("/api/users", async (CreateDirectoryPerson request, AppDb db) =>
+{
+    var nationalId = NormalizeDigits(request.NationalId.Trim());
+    var firstName = request.FirstName.Trim();
+    var lastName = request.LastName.Trim();
+    var title = request.Title?.Trim() ?? "";
+    if (nationalId.Length is < 8 or > 11 || !nationalId.All(char.IsDigit))
+        return Results.BadRequest(new { error = "کد ملی باید بین ۸ تا ۱۱ رقم باشد." });
+    if (string.IsNullOrWhiteSpace(firstName) || string.IsNullOrWhiteSpace(lastName))
+        return Results.BadRequest(new { error = "نام و نام خانوادگی الزامی است." });
+    var existing = await db.Directory.FirstOrDefaultAsync(person => person.NationalId == nationalId);
+    if (existing is not null)
+        return Results.Conflict(new { error = "این کد ملی قبلاً در فهرست اشخاص ثبت شده است." });
+    var person = new DirectoryUser { NationalId = nationalId, DisplayName = $"{firstName} {lastName}", Title = title };
+    db.Directory.Add(person);
+    await db.SaveChangesAsync();
+    return Results.Created($"/api/users/{person.NationalId}", new { person.NationalId, person.DisplayName, person.Title });
+});
+static string NormalizeDigits(string value)
+{
+    var persian = "۰۱۲۳۴۵۶۷۸۹"; var arabic = "٠١٢٣٤٥٦٧٨٩";
+    return new string(value.Select(character =>
+    {
+        var index = persian.IndexOf(character); if (index >= 0) return (char)('0' + index);
+        index = arabic.IndexOf(character); if (index >= 0) return (char)('0' + index);
+        return character;
+    }).ToArray());
+}
+app.MapGet("/api/users", async (AppDb db) => Results.Ok(await db.Directory.OrderBy(u => u.DisplayName).Select(u => new { u.NationalId, u.DisplayName, u.Title }).ToListAsync()));
 app.MapGet("/api/reports", async (AppDb db) =>
 {
     var records = await db.Resolutions.Include(r => r.Assignments).Include(r => r.Group).ThenInclude(g => g!.Members).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).ThenInclude(g => g!.Members).ToListAsync();
@@ -133,3 +161,4 @@ record ResolutionStatusUpdate(string Status, string? Notes);
 record GroupCreate(string Name);
 record MemberLookupRequest(string NationalId, string? Title);
 static class ResolutionStatuses { public static readonly string[] All = ["before", "in_progress", "completed", "delayed"]; }
+\nrecord CreateDirectoryPerson(string NationalId, string FirstName, string LastName, string? Title);
