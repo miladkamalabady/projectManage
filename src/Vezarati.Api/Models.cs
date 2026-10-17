@@ -17,6 +17,7 @@ public sealed class Resolution
     public ResolutionGroup? Group { get; set; }
     public List<ResolutionGroupAssignment> GroupAssignments { get; set; } = [];
     public List<ResolutionAssignment> Assignments { get; set; } = [];
+    public List<ResolutionProgress> Progress { get; set; } = [];
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? UpdatedAt { get; set; }
     public string CreatedBy { get; set; } = "";
@@ -61,6 +62,16 @@ public sealed class ResolutionAssignment
     public string NationalId { get; set; } = "";
 }
 
+public sealed class ResolutionProgress
+{
+    public int Id { get; set; }
+    public int ResolutionId { get; set; }
+    public string NationalId { get; set; } = "";
+    public string Status { get; set; } = "before";
+    public string Notes { get; set; } = "";
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
 public sealed class DirectoryUser
 {
     public int Id { get; set; }
@@ -84,6 +95,7 @@ public sealed class AppDb(DbContextOptions<AppDb> options) : DbContext(options)
     public DbSet<ResolutionGroupAssignment> ResolutionGroups => Set<ResolutionGroupAssignment>();
     public DbSet<GroupMember> GroupMembers => Set<GroupMember>();
     public DbSet<ResolutionAssignment> Assignments => Set<ResolutionAssignment>();
+    public DbSet<ResolutionProgress> Progress => Set<ResolutionProgress>();
     public DbSet<DirectoryUser> Directory => Set<DirectoryUser>();
     public DbSet<AppUser> Users => Set<AppUser>();
 
@@ -95,6 +107,9 @@ public sealed class AppDb(DbContextOptions<AppDb> options) : DbContext(options)
         model.Entity<Resolution>().HasIndex(x => x.SourceKey).IsUnique();
         model.Entity<Resolution>().HasOne(x => x.Group).WithMany().HasForeignKey(x => x.GroupId).OnDelete(DeleteBehavior.SetNull);
         model.Entity<ResolutionAssignment>().HasOne(x => x.Resolution).WithMany(x => x.Assignments).HasForeignKey(x => x.ResolutionId).OnDelete(DeleteBehavior.Cascade);
+        model.Entity<ResolutionProgress>().ToTable("ResolutionProgress");
+        model.Entity<ResolutionProgress>().HasIndex(x => new { x.ResolutionId, x.NationalId }).IsUnique();
+        model.Entity<ResolutionProgress>().HasOne<Resolution>().WithMany(x => x.Progress).HasForeignKey(x => x.ResolutionId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<GroupMember>().HasOne(x => x.Group).WithMany(x => x.Members).HasForeignKey(x => x.GroupId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<ResolutionGroupAssignment>().HasKey(x => new { x.ResolutionId, x.GroupId });
         model.Entity<ResolutionGroupAssignment>().HasOne(x => x.Resolution).WithMany(x => x.GroupAssignments).HasForeignKey(x => x.ResolutionId).OnDelete(DeleteBehavior.Cascade);
@@ -225,6 +240,8 @@ public static class SchemaCompatibility
         var directoryColumns = await ReadColumns(db, "Directory");
         if (directoryColumns.Count > 0 && !directoryColumns.Contains("Title")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Directory ADD COLUMN Title TEXT NOT NULL DEFAULT '';");
         await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS ResolutionGroups (ResolutionId INTEGER NOT NULL, GroupId INTEGER NOT NULL, CONSTRAINT PK_ResolutionGroups PRIMARY KEY (ResolutionId, GroupId), CONSTRAINT FK_ResolutionGroups_Resolutions_ResolutionId FOREIGN KEY (ResolutionId) REFERENCES Resolutions (Id) ON DELETE CASCADE, CONSTRAINT FK_ResolutionGroups_Groups_GroupId FOREIGN KEY (GroupId) REFERENCES Groups (Id) ON DELETE CASCADE);");
+        await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS ResolutionProgress (Id INTEGER NOT NULL CONSTRAINT PK_ResolutionProgress PRIMARY KEY AUTOINCREMENT, ResolutionId INTEGER NOT NULL, NationalId TEXT NOT NULL, Status TEXT NOT NULL DEFAULT 'before', Notes TEXT NOT NULL DEFAULT '', UpdatedAt TEXT NOT NULL, CONSTRAINT FK_ResolutionProgress_Resolutions_ResolutionId FOREIGN KEY (ResolutionId) REFERENCES Resolutions (Id) ON DELETE CASCADE);");
+        await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_ResolutionProgress_ResolutionId_NationalId ON ResolutionProgress (ResolutionId, NationalId);");
     }
 
     private static async Task<HashSet<string>> ReadColumns(AppDb db, string table)
