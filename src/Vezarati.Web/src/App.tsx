@@ -104,7 +104,10 @@ export default function App() {
     if (!selectedPerson) { setMessage("ابتدا یک شخص را از فهرست انتخاب کنید."); return; }
     if (await request(`/api/groups/${selectedGroup}/members/lookup`, "POST", { nationalId: selectedPerson.nationalId, title: memberTitle })) { setNationalId(""); setMemberTitle(""); setMemberSearch(""); setSelectedPerson(null); setMemberMatches([]); }
   }
-  async function createDirectoryPerson() {\n    if (await request("/api/users", "POST", { nationalId: newPerson.nationalId, firstName: newPerson.firstName, lastName: newPerson.lastName, title: newPerson.title })) { setNewPerson({ nationalId: "", firstName: "", lastName: "", title: "" }); await load(); }\n  }\n  async function searchMembers(value: string) {
+  async function createDirectoryPerson() {
+    if (await request("/api/users", "POST", { nationalId: newPerson.nationalId, firstName: newPerson.firstName, lastName: newPerson.lastName, title: newPerson.title })) { setNewPerson({ nationalId: "", firstName: "", lastName: "", title: "" }); await load(); }
+  }
+  async function searchMembers(value: string) {
     setMemberSearch(value); setSelectedPerson(null); setMemberSearchMessage("");
     const term = value.trim(); const sequence = ++memberSearchSequence.current;
     if (term.length < 2) { setMemberMatches([]); setMemberSearchMessage("برای جستجو حداقل ۲ حرف یا رقم وارد کنید."); return; }
