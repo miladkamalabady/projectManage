@@ -247,15 +247,28 @@ public static class SeedData
                 await db.SaveChangesAsync();
                 foreach (var item in seed.Resolutions)
                 {
+                    var date = JalaliDate.ToGregorian(item.MeetingDateJalali);
                     var resolution = await db.Resolutions.Include(r => r.GroupAssignments).FirstOrDefaultAsync(r => r.SourceKey == item.SourceKey);
                     if (resolution is null)
                     {
-                        var date = JalaliDate.ToGregorian(item.MeetingDateJalali);
+                        var candidates = await db.Resolutions.Include(r => r.GroupAssignments)
+                            .Where(r => r.MeetingDate == date && r.Number == item.Number).ToListAsync();
+                        var normalizedText = NormalizeImportedText(item.Text);
+                        resolution = candidates.FirstOrDefault(candidate => NormalizeImportedText(candidate.Text) == normalizedText);
+                    }
+                    if (resolution is null)
+                    {
                         resolution = new Resolution { SourceKey = item.SourceKey, MeetingDate = date, MeetingDateJalali = item.MeetingDateJalali, Number = item.Number, Text = item.Text, Notes = item.Notes, Status = item.Status, CreatedAt = DateTimeOffset.UtcNow, CreatedBy = "ورود از فایل اکسل" };
                         db.Resolutions.Add(resolution);
-                        foreach (var groupName in item.Groups) if (groups.TryGetValue(groupName, out var group) && resolution.GroupAssignments.All(a => a.GroupId != group.Id)) resolution.GroupAssignments.Add(new ResolutionGroupAssignment { Group = group });
                     }
-                    else foreach (var groupName in item.Groups) if (groups.TryGetValue(groupName, out var group) && resolution.GroupAssignments.All(a => a.GroupId != group.Id)) resolution.GroupAssignments.Add(new ResolutionGroupAssignment { Group = group });
+                    else
+                    {
+                        if (string.IsNullOrWhiteSpace(resolution.SourceKey)) resolution.SourceKey = item.SourceKey;
+                        if (string.IsNullOrWhiteSpace(resolution.MeetingDateJalali)) resolution.MeetingDateJalali = item.MeetingDateJalali;
+                    }
+                    foreach (var groupName in item.Groups)
+                        if (groups.TryGetValue(groupName, out var group) && resolution.GroupAssignments.All(a => a.GroupId != group.Id))
+                            resolution.GroupAssignments.Add(new ResolutionGroupAssignment { Group = group });
                 }
                 await db.SaveChangesAsync();
             }
@@ -263,6 +276,10 @@ public static class SeedData
         if (!await db.Users.AnyAsync()) db.Users.Add(new AppUser { NationalId = "admin", DisplayName = "مدیر دفتر وزارتی", Role = "ادمین" });
         await db.SaveChangesAsync();
     }
+
+    private static string NormalizeImportedText(string value) => string.Join(" ",
+        value.Replace('\u200c', ' ').Replace('ي', 'ی').Replace('ك', 'ک')
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
 }
 
 public static class JalaliDate
