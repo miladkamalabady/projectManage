@@ -213,6 +213,20 @@ public static class SeedData
             var seed = System.Text.Json.JsonSerializer.Deserialize<SeedDocument>(await File.ReadAllTextAsync(dataPath), new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             if (seed is not null)
             {
+                var allSeedGroupNames = seed.Groups.Keys.Concat(seed.Resolutions.SelectMany(item => item.Groups)).Distinct(StringComparer.Ordinal).ToList();
+                foreach (var groupName in allSeedGroupNames)
+                {
+                    if (groups.ContainsKey(groupName)) continue;
+                    var group = await db.Groups.Include(g => g.Members).FirstOrDefaultAsync(g => g.Name == groupName);
+                    if (group is null)
+                    {
+                        group = new ResolutionGroup { Name = groupName };
+                        db.Groups.Add(group);
+                    }
+                    groups[groupName] = group;
+                }
+                await db.SaveChangesAsync();
+
                 foreach (var (groupName, members) in seed.Groups)
                 {
                     if (!groups.TryGetValue(groupName, out var group)) continue;
