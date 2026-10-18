@@ -193,14 +193,17 @@ app.MapGet("/api/resolutions", async (HttpContext context, AppDb db) =>
     var id = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
     var isAdmin = context.User.IsInRole("ادمین");
     var records = await db.Resolutions.AsNoTracking().Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Attachments.Where(attachment => isAdmin || attachment.ApprovedForAll)).Include(r => r.Events).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).OrderByDescending(r => r.MeetingDate).ToListAsync();
-    if (!isAdmin) foreach (var resolution in records)
+    if (isAdmin) return Results.Ok(records);
+    var groupIds = await db.GroupMembers.Where(member => member.NationalId == id).Select(member => member.GroupId).ToHashSetAsync();
+    var mine = records.Where(r => !r.IsArchived && (r.PublishToAll || (r.GroupId.HasValue && groupIds.Contains(r.GroupId.Value)) || r.GroupAssignments.Any(a => groupIds.Contains(a.GroupId)) || r.Assignments.Any(a => a.NationalId == id))).ToList();
+    foreach (var resolution in mine)
     {
         foreach (var progress in resolution.Progress.Where(progress => progress.NationalId != id)) { progress.ReportText = ""; progress.AdminFeedback = ""; progress.NationalId = ""; }
         foreach (var entry in resolution.Events) entry.NationalId = "";
         foreach (var assignment in resolution.Assignments) assignment.NationalId = "";
         foreach (var attachment in resolution.Attachments) attachment.UploadedBy = "";
     }
-    return Results.Ok(isAdmin ? records : records.Where(r => !r.IsArchived).ToList());
+    return Results.Ok(mine);
 });
 app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpContext http) =>
 {
