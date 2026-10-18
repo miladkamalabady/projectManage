@@ -194,7 +194,7 @@ app.MapGet("/api/resolutions", async (HttpContext context, AppDb db) =>
     var isAdmin = context.User.IsInRole("ادمین");
     var records = await db.Resolutions.AsNoTracking().Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Attachments.Where(attachment => isAdmin || attachment.ApprovedForAll)).Include(r => r.Events).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).OrderByDescending(r => r.MeetingDate).ToListAsync();
     if (isAdmin) return Results.Ok(records);
-    var groupIds = await db.GroupMembers.Where(member => member.NationalId == id).Select(member => member.GroupId).ToHashSetAsync();
+    var groupIds = (await db.GroupMembers.Where(member => member.NationalId == id).Select(member => member.GroupId).ToListAsync()).ToHashSet();
     var mine = records.Where(r => !r.IsArchived && (r.PublishToAll || (r.GroupId.HasValue && groupIds.Contains(r.GroupId.Value)) || r.GroupAssignments.Any(a => groupIds.Contains(a.GroupId)) || r.Assignments.Any(a => a.NationalId == id))).ToList();
     foreach (var resolution in mine)
     {
