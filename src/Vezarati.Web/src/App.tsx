@@ -93,7 +93,7 @@ export default function App() {
     const code = params.get("code");
     if (code) {
       window.history.replaceState({}, document.title, window.location.pathname);
-      fetch("/api/auth/sso", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) })
+      fetch("/api/auth/sso", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) })
         .then(async response => { const raw = await response.text(); if (!response.ok) throw new Error(response.status === 401 ? "کد ورود نامعتبر یا منقضی شده است؛ دوباره از درگاه وارد شوید." : raw || `ورود ناموفق بود (HTTP ${response.status}).`); const sessionResponse = await fetch("/api/auth/me", { credentials: "include" }); if (!sessionResponse.ok) throw new Error("پاسخ SSO دریافت شد اما نشست کاربر ساخته نشد."); const user = await sessionResponse.json(); if (active) { setAuthUser(user); setViewerId(user.nationalId); } })
         .catch(cause => { if (active) setError(cause instanceof Error ? cause.message : "ورود یکپارچه ناموفق بود."); })
         .finally(() => { if (active) setAuthReady(true); });
