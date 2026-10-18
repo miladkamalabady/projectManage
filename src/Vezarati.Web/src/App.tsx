@@ -234,6 +234,7 @@ export default function App() {
   const completedEnd = reportShares.completed;
   const delayedEnd = completedEnd + reportShares.delayed;
   const reportDonut = `conic-gradient(#4c9a70 0% ${completedEnd}%, #ce7068 ${completedEnd}% ${delayedEnd}%, #d7a33f ${delayedEnd}% 100%)`;
+  const activeResolutions = resolutions.filter(item => !item.isArchived);
   const reportMonths = Array.from({ length: 6 }, (_, index) => {
     const month = new Date(); month.setDate(1); month.setHours(12, 0, 0, 0); month.setMonth(month.getMonth() - 5 + index);
     const key = `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, "0")}`;
@@ -255,7 +256,6 @@ export default function App() {
   }).sort((left, right) => right.percent - left.percent || right.resolutions - left.resolutions);
   const wallItems = wallStatusFilter === "all" ? [] : mine.filter(item => { const status = isAdmin ? item.status : item.progress?.find(progress => progress.nationalId === viewerId)?.status ?? item.status; return wallStatusFilter === "pending" ? status === "before" || status === "in_progress" : status === wallStatusFilter; });
   const unreadNotifications = notifications.filter(item => !item.isRead).length;
-  const activeResolutions = resolutions.filter(item => !item.isArchived);
   const archivedResolutions = resolutions.filter(item => item.isArchived && (!archiveQuery.trim() || `${item.number} ${item.text} ${item.notes}`.toLocaleLowerCase("fa").includes(archiveQuery.trim().toLocaleLowerCase("fa"))));
   const awaitingReview = activeResolutions.flatMap(item => (item.progress ?? []).filter(progress => progress.approvalStatus === "pending" && progress.reportText).map(progress => ({ item, progress })));
 
