@@ -131,15 +131,18 @@ app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context
         if (!response.IsSuccessStatusCode)
             return new RawUpstreamResult(upstreamPayload, upstreamContentType, (int)response.StatusCode);
         using var json = JsonDocument.Parse(upstreamPayload);
-        if (!json.RootElement.TryGetProperty("resultCode", out var resultCode) || !resultCode.TryGetInt32(out var codeResult))
-            return new RawUpstreamResult(upstreamPayload, upstreamContentType, (int)response.StatusCode);
-        if (codeResult != 200)
-            return new RawUpstreamResult(upstreamPayload, upstreamContentType, (int)response.StatusCode);
-        if (!json.RootElement.TryGetProperty("data", out var data))
-            return new RawUpstreamResult(upstreamPayload, upstreamContentType, (int)response.StatusCode);
+        var root = json.RootElement;
+        if (root.TryGetProperty("resultCode", out var resultCode) && resultCode.TryGetInt32(out var codeResult) && codeResult != 200)
+            return new RawUpstreamResult(upstreamPayload, upstreamContentType ?? "application/json; charset=utf-8", StatusCodes.Status401Unauthorized);
+        var data = root;
+        if (root.TryGetProperty("data", out var nestedData) && nestedData.ValueKind == JsonValueKind.Object)
+            data = nestedData;
+        var isSuccessful = root.TryGetProperty("status", out var statusValue) && statusValue.ValueKind == JsonValueKind.True;
         string ReadString(string key) => data.TryGetProperty(key, out var value) && value.ValueKind != JsonValueKind.Null ? value.ToString() : "";
         int? ReadInt(string key) => data.TryGetProperty(key, out var value) && value.TryGetInt32(out var number) ? number : null;
         var nationalId = ReadString("nationalID").Trim();
+        if (!isSuccessful || nationalId.Length is < 8 or > 11 || !nationalId.All(char.IsDigit))
+            return new RawUpstreamResult(upstreamPayload ?? Array.Empty<byte>(), upstreamContentType ?? "application/json; charset=utf-8", StatusCodes.Status401Unauthorized);
         var firstName = ReadString("firstName").Trim();
         var lastName = ReadString("lastName").Trim();
         if (nationalId.Length is < 8 or > 11 || !nationalId.All(char.IsDigit) || firstName.Length + lastName.Length == 0) return new RawUpstreamResult(upstreamPayload, upstreamContentType, (int)response.StatusCode);
