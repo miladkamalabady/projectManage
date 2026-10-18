@@ -345,18 +345,33 @@ public static class SchemaCompatibility
         if (columns.Count > 0 && !columns.Contains("PublishToAll")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN PublishToAll INTEGER NOT NULL DEFAULT 0;");
         await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_Resolutions_SourceKey ON Resolutions (SourceKey);");
         var userColumns = await ReadColumns(db, "Users");
-        var userTextColumns = new Dictionary<string, string>
+        var userTextColumnSql = new Dictionary<string, string>
         {
-            ["FirstName"] = "", ["LastName"] = "", ["Father"] = "", ["BirthDate"] = "", ["PersianBirthDate"] = "",
-            ["Mobile"] = "", ["PersonnelCode"] = "", ["OrgPositionCode"] = "", ["OrgPositionDesc"] = "", ["OrgPositionTypeDesc"] = ""
+            ["FirstName"] = "ALTER TABLE Users ADD COLUMN FirstName TEXT NOT NULL DEFAULT '';",
+            ["LastName"] = "ALTER TABLE Users ADD COLUMN LastName TEXT NOT NULL DEFAULT '';",
+            ["Father"] = "ALTER TABLE Users ADD COLUMN Father TEXT NOT NULL DEFAULT '';",
+            ["BirthDate"] = "ALTER TABLE Users ADD COLUMN BirthDate TEXT NOT NULL DEFAULT '';",
+            ["PersianBirthDate"] = "ALTER TABLE Users ADD COLUMN PersianBirthDate TEXT NOT NULL DEFAULT '';",
+            ["Mobile"] = "ALTER TABLE Users ADD COLUMN Mobile TEXT NOT NULL DEFAULT '';",
+            ["PersonnelCode"] = "ALTER TABLE Users ADD COLUMN PersonnelCode TEXT NOT NULL DEFAULT '';",
+            ["OrgPositionCode"] = "ALTER TABLE Users ADD COLUMN OrgPositionCode TEXT NOT NULL DEFAULT '';",
+            ["OrgPositionDesc"] = "ALTER TABLE Users ADD COLUMN OrgPositionDesc TEXT NOT NULL DEFAULT '';",
+            ["OrgPositionTypeDesc"] = "ALTER TABLE Users ADD COLUMN OrgPositionTypeDesc TEXT NOT NULL DEFAULT '';"
         };
-        foreach (var (column, defaultValue) in userTextColumns)
+        foreach (var (column, sql) in userTextColumnSql)
             if (userColumns.Count > 0 && !userColumns.Contains(column))
-                await db.Database.ExecuteSqlRawAsync($"ALTER TABLE Users ADD COLUMN {column} TEXT NOT NULL DEFAULT '{defaultValue}';");
-        var userNullableColumns = new Dictionary<string, string> { ["Gender"] = "INTEGER NULL", ["UserType"] = "INTEGER NULL", ["OrgPositionTypeCode"] = "INTEGER NULL", ["RegionId"] = "INTEGER NULL", ["LastLoginAt"] = "TEXT NULL" };
-        foreach (var (column, definition) in userNullableColumns)
+                await db.Database.ExecuteSqlRawAsync(sql);
+        var userNullableColumnSql = new Dictionary<string, string>
+        {
+            ["Gender"] = "ALTER TABLE Users ADD COLUMN Gender INTEGER NULL;",
+            ["UserType"] = "ALTER TABLE Users ADD COLUMN UserType INTEGER NULL;",
+            ["OrgPositionTypeCode"] = "ALTER TABLE Users ADD COLUMN OrgPositionTypeCode INTEGER NULL;",
+            ["RegionId"] = "ALTER TABLE Users ADD COLUMN RegionId INTEGER NULL;",
+            ["LastLoginAt"] = "ALTER TABLE Users ADD COLUMN LastLoginAt TEXT NULL;"
+        };
+        foreach (var (column, sql) in userNullableColumnSql)
             if (userColumns.Count > 0 && !userColumns.Contains(column))
-                await db.Database.ExecuteSqlRawAsync($"ALTER TABLE Users ADD COLUMN {column} {definition};");
+                await db.Database.ExecuteSqlRawAsync(sql);
         var directoryColumns = await ReadColumns(db, "Directory");
         if (directoryColumns.Count > 0 && !directoryColumns.Contains("Title")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Directory ADD COLUMN Title TEXT NOT NULL DEFAULT '';");
         await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS ResolutionGroups (ResolutionId INTEGER NOT NULL, GroupId INTEGER NOT NULL, CONSTRAINT PK_ResolutionGroups PRIMARY KEY (ResolutionId, GroupId), CONSTRAINT FK_ResolutionGroups_Resolutions_ResolutionId FOREIGN KEY (ResolutionId) REFERENCES Resolutions (Id) ON DELETE CASCADE, CONSTRAINT FK_ResolutionGroups_Groups_GroupId FOREIGN KEY (GroupId) REFERENCES Groups (Id) ON DELETE CASCADE);");
