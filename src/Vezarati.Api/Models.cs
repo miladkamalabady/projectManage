@@ -388,6 +388,9 @@ public static class SchemaCompatibility
         await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS ResolutionEvents (Id INTEGER NOT NULL CONSTRAINT PK_ResolutionEvents PRIMARY KEY AUTOINCREMENT, ResolutionId INTEGER NOT NULL, NationalId TEXT NOT NULL, UserName TEXT NOT NULL, Text TEXT NOT NULL, CreatedAt TEXT NOT NULL, CONSTRAINT FK_ResolutionEvents_Resolutions_ResolutionId FOREIGN KEY (ResolutionId) REFERENCES Resolutions (Id) ON DELETE CASCADE);");
         await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS IX_ResolutionEvents_ResolutionId_CreatedAt ON ResolutionEvents (ResolutionId, CreatedAt);");
         await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS Notifications (Id INTEGER NOT NULL CONSTRAINT PK_Notifications PRIMARY KEY AUTOINCREMENT, NationalId TEXT NOT NULL, ResolutionId INTEGER NULL, Type TEXT NOT NULL, Text TEXT NOT NULL, DateKey TEXT NOT NULL DEFAULT '', IsRead INTEGER NOT NULL DEFAULT 0, CreatedAt TEXT NOT NULL);");
+        var notificationColumns = await ReadColumns(db, "Notifications");
+        if (notificationColumns.Count > 0 && !notificationColumns.Contains("DateKey")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Notifications ADD COLUMN DateKey TEXT NOT NULL DEFAULT '';");
+        if (notificationColumns.Count > 0 && !notificationColumns.Contains("IsRead")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Notifications ADD COLUMN IsRead INTEGER NOT NULL DEFAULT 0;");
         await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_Notifications_NationalId_ResolutionId_Type_DateKey ON Notifications (NationalId, ResolutionId, Type, DateKey);");
     }
 
