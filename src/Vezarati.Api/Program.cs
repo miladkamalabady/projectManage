@@ -80,7 +80,7 @@ using (var scope = app.Services.CreateScope())
 
 const string primaryAdminNationalId = "0534921973";
 
-app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context, AppDb db, IHttpClientFactory clients, IConfiguration configuration) =>
+app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context, AppDb db, IHttpClientFactory clients, IConfiguration configuration, ILogger<Program> logger) =>
 {
     var code = request.Code?.Trim();
     if (string.IsNullOrWhiteSpace(code) || code.Length > 4096) return Results.BadRequest(new { error = "کد ورود نامعتبر است." });
@@ -129,18 +129,26 @@ app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context
         var upstreamPayload = await response.Content.ReadAsByteArrayAsync(context.RequestAborted);
         var upstreamContentType = response.Content.Headers.ContentType?.ToString();
         if (!response.IsSuccessStatusCode)
-            return Results.StatusCode((int)response.StatusCode);
+        {
+            logger.LogWarning("Medu SSO returned HTTP {UpstreamStatus}.", (int)response.StatusCode);
+            return Results.StatusCode(StatusCodes.Status401Unauthorized);
+        }
         using var json = JsonDocument.Parse(upstreamPayload);
         var root = json.RootElement;
-        var ssoError = root.TryGetProperty("resultCode", out var resultCode) && resultCode.TryGetInt32(out var codeResult) && codeResult != 200;
-        if (ssoError)
+        var hasResultCode = root.TryGetProperty("resultCode", out var resultCode) && resultCode.TryGetInt32(out var codeResult);
+        if (hasResultCode && codeResult != 200)
         {
+            logger.LogWarning("Medu SSO rejected the code with resultCode {ResultCode}.", codeResult);
             return Results.StatusCode(StatusCodes.Status401Unauthorized);
         }
         var data = root;
-        if (root.TryGetProperty("data", out var nestedData) && nestedData.ValueKind == JsonValueKind.Object)
+        var hasNestedData = root.TryGetProperty("data", out var nestedData) && nestedData.ValueKind == JsonValueKind.Object;
+        if (hasNestedData)
             data = nestedData;
-        var isSuccessful = root.TryGetProperty("status", out var statusValue) && statusValue.ValueKind == JsonValueKind.True;
+        var hasStatus = root.TryGetProperty("status", out var statusValue) && statusValue.ValueKind == JsonValueKind.True;
+        var isSuccessful = hasStatus || (hasResultCode && codeResult == 200 && hasNestedData && nestedData.TryGetProperty("nationalID", out _));
+        if (!isSuccessful)
+            logger.LogWarning("Medu SSO response did not match a supported success shape (has status: {HasStatus}, nested data: {HasNestedData}).", root.TryGetProperty("status", out _), hasNestedData);
         string ReadString(string key) => data.TryGetProperty(key, out var value) && value.ValueKind != JsonValueKind.Null ? value.ToString() : "";
         int? ReadInt(string key) => data.TryGetProperty(key, out var value) && value.TryGetInt32(out var number) ? number : null;
         var nationalId = ReadString("nationalID").Trim();
