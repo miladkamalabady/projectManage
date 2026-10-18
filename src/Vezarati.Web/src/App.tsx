@@ -94,7 +94,7 @@ export default function App() {
     if (code) {
       window.history.replaceState({}, document.title, window.location.pathname);
       fetch("/api/auth/sso", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) })
-        .then(async response => { const result = await response.json(); if (!response.ok) throw new Error(result?.error || "ورود یکپارچه ناموفق بود."); if (active) { setAuthUser(result); setViewerId(result.nationalId); } })
+        .then(async response => { const result = await response.json(); if (!response.ok) throw new Error([result?.error, result?.upstreamMessage].filter(Boolean).join(" — ") || "ورود یکپارچه ناموفق بود."); if (active) { setAuthUser(result); setViewerId(result.nationalId); } })
         .catch(cause => { if (active) setError(cause instanceof Error ? cause.message : "ورود یکپارچه ناموفق بود."); })
         .finally(() => { if (active) setAuthReady(true); });
     } else {
