@@ -132,7 +132,8 @@ app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context
             return new RawUpstreamResult(upstreamPayload, upstreamContentType, (int)response.StatusCode);
         using var json = JsonDocument.Parse(upstreamPayload);
         var root = json.RootElement;
-        if (root.TryGetProperty("resultCode", out var resultCode) && resultCode.TryGetInt32(out var codeResult) && codeResult != 200)
+        var ssoError = root.TryGetProperty("resultCode", out var resultCode) && resultCode.TryGetInt32(out var codeResult) && codeResult != 200;
+        if (ssoError)
         {
             var errorBody = System.Text.Encoding.UTF8.GetBytes(root.TryGetProperty("data", out var errorData) && errorData.ValueKind == JsonValueKind.String ? errorData.GetString() ?? "" : System.Text.Encoding.UTF8.GetString(upstreamPayload));
             return new RawUpstreamResult(errorBody, "text/plain; charset=utf-8", StatusCodes.Status401Unauthorized);
