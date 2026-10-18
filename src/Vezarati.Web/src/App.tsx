@@ -14,6 +14,27 @@ type Resolution = { publishToAll?: boolean; isArchived?: boolean; updatedAt?: st
 type DirectoryUser = { nationalId: string; displayName: string; title?: string; province?: string | null };
 type Dashboard = { currentUser: { nationalId: string; displayName: string; role: string }; groups: Group[]; resolutions: Resolution[] };
 type AuthUser = { nationalId: string; displayName: string; role: string; title?: string; province?: string | null };
+
+let pendingSsoLogin: { code: string; task: Promise<AuthUser> } | null = null;
+function loginWithSso(code: string): Promise<AuthUser> {
+  if (pendingSsoLogin?.code === code) return pendingSsoLogin.task;
+  const task = (async () => {
+    const response = await fetch("/api/auth/sso", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) });
+    const body = await response.text();
+    if (!response.ok) throw new Error(response.status === 401 ? "کد ورود نامعتبر یا منقضی شده است؛ دوباره از درگاه وارد شوید." : body || `ورود ناموفق بود (HTTP ${response.status}).`);
+    let sessionResponse: Response | null = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      sessionResponse = await fetch("/api/auth/me", { credentials: "include", cache: "no-store" });
+      if (sessionResponse.ok) return await sessionResponse.json() as AuthUser;
+      if (sessionResponse.status !== 401) break;
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    throw new Error("ورود SSO انجام شد اما نشست کاربر دریافت نشد؛ دوباره تلاش کنید.");
+  })();
+  pendingSsoLogin = { code, task };
+  void task.then(() => { if (pendingSsoLogin?.task === task) pendingSsoLogin = null; }, () => { if (pendingSsoLogin?.task === task) pendingSsoLogin = null; });
+  return task;
+}
 type Report = { total: number; completed: number; delayed: number; pending: number; people: { nationalId: string; displayName: string; total: number; completed: number; delayed: number; pending: number; title?: string }[] };
 
 const labels: Record<string, string> = { before: "قبل از اجرا", in_progress: "در حال اجرا", completed: "اجرا شده", delayed: "دارای تأخیر" };
@@ -90,22 +111,24 @@ export default function App() {
   useEffect(() => {
     let active = true;
     const params = new URLSearchParams(window.location.search);
-    const code = params.get("code");
+    const queryCode = params.get("code");
+    const storedCode = sessionStorage.getItem("vezarati.pendingSsoCode");
+    const code = queryCode || storedCode;
     if (code) {
-      window.history.replaceState({}, document.title, window.location.pathname);
-      fetch("/api/auth/sso", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) })
-        .then(async response => { const raw = await response.text(); if (!response.ok) throw new Error(response.status === 401 ? "کد ورود نامعتبر یا منقضی شده است؛ دوباره از درگاه وارد شوید." : raw || `ورود ناموفق بود (HTTP ${response.status}).`); const sessionResponse = await fetch("/api/auth/me", { credentials: "include" }); if (!sessionResponse.ok) throw new Error("پاسخ SSO دریافت شد اما نشست کاربر ساخته نشد."); const user = await sessionResponse.json(); if (active) { setAuthUser(user); setViewerId(user.nationalId); } })
-        .catch(cause => { if (active) setError(cause instanceof Error ? cause.message : "ورود یکپارچه ناموفق بود."); })
+      sessionStorage.setItem("vezarati.pendingSsoCode", code);
+      if (queryCode) window.history.replaceState({}, document.title, window.location.pathname);
+      loginWithSso(code)
+        .then(user => { sessionStorage.removeItem("vezarati.pendingSsoCode"); if (active) { setAuthUser(user); setViewerId(user.nationalId); } })
+        .catch(cause => { sessionStorage.removeItem("vezarati.pendingSsoCode"); if (active) setError(cause instanceof Error ? cause.message : "ورود یکپارچه ناموفق بود."); })
         .finally(() => { if (active) setAuthReady(true); });
     } else {
-      fetch("/api/auth/me").then(async response => { if (!response.ok) throw new Error("ورود لازم است."); return response.json(); })
+      fetch("/api/auth/me", { credentials: "include", cache: "no-store" }).then(async response => { if (!response.ok) throw new Error("ورود لازم است."); return response.json(); })
         .then(user => { if (active) { setAuthUser(user); setViewerId(user.nationalId); } })
         .catch(() => { if (active) { setAuthUser(null); setViewerId(""); } })
         .finally(() => { if (active) setAuthReady(true); });
     }
     return () => { active = false; };
-  }, []);
-  useEffect(() => { if (authUser) void load(); }, [authUser?.nationalId]);
+  }, []);  useEffect(() => { if (authUser) void load(); }, [authUser?.nationalId]);
 
 
   async function uploadAttachment(resolutionId: number, file: File) {
