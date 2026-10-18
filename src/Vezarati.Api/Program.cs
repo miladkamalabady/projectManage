@@ -78,7 +78,7 @@ using (var scope = app.Services.CreateScope())
     await SeedData.Initialize(db, scope.ServiceProvider.GetRequiredService<IWebHostEnvironment>());
 }
 
-const primaryAdminNationalId = "0534921973";
+const string primaryAdminNationalId = "0534921973";
 
 app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context, AppDb db, IHttpClientFactory clients, IConfiguration configuration) =>
 {
