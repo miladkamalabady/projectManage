@@ -389,8 +389,19 @@ public static class SchemaCompatibility
         await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS IX_ResolutionEvents_ResolutionId_CreatedAt ON ResolutionEvents (ResolutionId, CreatedAt);");
         await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS Notifications (Id INTEGER NOT NULL CONSTRAINT PK_Notifications PRIMARY KEY AUTOINCREMENT, NationalId TEXT NOT NULL, ResolutionId INTEGER NULL, Type TEXT NOT NULL, Text TEXT NOT NULL, DateKey TEXT NOT NULL DEFAULT '', IsRead INTEGER NOT NULL DEFAULT 0, CreatedAt TEXT NOT NULL);");
         var notificationColumns = await ReadColumns(db, "Notifications");
-        if (notificationColumns.Count > 0 && !notificationColumns.Contains("DateKey")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Notifications ADD COLUMN DateKey TEXT NOT NULL DEFAULT '';");
-        if (notificationColumns.Count > 0 && !notificationColumns.Contains("IsRead")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Notifications ADD COLUMN IsRead INTEGER NOT NULL DEFAULT 0;");
+        var notificationColumnSql = new Dictionary<string, string>
+        {
+            ["NationalId"] = "ALTER TABLE Notifications ADD COLUMN NationalId TEXT NOT NULL DEFAULT '';",
+            ["ResolutionId"] = "ALTER TABLE Notifications ADD COLUMN ResolutionId INTEGER NULL;",
+            ["Type"] = "ALTER TABLE Notifications ADD COLUMN Type TEXT NOT NULL DEFAULT '';",
+            ["Text"] = "ALTER TABLE Notifications ADD COLUMN Text TEXT NOT NULL DEFAULT '';",
+            ["DateKey"] = "ALTER TABLE Notifications ADD COLUMN DateKey TEXT NOT NULL DEFAULT '';",
+            ["IsRead"] = "ALTER TABLE Notifications ADD COLUMN IsRead INTEGER NOT NULL DEFAULT 0;",
+            ["CreatedAt"] = "ALTER TABLE Notifications ADD COLUMN CreatedAt TEXT NOT NULL DEFAULT '1970-01-01T00:00:00+00:00';"
+        };
+        foreach (var (column, sql) in notificationColumnSql)
+            if (notificationColumns.Count > 0 && !notificationColumns.Contains(column))
+                await db.Database.ExecuteSqlRawAsync(sql);
         await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_Notifications_NationalId_ResolutionId_Type_DateKey ON Notifications (NationalId, ResolutionId, Type, DateKey);");
     }
 
