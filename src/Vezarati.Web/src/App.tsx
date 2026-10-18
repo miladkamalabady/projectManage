@@ -94,7 +94,7 @@ export default function App() {
     if (code) {
       window.history.replaceState({}, document.title, window.location.pathname);
       fetch("/api/auth/sso", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) })
-        .then(async response => { const raw = await response.text(); let result: any; try { result = JSON.parse(raw); } catch { result = null; } if (!response.ok) throw new Error(raw || `پاسخ سرویس SSO: HTTP ${response.status}`); if (!result || result.resultCode !== 200) throw new Error(raw || "پاسخ سرویس SSO نامعتبر است."); const sessionResponse = await fetch("/api/auth/me", { credentials: "include" }); if (!sessionResponse.ok) throw new Error("پاسخ SSO دریافت شد اما نشست کاربر ساخته نشد."); const user = await sessionResponse.json(); if (active) { setAuthUser(user); setViewerId(user.nationalId); } })
+        .then(async response => { const raw = await response.text(); if (!response.ok) throw new Error(raw || `ورود ناموفق بود (HTTP ${response.status}).`); const sessionResponse = await fetch("/api/auth/me", { credentials: "include" }); if (!sessionResponse.ok) throw new Error("پاسخ SSO دریافت شد اما نشست کاربر ساخته نشد."); const user = await sessionResponse.json(); if (active) { setAuthUser(user); setViewerId(user.nationalId); } })
         .catch(cause => { if (active) setError(cause instanceof Error ? cause.message : "ورود یکپارچه ناموفق بود."); })
         .finally(() => { if (active) setAuthReady(true); });
     } else {
