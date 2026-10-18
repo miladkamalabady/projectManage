@@ -265,7 +265,7 @@ export default function App() {
   return <div className="shell">
     <aside className="sidebar">
       <div className="brand"><span className="brand-icon"><ShieldCheck /></span><div><b>دفتر وزارتی</b><small>سامانه پیگیری مصوبات</small></div></div>
-      <div className="profile"><div className="avatar">{dashboard?.currentUser.displayName?.[0] || "م"}</div><div><b>{dashboard?.currentUser.displayName || "مدیر دفتر وزارتی"}</b><small>دسترسی: {authUser.role}</small><button className="logout-btn" onClick={() => void logout()}>خروج</button></div></div>
+      <div className="profile"><div className="avatar">{authUser.displayName?.[0] || "م"}</div><div><b>{authUser.displayName || dashboard?.currentUser.displayName || "کاربر"}</b><small>نقش: {authUser.role}</small><small>سمت: {authUser.title || "سمت ثبت نشده"}</small><button className="logout-btn" onClick={() => void logout()}>خروج</button></div></div>
       <nav>{[["wall", LayoutDashboard, "دیواره من"], ["notifications", Bell, `اعلان‌ها ${notifications.filter(item=>!item.isRead).length ? "(" + notifications.filter(item=>!item.isRead).length + ")" : ""}`], ["resolutions", ClipboardList, "مصوبات"], ...(isAdmin ? [["archive", Archive, "بایگانی"], ["groups", Users, "گروه‌ها و اعضا"], ["reports", FileText, "گزارش‌ها"]] : [])].map(([key, Icon, title]: any) => <button key={key} className={`nav ${tab === key ? "active" : ""}`} onClick={() => setTab(key)}><Icon size={18} />{title}</button>)}</nav>
       <div className="sidebar-foot">محیط پیگیری اجرایی<br /><span>دفتر وزارتی</span></div>
     </aside>
