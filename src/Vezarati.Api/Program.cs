@@ -449,7 +449,7 @@ app.MapPatch("/api/resolutions/{id:int}/archive", async (int id, ArchiveUpdateRe
     return Results.Ok(resolution);
 });
 
-app.MapGet("/api/notifications", async (HttpContext context, AppDb db) =>
+app.MapGet("/api/notifications", async (HttpContext context, AppDb db, ILogger<Program> logger) =>
 {
     var nationalId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
     var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3.5));
@@ -472,7 +472,12 @@ app.MapGet("/api/notifications", async (HttpContext context, AppDb db) =>
         if (!await db.Notifications.AnyAsync(notification => notification.NationalId == nationalId && notification.ResolutionId == item.Id && notification.Type == type && notification.DateKey == dateKey))
             db.Notifications.Add(new UserNotification { NationalId = nationalId, ResolutionId = item.Id, Type = type, DateKey = dateKey, Text = overdue ? "مهلت مصوبه " + item.Number + " گذشته است." : "مهلت مصوبه " + item.Number + " نزدیک است.", CreatedAt = DateTimeOffset.UtcNow });
     }
-    await db.SaveChangesAsync();
+    try { await db.SaveChangesAsync(); }
+    catch (DbUpdateException exception)
+    {
+        logger.LogInformation(exception, "A concurrent notification insert was ignored.");
+        db.ChangeTracker.Clear();
+    }
     var notifications = await db.Notifications.Where(notification => notification.NationalId == nationalId).OrderByDescending(notification => notification.CreatedAt).Take(100).ToListAsync();
     var resolutionIds = notifications.Where(notification => notification.ResolutionId.HasValue).Select(notification => notification.ResolutionId!.Value).Distinct().ToList();
     var numbers = await db.Resolutions.Where(item => resolutionIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, item => item.Number);
