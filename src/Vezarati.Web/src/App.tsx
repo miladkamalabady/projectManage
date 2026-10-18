@@ -77,7 +77,7 @@ export default function App() {
     setError("");
     try {
       const [dashboardResponse, resolutionsResponse, groupsResponse, reportsResponse, usersResponse, notificationsResponse] = await Promise.all([
-        fetch("/api/dashboard"), fetch("/api/resolutions"), fetch("/api/groups"), fetch("/api/reports"), isAdmin ? fetch("/api/users") : Promise.resolve(new Response("[]", { status: 200 })), fetch("/api/notifications")
+        fetch("/api/dashboard"), fetch("/api/resolutions"), fetch("/api/groups"), fetch("/api/reports"), isAdmin ? fetch("/api/users") : Promise.resolve(new Response(JSON.stringify({ total: 0, completed: 0, delayed: 0, pending: 0, people: [] }), { status: 200 })), fetch("/api/notifications")
       ]);
       for (const response of [dashboardResponse, resolutionsResponse, groupsResponse, reportsResponse, usersResponse, notificationsResponse]) if (!response.ok) throw new Error(response.status === 401 ? "نشست شما منقضی شده است." : "گرفتن اطلاعات از API ناموفق بود.");
       setDashboard(await dashboardResponse.json()); setResolutions(await resolutionsResponse.json()); setGroups(await groupsResponse.json()); setReports(await reportsResponse.json()); setUsers(await usersResponse.json()); setNotifications(await notificationsResponse.json());
