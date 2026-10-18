@@ -97,11 +97,36 @@ app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context
         {
             var upstreamStatus = (int)response.StatusCode;
             var userMessage = upstreamStatus == StatusCodes.Status400BadRequest
-                ? "سرویس SSO درخواست را نامعتبر دانست (HTTP 400). کد باید معتبر و منقضی‌نشده باشد و هدرهای code و Authorization باید مطابق قرارداد سرویس باشند."
+                ? "سرویس SSO درخواست را نامعتبر دانست."
                 : upstreamStatus is StatusCodes.Status401Unauthorized or StatusCodes.Status403Forbidden
-                    ? "سرویس SSO احراز هویت را نپذیرفت. پیکربندی Authorization را بررسی کنید."
+                    ? "سرویس SSO احراز هویت را نپذیرفت."
                     : $"سرویس SSO با وضعیت HTTP {upstreamStatus} پاسخ داد.";
-            return Results.Json(new { error = userMessage, upstreamStatus }, statusCode: StatusCodes.Status502BadGateway);
+            string? upstreamMessage = null;
+            try
+            {
+                var upstreamBody = await response.Content.ReadAsStringAsync(context.RequestAborted);
+                using var errorJson = JsonDocument.Parse(upstreamBody);
+                foreach (var key in new[] { "message", "error_description", "error", "detail", "title" })
+                {
+                    if (errorJson.RootElement.ValueKind == JsonValueKind.Object &&
+                        errorJson.RootElement.TryGetProperty(key, out var messageValue) &&
+                        messageValue.ValueKind == JsonValueKind.String)
+                    {
+                        upstreamMessage = messageValue.GetString();
+                        break;
+                    }
+                }
+            }
+            catch { }
+            if (!string.IsNullOrWhiteSpace(upstreamMessage))
+            {
+                upstreamMessage = upstreamMessage.Replace(code, "[حذف شد]", StringComparison.Ordinal);
+                upstreamMessage = upstreamMessage.Replace(authorization, "[حذف شد]", StringComparison.Ordinal);
+                var encodedCredential = authorization.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase) ? authorization[6..] : "";
+                if (encodedCredential.Length > 0) upstreamMessage = upstreamMessage.Replace(encodedCredential, "[حذف شد]", StringComparison.Ordinal);
+                upstreamMessage = new string(upstreamMessage.Where(character => !char.IsControl(character)).Take(500).ToArray());
+            }
+            return Results.Json(new { error = userMessage, upstreamStatus, upstreamMessage }, statusCode: StatusCodes.Status502BadGateway);
         }
         await using var stream = await response.Content.ReadAsStreamAsync(context.RequestAborted);
         using var json = await JsonDocument.ParseAsync(stream, cancellationToken: context.RequestAborted);
