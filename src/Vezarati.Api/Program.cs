@@ -14,7 +14,7 @@ builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 
 builder.Services.Configure<FormOptions>(options => options.MultipartBodyLengthLimit = maxAttachmentSize);
 builder.Services.AddDbContext<AppDb>(options => options.UseSqlite(builder.Configuration.GetConnectionString("Default") ?? "Data Source=data/vezarati.db"));
 builder.Services.AddScoped<NationalIdLookup, LocalNationalIdLookup>();
-builder.Services.AddHttpClient("MeduSso", client => client.Timeout = TimeSpan.FromSeconds(20));
+builder.Services.AddHttpClient("MeduSso", client => client.Timeout = TimeSpan.FromSeconds(20)).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme).AddCookie(options =>
 {
     options.Cookie.Name = "vezarati.auth";
@@ -88,11 +88,44 @@ app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context
     if (string.IsNullOrWhiteSpace(authorization)) return Results.Problem("تنظیم اتصال SSO روی سرور انجام نشده است.", statusCode: StatusCodes.Status503ServiceUnavailable);
     try
     {
-        using var message = new HttpRequestMessage(HttpMethod.Post, configuration["SSO:UserInfoUrl"] ?? "http://my1.medu.ir/api/sso/UserInfo");
-        message.Content = new ByteArrayContent(Array.Empty<byte>());
-        message.Headers.TryAddWithoutValidation("code", code);
-        message.Headers.Authorization = AuthenticationHeaderValue.Parse(authorization);
-        using var response = await clients.CreateClient("MeduSso").SendAsync(message, HttpCompletionOption.ResponseHeadersRead, context.RequestAborted);
+        var currentUri = new Uri(configuration["SSO:UserInfoUrl"] ?? "http://my1.medu.ir/api/sso/UserInfo");
+        using var client = clients.CreateClient("MeduSso");
+        HttpResponseMessage? pendingResponse = null;
+        for (var redirectCount = 0; redirectCount <= 5; redirectCount++)
+        {
+            using var message = new HttpRequestMessage(HttpMethod.Post, currentUri);
+            message.Content = new ByteArrayContent(Array.Empty<byte>());
+            message.Headers.Accept.ParseAdd("*/*");
+            message.Headers.TryAddWithoutValidation("code", code);
+            message.Headers.Authorization = AuthenticationHeaderValue.Parse(authorization);
+            pendingResponse = await client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, context.RequestAborted);
+            var location = pendingResponse.Headers.Location;
+            var isRedirect = pendingResponse.StatusCode is System.Net.HttpStatusCode.MovedPermanently
+                or System.Net.HttpStatusCode.Redirect
+                or System.Net.HttpStatusCode.SeeOther
+                or System.Net.HttpStatusCode.TemporaryRedirect
+                or System.Net.HttpStatusCode.PermanentRedirect;
+            if (!isRedirect || location is null) break;
+            if (redirectCount == 5)
+            {
+                pendingResponse.Dispose();
+                return Results.Json(new { error = "سرویس SSO تعداد redirect بیش از حد مجاز برگرداند." }, statusCode: StatusCodes.Status502BadGateway);
+            }
+            var nextUri = location.IsAbsoluteUri ? location : new Uri(currentUri, location);
+            var sameHost = string.Equals(currentUri.Host, nextUri.Host, StringComparison.OrdinalIgnoreCase);
+            var safeSchemeChange = currentUri.Scheme == nextUri.Scheme ||
+                (currentUri.Scheme == Uri.UriSchemeHttp && nextUri.Scheme == Uri.UriSchemeHttps);
+            if (!sameHost || !safeSchemeChange || nextUri.UserInfo.Length > 0)
+            {
+                pendingResponse.Dispose();
+                return Results.Json(new { error = "سرویس SSO به نشانی ناامن یا میزبان دیگری redirect داد؛ اعتبارنامه ارسال نشد." }, statusCode: StatusCodes.Status502BadGateway);
+            }
+            pendingResponse.Dispose();
+            pendingResponse = null;
+            currentUri = nextUri;
+        }
+        if (pendingResponse is null) return Results.Json(new { error = "پاسخی از سرویس SSO دریافت نشد." }, statusCode: StatusCodes.Status502BadGateway);
+        using var response = pendingResponse;
         if (!response.IsSuccessStatusCode)
         {
             var upstreamStatus = (int)response.StatusCode;
@@ -102,9 +135,10 @@ app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context
                     ? "سرویس SSO احراز هویت را نپذیرفت."
                     : $"سرویس SSO با وضعیت HTTP {upstreamStatus} پاسخ داد.";
             string? upstreamMessage = null;
+            var upstreamBody = "";
             try
             {
-                var upstreamBody = await response.Content.ReadAsStringAsync(context.RequestAborted);
+                upstreamBody = await response.Content.ReadAsStringAsync(context.RequestAborted);
                 using var errorJson = JsonDocument.Parse(upstreamBody);
                 foreach (var key in new[] { "message", "error_description", "error", "detail", "title" })
                 {
@@ -118,6 +152,8 @@ app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context
                 }
             }
             catch { }
+            if (string.IsNullOrWhiteSpace(upstreamMessage) && !string.IsNullOrWhiteSpace(upstreamBody))
+                upstreamMessage = upstreamBody;
             if (!string.IsNullOrWhiteSpace(upstreamMessage))
             {
                 upstreamMessage = upstreamMessage.Replace(code, "[حذف شد]", StringComparison.Ordinal);
@@ -126,7 +162,7 @@ app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context
                 if (encodedCredential.Length > 0) upstreamMessage = upstreamMessage.Replace(encodedCredential, "[حذف شد]", StringComparison.Ordinal);
                 upstreamMessage = new string(upstreamMessage.Where(character => !char.IsControl(character)).Take(500).ToArray());
             }
-            return Results.Json(new { error = userMessage, upstreamStatus, upstreamMessage }, statusCode: StatusCodes.Status502BadGateway);
+            return Results.Json(new { error = userMessage, upstreamStatus, upstreamUrl = response.RequestMessage?.RequestUri?.GetLeftPart(UriPartial.Path), upstreamContentType = response.Content.Headers.ContentType?.MediaType, upstreamMessage }, statusCode: StatusCodes.Status502BadGateway);
         }
         await using var stream = await response.Content.ReadAsStreamAsync(context.RequestAborted);
         using var json = await JsonDocument.ParseAsync(stream, cancellationToken: context.RequestAborted);
