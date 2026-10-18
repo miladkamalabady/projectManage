@@ -184,7 +184,7 @@ app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context
         };
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme));
         await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal, new AuthenticationProperties { IsPersistent = true, ExpiresUtc = DateTimeOffset.UtcNow.AddHours(8) });
-        return Results.Content(System.Text.Encoding.UTF8.GetString(upstreamPayload), upstreamContentType ?? "application/json; charset=utf-8", System.Text.Encoding.UTF8, (int)response.StatusCode);
+        return Results.NoContent();
     }
     catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested) { return Results.NoContent(); }
     catch { return Results.Problem("ارتباط با سرویس ورود برقرار نشد.", statusCode: StatusCodes.Status502BadGateway); }
