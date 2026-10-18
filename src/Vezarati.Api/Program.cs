@@ -89,14 +89,28 @@ app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context
     try
     {
         using var message = new HttpRequestMessage(HttpMethod.Post, configuration["SSO:UserInfoUrl"] ?? "http://my1.medu.ir/api/sso/UserInfo");
+        message.Content = new ByteArrayContent(Array.Empty<byte>());
         message.Headers.TryAddWithoutValidation("code", code);
         message.Headers.Authorization = AuthenticationHeaderValue.Parse(authorization);
         using var response = await clients.CreateClient("MeduSso").SendAsync(message, HttpCompletionOption.ResponseHeadersRead, context.RequestAborted);
-        if (!response.IsSuccessStatusCode) return Results.Unauthorized();
+        if (!response.IsSuccessStatusCode)
+        {
+            var upstreamStatus = (int)response.StatusCode;
+            var userMessage = upstreamStatus == StatusCodes.Status400BadRequest
+                ? "سرویس SSO درخواست را نامعتبر دانست (HTTP 400). کد باید معتبر و منقضی‌نشده باشد و هدرهای code و Authorization باید مطابق قرارداد سرویس باشند."
+                : upstreamStatus is StatusCodes.Status401Unauthorized or StatusCodes.Status403Forbidden
+                    ? "سرویس SSO احراز هویت را نپذیرفت. پیکربندی Authorization را بررسی کنید."
+                    : $"سرویس SSO با وضعیت HTTP {upstreamStatus} پاسخ داد.";
+            return Results.Json(new { error = userMessage, upstreamStatus }, statusCode: StatusCodes.Status502BadGateway);
+        }
         await using var stream = await response.Content.ReadAsStreamAsync(context.RequestAborted);
         using var json = await JsonDocument.ParseAsync(stream, cancellationToken: context.RequestAborted);
-        if (!json.RootElement.TryGetProperty("resultCode", out var resultCode) || !resultCode.TryGetInt32(out var codeResult) || codeResult != 200 ||
-            !json.RootElement.TryGetProperty("data", out var data)) return Results.Unauthorized();
+        if (!json.RootElement.TryGetProperty("resultCode", out var resultCode) || !resultCode.TryGetInt32(out var codeResult))
+            return Results.Json(new { error = "پاسخ سرویس SSO قالب قابل‌قبولی ندارد." }, statusCode: StatusCodes.Status502BadGateway);
+        if (codeResult != 200)
+            return Results.Json(new { error = $"سرویس SSO کد نتیجه {codeResult} را برگرداند.", upstreamResultCode = codeResult }, statusCode: StatusCodes.Status502BadGateway);
+        if (!json.RootElement.TryGetProperty("data", out var data))
+            return Results.Json(new { error = "اطلاعات کاربر در پاسخ سرویس SSO وجود ندارد." }, statusCode: StatusCodes.Status502BadGateway);
         string ReadString(string key) => data.TryGetProperty(key, out var value) && value.ValueKind != JsonValueKind.Null ? value.ToString() : "";
         int? ReadInt(string key) => data.TryGetProperty(key, out var value) && value.TryGetInt32(out var number) ? number : null;
         var nationalId = ReadString("nationalID").Trim();
