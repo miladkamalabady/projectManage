@@ -134,7 +134,22 @@ public sealed class AppUser
     public int Id { get; set; }
     public string NationalId { get; set; } = "";
     public string DisplayName { get; set; } = "";
-    public string Role { get; set; } = "";
+    public string Role { get; set; } = "کاربر";
+    public string FirstName { get; set; } = "";
+    public string LastName { get; set; } = "";
+    public string Father { get; set; } = "";
+    public int? Gender { get; set; }
+    public string BirthDate { get; set; } = "";
+    public string PersianBirthDate { get; set; } = "";
+    public string Mobile { get; set; } = "";
+    public int? UserType { get; set; }
+    public string PersonnelCode { get; set; } = "";
+    public string OrgPositionCode { get; set; } = "";
+    public string OrgPositionDesc { get; set; } = "";
+    public int? OrgPositionTypeCode { get; set; }
+    public string OrgPositionTypeDesc { get; set; } = "";
+    public int? RegionId { get; set; }
+    public DateTimeOffset? LastLoginAt { get; set; }
 }
 
 public sealed class AppDb(DbContextOptions<AppDb> options) : DbContext(options)
@@ -329,6 +344,19 @@ public static class SchemaCompatibility
         if (columns.Count > 0 && !columns.Contains("IsArchived")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN IsArchived INTEGER NOT NULL DEFAULT 0;");
         if (columns.Count > 0 && !columns.Contains("PublishToAll")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN PublishToAll INTEGER NOT NULL DEFAULT 0;");
         await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_Resolutions_SourceKey ON Resolutions (SourceKey);");
+        var userColumns = await ReadColumns(db, "Users");
+        var userTextColumns = new Dictionary<string, string>
+        {
+            ["FirstName"] = "", ["LastName"] = "", ["Father"] = "", ["BirthDate"] = "", ["PersianBirthDate"] = "",
+            ["Mobile"] = "", ["PersonnelCode"] = "", ["OrgPositionCode"] = "", ["OrgPositionDesc"] = "", ["OrgPositionTypeDesc"] = ""
+        };
+        foreach (var (column, defaultValue) in userTextColumns)
+            if (userColumns.Count > 0 && !userColumns.Contains(column))
+                await db.Database.ExecuteSqlRawAsync($"ALTER TABLE Users ADD COLUMN {column} TEXT NOT NULL DEFAULT '{defaultValue}';");
+        var userNullableColumns = new Dictionary<string, string> { ["Gender"] = "INTEGER NULL", ["UserType"] = "INTEGER NULL", ["OrgPositionTypeCode"] = "INTEGER NULL", ["RegionId"] = "INTEGER NULL", ["LastLoginAt"] = "TEXT NULL" };
+        foreach (var (column, definition) in userNullableColumns)
+            if (userColumns.Count > 0 && !userColumns.Contains(column))
+                await db.Database.ExecuteSqlRawAsync($"ALTER TABLE Users ADD COLUMN {column} {definition};");
         var directoryColumns = await ReadColumns(db, "Directory");
         if (directoryColumns.Count > 0 && !directoryColumns.Contains("Title")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Directory ADD COLUMN Title TEXT NOT NULL DEFAULT '';");
         await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS ResolutionGroups (ResolutionId INTEGER NOT NULL, GroupId INTEGER NOT NULL, CONSTRAINT PK_ResolutionGroups PRIMARY KEY (ResolutionId, GroupId), CONSTRAINT FK_ResolutionGroups_Resolutions_ResolutionId FOREIGN KEY (ResolutionId) REFERENCES Resolutions (Id) ON DELETE CASCADE, CONSTRAINT FK_ResolutionGroups_Groups_GroupId FOREIGN KEY (GroupId) REFERENCES Groups (Id) ON DELETE CASCADE);");
