@@ -129,14 +129,13 @@ app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context
         var upstreamPayload = await response.Content.ReadAsByteArrayAsync(context.RequestAborted);
         var upstreamContentType = response.Content.Headers.ContentType?.ToString();
         if (!response.IsSuccessStatusCode)
-            return new RawUpstreamResult(upstreamPayload, upstreamContentType, (int)response.StatusCode);
+            return Results.StatusCode((int)response.StatusCode);
         using var json = JsonDocument.Parse(upstreamPayload);
         var root = json.RootElement;
         var ssoError = root.TryGetProperty("resultCode", out var resultCode) && resultCode.TryGetInt32(out var codeResult) && codeResult != 200;
         if (ssoError)
         {
-            var errorBody = System.Text.Encoding.UTF8.GetBytes(root.TryGetProperty("data", out var errorData) && errorData.ValueKind == JsonValueKind.String ? errorData.GetString() ?? "" : System.Text.Encoding.UTF8.GetString(upstreamPayload));
-            return new RawUpstreamResult(errorBody, "text/plain; charset=utf-8", StatusCodes.Status401Unauthorized);
+            return Results.StatusCode(StatusCodes.Status401Unauthorized);
         }
         var data = root;
         if (root.TryGetProperty("data", out var nestedData) && nestedData.ValueKind == JsonValueKind.Object)
@@ -146,10 +145,10 @@ app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context
         int? ReadInt(string key) => data.TryGetProperty(key, out var value) && value.TryGetInt32(out var number) ? number : null;
         var nationalId = ReadString("nationalID").Trim();
         if (!isSuccessful || nationalId.Length is < 8 or > 11 || !nationalId.All(char.IsDigit))
-            return new RawUpstreamResult(upstreamPayload ?? Array.Empty<byte>(), upstreamContentType ?? "application/json; charset=utf-8", StatusCodes.Status401Unauthorized);
+            return Results.StatusCode(StatusCodes.Status401Unauthorized);
         var firstName = ReadString("firstName").Trim();
         var lastName = ReadString("lastName").Trim();
-        if (nationalId.Length is < 8 or > 11 || !nationalId.All(char.IsDigit) || firstName.Length + lastName.Length == 0) return new RawUpstreamResult(upstreamPayload, upstreamContentType, (int)response.StatusCode);
+        if (nationalId.Length is < 8 or > 11 || !nationalId.All(char.IsDigit) || firstName.Length + lastName.Length == 0) return Results.StatusCode(StatusCodes.Status401Unauthorized);
         var displayName = string.Join(" ", new[] { firstName, lastName }.Where(value => value.Length > 0));
         var position = ReadString("orgPositionDesc");
         var user = await db.Users.FirstOrDefaultAsync(item => item.NationalId == nationalId, context.RequestAborted);
