@@ -135,7 +135,8 @@ app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context
         }
         using var json = JsonDocument.Parse(upstreamPayload);
         var root = json.RootElement;
-        var hasResultCode = root.TryGetProperty("resultCode", out var resultCode) && resultCode.TryGetInt32(out var codeResult);
+        var codeResult = 0;
+        var hasResultCode = root.TryGetProperty("resultCode", out var resultCode) && resultCode.TryGetInt32(out codeResult);
         if (hasResultCode && codeResult != 200)
         {
             logger.LogWarning("Medu SSO rejected the code with resultCode {ResultCode}.", codeResult);
