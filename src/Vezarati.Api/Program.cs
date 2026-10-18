@@ -126,58 +126,23 @@ app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context
         }
         if (pendingResponse is null) return Results.Json(new { error = "پاسخی از سرویس SSO دریافت نشد." }, statusCode: StatusCodes.Status502BadGateway);
         using var response = pendingResponse;
+        var upstreamPayload = await response.Content.ReadAsByteArrayAsync(context.RequestAborted);
+        var upstreamContentType = response.Content.Headers.ContentType?.ToString();
         if (!response.IsSuccessStatusCode)
-        {
-            var upstreamStatus = (int)response.StatusCode;
-            var userMessage = upstreamStatus == StatusCodes.Status400BadRequest
-                ? "سرویس SSO درخواست را نامعتبر دانست."
-                : upstreamStatus is StatusCodes.Status401Unauthorized or StatusCodes.Status403Forbidden
-                    ? "سرویس SSO احراز هویت را نپذیرفت."
-                    : $"سرویس SSO با وضعیت HTTP {upstreamStatus} پاسخ داد.";
-            string? upstreamMessage = null;
-            var upstreamBody = "";
-            try
-            {
-                upstreamBody = await response.Content.ReadAsStringAsync(context.RequestAborted);
-                using var errorJson = JsonDocument.Parse(upstreamBody);
-                foreach (var key in new[] { "message", "error_description", "error", "detail", "title" })
-                {
-                    if (errorJson.RootElement.ValueKind == JsonValueKind.Object &&
-                        errorJson.RootElement.TryGetProperty(key, out var messageValue) &&
-                        messageValue.ValueKind == JsonValueKind.String)
-                    {
-                        upstreamMessage = messageValue.GetString();
-                        break;
-                    }
-                }
-            }
-            catch { }
-            if (string.IsNullOrWhiteSpace(upstreamMessage) && !string.IsNullOrWhiteSpace(upstreamBody))
-                upstreamMessage = upstreamBody;
-            if (!string.IsNullOrWhiteSpace(upstreamMessage))
-            {
-                upstreamMessage = upstreamMessage.Replace(code, "[حذف شد]", StringComparison.Ordinal);
-                upstreamMessage = upstreamMessage.Replace(authorization, "[حذف شد]", StringComparison.Ordinal);
-                var encodedCredential = authorization.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase) ? authorization[6..] : "";
-                if (encodedCredential.Length > 0) upstreamMessage = upstreamMessage.Replace(encodedCredential, "[حذف شد]", StringComparison.Ordinal);
-                upstreamMessage = new string(upstreamMessage.Where(character => !char.IsControl(character)).Take(500).ToArray());
-            }
-            return Results.Json(new { error = userMessage, upstreamStatus, upstreamUrl = response.RequestMessage?.RequestUri?.GetLeftPart(UriPartial.Path), upstreamContentType = response.Content.Headers.ContentType?.MediaType, upstreamMessage }, statusCode: StatusCodes.Status502BadGateway);
-        }
-        await using var stream = await response.Content.ReadAsStreamAsync(context.RequestAborted);
-        using var json = await JsonDocument.ParseAsync(stream, cancellationToken: context.RequestAborted);
+            return new RawUpstreamResult(upstreamPayload, upstreamContentType, (int)response.StatusCode);
+        using var json = JsonDocument.Parse(upstreamPayload);
         if (!json.RootElement.TryGetProperty("resultCode", out var resultCode) || !resultCode.TryGetInt32(out var codeResult))
-            return Results.Json(new { error = "پاسخ سرویس SSO قالب قابل‌قبولی ندارد." }, statusCode: StatusCodes.Status502BadGateway);
+            return new RawUpstreamResult(upstreamPayload, upstreamContentType, (int)response.StatusCode);
         if (codeResult != 200)
-            return Results.Json(new { error = $"سرویس SSO کد نتیجه {codeResult} را برگرداند.", upstreamResultCode = codeResult }, statusCode: StatusCodes.Status502BadGateway);
+            return new RawUpstreamResult(upstreamPayload, upstreamContentType, (int)response.StatusCode);
         if (!json.RootElement.TryGetProperty("data", out var data))
-            return Results.Json(new { error = "اطلاعات کاربر در پاسخ سرویس SSO وجود ندارد." }, statusCode: StatusCodes.Status502BadGateway);
+            return new RawUpstreamResult(upstreamPayload, upstreamContentType, (int)response.StatusCode);
         string ReadString(string key) => data.TryGetProperty(key, out var value) && value.ValueKind != JsonValueKind.Null ? value.ToString() : "";
         int? ReadInt(string key) => data.TryGetProperty(key, out var value) && value.TryGetInt32(out var number) ? number : null;
         var nationalId = ReadString("nationalID").Trim();
         var firstName = ReadString("firstName").Trim();
         var lastName = ReadString("lastName").Trim();
-        if (nationalId.Length is < 8 or > 11 || !nationalId.All(char.IsDigit) || firstName.Length + lastName.Length == 0) return Results.Unauthorized();
+        if (nationalId.Length is < 8 or > 11 || !nationalId.All(char.IsDigit) || firstName.Length + lastName.Length == 0) return new RawUpstreamResult(upstreamPayload, upstreamContentType, (int)response.StatusCode);
         var displayName = string.Join(" ", new[] { firstName, lastName }.Where(value => value.Length > 0));
         var position = ReadString("orgPositionDesc");
         var user = await db.Users.FirstOrDefaultAsync(item => item.NationalId == nationalId, context.RequestAborted);
@@ -212,7 +177,7 @@ app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context
         };
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme));
         await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal, new AuthenticationProperties { IsPersistent = true, ExpiresUtc = DateTimeOffset.UtcNow.AddHours(8) });
-        return Results.Ok(new { nationalId, displayName, role, title = directory.Title });
+        return new RawUpstreamResult(upstreamPayload, upstreamContentType ?? "application/json; charset=utf-8", (int)response.StatusCode);
     }
     catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested) { return Results.NoContent(); }
     catch { return Results.Problem("ارتباط با سرویس ورود برقرار نشد.", statusCode: StatusCodes.Status502BadGateway); }
@@ -716,3 +681,14 @@ static class AttachmentFileTypes
 
 record CreateDirectoryPerson(string NationalId, string FirstName, string LastName, string? Title);
 record SsoLoginRequest(string? Code);
+
+sealed class RawUpstreamResult(byte[] body, string? contentType, int statusCode) : IResult
+{
+    public async Task ExecuteAsync(HttpContext context)
+    {
+        context.Response.StatusCode = statusCode;
+        if (!string.IsNullOrWhiteSpace(contentType)) context.Response.ContentType = contentType;
+        context.Response.ContentLength = body.LongLength;
+        await context.Response.Body.WriteAsync(body, context.RequestAborted);
+    }
+}
