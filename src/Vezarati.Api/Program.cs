@@ -45,8 +45,9 @@ app.Use(async (context, next) =>
             return;
         }
         var adminOnly =
-            (path.Equals("/api/groups", StringComparison.OrdinalIgnoreCase) && (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsPost(context.Request.Method)))
+            (path.Equals("/api/groups", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPost(context.Request.Method))
             || (path.StartsWith("/api/groups/", StringComparison.OrdinalIgnoreCase) && (HttpMethods.IsPost(context.Request.Method) || HttpMethods.IsDelete(context.Request.Method)))
+            || (path.Equals("/api/attachments", StringComparison.OrdinalIgnoreCase) == false && path.StartsWith("/api/attachments/", StringComparison.OrdinalIgnoreCase) && path.EndsWith("/approval", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPatch(context.Request.Method))
             || (path.Equals("/api/users", StringComparison.OrdinalIgnoreCase) && (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsPost(context.Request.Method)))
             || path.Equals("/api/users/search", StringComparison.OrdinalIgnoreCase)
             || path.Equals("/api/reports", StringComparison.OrdinalIgnoreCase)
@@ -94,7 +95,7 @@ app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context
         if (!response.IsSuccessStatusCode) return Results.Unauthorized();
         await using var stream = await response.Content.ReadAsStreamAsync(context.RequestAborted);
         using var json = await JsonDocument.ParseAsync(stream, cancellationToken: context.RequestAborted);
-        if (!json.RootElement.TryGetProperty("resultCode", out var resultCode) || resultCode.GetInt32() != 200 ||
+        if (!json.RootElement.TryGetProperty("resultCode", out var resultCode) || !resultCode.TryGetInt32(out var codeResult) || codeResult != 200 ||
             !json.RootElement.TryGetProperty("data", out var data)) return Results.Unauthorized();
         string ReadString(string key) => data.TryGetProperty(key, out var value) && value.ValueKind != JsonValueKind.Null ? value.ToString() : "";
         int? ReadInt(string key) => data.TryGetProperty(key, out var value) && value.TryGetInt32(out var number) ? number : null;
@@ -138,7 +139,7 @@ app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context
         await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal, new AuthenticationProperties { IsPersistent = true, ExpiresUtc = DateTimeOffset.UtcNow.AddHours(8) });
         return Results.Ok(new { nationalId, displayName, role, title = directory.Title });
     }
-    catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested) { return Results.Empty; }
+    catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested) { return Results.NoContent(); }
     catch { return Results.Problem("ارتباط با سرویس ورود برقرار نشد.", statusCode: StatusCodes.Status502BadGateway); }
 });
 
@@ -162,7 +163,13 @@ app.MapGet("/api/dashboard", async (HttpContext context, AppDb db) =>
     var isAdmin = context.User.IsInRole("ادمین");
     var groups = await db.Groups.Include(g => g.Members).ToListAsync();
     var records = await db.Resolutions.AsNoTracking().Where(item => !item.IsArchived).Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Attachments.Where(attachment => isAdmin || attachment.ApprovedForAll)).Include(r => r.Events).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).OrderByDescending(r => r.MeetingDate).ToListAsync();
-    if (!isAdmin) foreach (var resolution in records) foreach (var progress in resolution.Progress.Where(progress => progress.NationalId != id)) { progress.ReportText = ""; progress.AdminFeedback = ""; }
+    if (!isAdmin) foreach (var resolution in records)
+    {
+        foreach (var progress in resolution.Progress.Where(progress => progress.NationalId != id)) { progress.ReportText = ""; progress.AdminFeedback = ""; progress.NationalId = ""; }
+        foreach (var entry in resolution.Events) entry.NationalId = "";
+        foreach (var assignment in resolution.Assignments) assignment.NationalId = "";
+        foreach (var attachment in resolution.Attachments) attachment.UploadedBy = "";
+    }
     var groupIds = groups.Where(g => g.Members.Any(m => m.NationalId == id)).Select(g => g.Id).ToHashSet();
     var mine = isAdmin ? records : records.Where(r => !r.IsArchived && (r.PublishToAll || (r.GroupId.HasValue && groupIds.Contains(r.GroupId.Value)) || r.GroupAssignments.Any(a => groupIds.Contains(a.GroupId)) || r.Assignments.Any(a => a.NationalId == id))).ToList();
     object? currentUser;
@@ -178,7 +185,7 @@ app.MapGet("/api/dashboard", async (HttpContext context, AppDb db) =>
         var role = titles.Count > 0 ? string.Join("، ", titles) : person?.Title ?? "کاربر";
         currentUser = person is null ? null : new { nationalId = person.NationalId, displayName = person.DisplayName, role };
     }
-    return Results.Ok(new { currentUser, groups = isAdmin ? groups : groups.Where(g => g.Members.Any(m => m.NationalId == id)).Select(g => new { g.Id, g.Name, Members = g.Members.Where(m => m.NationalId == id).ToList() }), resolutions = mine });
+    return Results.Ok(new { currentUser, groups = isAdmin ? (object)groups : groups.Where(g => g.Members.Any(m => m.NationalId == id)).Select(g => new { g.Id, g.Name, Members = g.Members.Where(m => m.NationalId == id).ToList() }), resolutions = mine });
 });
 
 app.MapGet("/api/resolutions", async (HttpContext context, AppDb db) =>
@@ -186,7 +193,13 @@ app.MapGet("/api/resolutions", async (HttpContext context, AppDb db) =>
     var id = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
     var isAdmin = context.User.IsInRole("ادمین");
     var records = await db.Resolutions.AsNoTracking().Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Attachments.Where(attachment => isAdmin || attachment.ApprovedForAll)).Include(r => r.Events).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).OrderByDescending(r => r.MeetingDate).ToListAsync();
-    if (!isAdmin) foreach (var resolution in records) foreach (var progress in resolution.Progress.Where(progress => progress.NationalId != id)) { progress.ReportText = ""; progress.AdminFeedback = ""; }
+    if (!isAdmin) foreach (var resolution in records)
+    {
+        foreach (var progress in resolution.Progress.Where(progress => progress.NationalId != id)) { progress.ReportText = ""; progress.AdminFeedback = ""; progress.NationalId = ""; }
+        foreach (var entry in resolution.Events) entry.NationalId = "";
+        foreach (var assignment in resolution.Assignments) assignment.NationalId = "";
+        foreach (var attachment in resolution.Attachments) attachment.UploadedBy = "";
+    }
     return Results.Ok(isAdmin ? records : records.Where(r => !r.IsArchived).ToList());
 });
 app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpContext http) =>
@@ -205,7 +218,7 @@ app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpC
     if (record.PublishToAll) recipientIds.UnionWith(await db.Directory.Select(person => person.NationalId).ToListAsync());
     foreach (var recipient in recipientIds)
         db.Notifications.Add(new UserNotification { NationalId = recipient, ResolutionId = record.Id, Type = "assigned", DateKey = record.Id.ToString(), Text = "مصوبه " + record.Number + " برای پیگیری به شما ارجاع شد.", CreatedAt = DateTimeOffset.UtcNow });
-    db.Events.Add(new ResolutionEvent { ResolutionId = record.Id, NationalId = "admin", UserName = record.CreatedBy, Text = "مصوبه ثبت و برای پیگیری ارجاع شد.", CreatedAt = DateTimeOffset.UtcNow });
+    db.Events.Add(new ResolutionEvent { ResolutionId = record.Id, NationalId = primaryAdminNationalId, UserName = record.CreatedBy, Text = "مصوبه ثبت و برای پیگیری ارجاع شد.", CreatedAt = DateTimeOffset.UtcNow });
     await db.SaveChangesAsync();
     return Results.Created("/api/resolutions/" + record.Id, record);
 });
@@ -238,7 +251,7 @@ app.MapPut("/api/resolutions/{id:int}", async (int id, ResolutionCreate request,
     if (request.PublishToAll && !wasPublic) newRecipients.UnionWith(await db.Directory.Select(person => person.NationalId).ToListAsync());
     foreach (var recipient in newRecipients.Except(priorRecipients))
         db.Notifications.Add(new UserNotification { NationalId = recipient, ResolutionId = id, Type = "assigned", DateKey = id + ":" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), Text = "مصوبه " + record.Number + " برای پیگیری به شما ارجاع شد.", CreatedAt = DateTimeOffset.UtcNow });
-    db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = "admin", UserName = "مدیر دفتر وزارتی", Text = "اطلاعات مصوبه، مهلت و ارجاع‌های آن ویرایش شد.", CreatedAt = DateTimeOffset.UtcNow });
+    db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = primaryAdminNationalId, UserName = "مدیر دفتر وزارتی", Text = "اطلاعات مصوبه، مهلت و ارجاع‌های آن ویرایش شد.", CreatedAt = DateTimeOffset.UtcNow });
     await db.SaveChangesAsync(); return Results.Ok(record);
 });
 app.MapDelete("/api/resolutions/{id:int}", async (int id, AppDb db) =>
@@ -273,7 +286,7 @@ app.MapPatch("/api/resolutions/{id:int}/status", async (int id, ResolutionStatus
         record.UpdatedAt = DateTimeOffset.UtcNow;
         var personName = await db.Directory.Where(person => person.NationalId == nationalId).Select(person => person.DisplayName).FirstOrDefaultAsync() ?? nationalId;
         db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = "وضعیت پیگیری به «" + request.Status + "» تغییر کرد.", CreatedAt = DateTimeOffset.UtcNow });
-        db.Notifications.Add(new UserNotification { NationalId = "admin", ResolutionId = id, Type = "status", DateKey = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(), Text = personName + " وضعیت پیگیری مصوبه " + record.Number + " را تغییر داد.", CreatedAt = DateTimeOffset.UtcNow });
+        db.Notifications.Add(new UserNotification { NationalId = primaryAdminNationalId, ResolutionId = id, Type = "status", DateKey = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(), Text = personName + " وضعیت پیگیری مصوبه " + record.Number + " را تغییر داد.", CreatedAt = DateTimeOffset.UtcNow });
         await db.SaveChangesAsync();
         return Results.Ok(progress);
     }
@@ -281,7 +294,7 @@ app.MapPatch("/api/resolutions/{id:int}/status", async (int id, ResolutionStatus
     record.Status = request.Status;
     record.Notes = request.Notes ?? record.Notes;
     record.UpdatedAt = DateTimeOffset.UtcNow;
-    db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = "admin", UserName = "مدیر دفتر وزارتی", Text = "وضعیت کلی مصوبه به «" + request.Status + "» تغییر کرد.", CreatedAt = DateTimeOffset.UtcNow });
+    db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = primaryAdminNationalId, UserName = "مدیر دفتر وزارتی", Text = "وضعیت کلی مصوبه به «" + request.Status + "» تغییر کرد.", CreatedAt = DateTimeOffset.UtcNow });
     await db.SaveChangesAsync();
     return Results.Ok(record);
 });
@@ -314,7 +327,7 @@ app.MapPost("/api/resolutions/{id:int}/events", async (int id, ResolutionEventCr
     };
     db.Events.Add(eventEntry);
     if (!context.User.IsInRole("ادمین"))
-        db.Notifications.Add(new UserNotification { NationalId = "admin", ResolutionId = id, Type = "event", DateKey = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(), Text = eventEntry.UserName + " رویداد جدیدی برای مصوبه " + resolution.Number + " ثبت کرد.", CreatedAt = DateTimeOffset.UtcNow });
+        db.Notifications.Add(new UserNotification { NationalId = primaryAdminNationalId, ResolutionId = id, Type = "event", DateKey = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(), Text = eventEntry.UserName + " رویداد جدیدی برای مصوبه " + resolution.Number + " ثبت کرد.", CreatedAt = DateTimeOffset.UtcNow });
     await db.SaveChangesAsync();
     return Results.Created($"/api/resolutions/{id}/events/{eventEntry.Id}", eventEntry);
 });
@@ -343,7 +356,7 @@ app.MapPost("/api/resolutions/{id:int}/completion-report", async (int id, Comple
     var personName = await db.Directory.Where(person => person.NationalId == nationalId).Select(person => person.DisplayName).FirstOrDefaultAsync() ?? request.UserName;
     db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = "گزارش اقدام برای بررسی ادمین ارسال شد.", CreatedAt = DateTimeOffset.UtcNow });
     var notifyKey = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
-    db.Notifications.Add(new UserNotification { NationalId = "admin", ResolutionId = id, Type = "report", DateKey = id + ":" + notifyKey, Text = "گزارش اقدام جدید برای مصوبه " + resolution.Number + " ثبت شد.", CreatedAt = DateTimeOffset.UtcNow });
+    db.Notifications.Add(new UserNotification { NationalId = primaryAdminNationalId, ResolutionId = id, Type = "report", DateKey = id + ":" + notifyKey, Text = "گزارش اقدام جدید برای مصوبه " + resolution.Number + " ثبت شد.", CreatedAt = DateTimeOffset.UtcNow });
     await db.SaveChangesAsync();
     return Results.Ok(progress);
 });
@@ -361,7 +374,7 @@ app.MapPatch("/api/resolutions/{id:int}/completion-review", async (int id, Compl
     resolution.UpdatedAt = DateTimeOffset.UtcNow;
     var actionText = request.Approved ? "گزارش اقدام تأیید شد." : "گزارش اقدام برای اصلاح برگشت داده شد.";
     if (!string.IsNullOrWhiteSpace(progress.AdminFeedback)) actionText += " توضیح ادمین: " + progress.AdminFeedback;
-    db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = "admin", UserName = "مدیر دفتر وزارتی", Text = actionText, CreatedAt = DateTimeOffset.UtcNow });
+    db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = primaryAdminNationalId, UserName = "مدیر دفتر وزارتی", Text = actionText, CreatedAt = DateTimeOffset.UtcNow });
     db.Notifications.Add(new UserNotification { NationalId = progress.NationalId, ResolutionId = id, Type = request.Approved ? "report-approved" : "report-rejected", DateKey = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(), Text = "گزارش اقدام شما برای مصوبه " + resolution.Number + (request.Approved ? " تأیید شد." : " نیاز به اصلاح دارد."), CreatedAt = DateTimeOffset.UtcNow });
     await db.SaveChangesAsync();
     return Results.Ok(progress);
@@ -373,7 +386,7 @@ app.MapPatch("/api/resolutions/{id:int}/archive", async (int id, ArchiveUpdateRe
     if (resolution is null) return Results.NotFound();
     resolution.IsArchived = request.IsArchived;
     resolution.UpdatedAt = DateTimeOffset.UtcNow;
-    db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = "admin", UserName = "مدیر دفتر وزارتی", Text = request.IsArchived ? "مصوبه به بایگانی منتقل شد." : "مصوبه از بایگانی بازگردانده شد.", CreatedAt = DateTimeOffset.UtcNow });
+    db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = primaryAdminNationalId, UserName = "مدیر دفتر وزارتی", Text = request.IsArchived ? "مصوبه به بایگانی منتقل شد." : "مصوبه از بایگانی بازگردانده شد.", CreatedAt = DateTimeOffset.UtcNow });
     await db.SaveChangesAsync();
     return Results.Ok(resolution);
 });
@@ -389,7 +402,7 @@ app.MapGet("/api/notifications", async (HttpContext context, AppDb db) =>
     {
         var personalProgress = item.Progress.FirstOrDefault(progress => progress.NationalId == nationalId);
         if (personalProgress?.Status == "completed") continue;
-        var assigned = nationalId == "admin" ||
+        var assigned = nationalId == primaryAdminNationalId ||
             (personalProgress is not null) ||
             item.Assignments.Any(assignment => assignment.NationalId == nationalId) ||
             groupIds.Contains(item.GroupId ?? -1) || item.GroupAssignments.Any(group => groupIds.Contains(group.GroupId)) ||
@@ -481,7 +494,7 @@ app.MapPatch("/api/attachments/{id:int}/approval", async (int id, AttachmentAppr
     return Results.Ok(new { attachment.Id, attachment.ApprovedForAll });
 });
 
-app.MapGet("/api/groups", async (HttpContext context, AppDb db) => { var groups = await db.Groups.Include(g => g.Members).OrderBy(g => g.Name).ToListAsync(); return Results.Ok(context.User.IsInRole("ادمین") ? groups : groups.Where(g => g.Members.Any(m => m.NationalId == context.User.FindFirstValue(ClaimTypes.NameIdentifier))).Select(g => new { g.Id, g.Name, Members = g.Members.Where(m => m.NationalId == context.User.FindFirstValue(ClaimTypes.NameIdentifier)).ToList() })); });
+app.MapGet("/api/groups", async (HttpContext context, AppDb db) => { var groups = await db.Groups.Include(g => g.Members).OrderBy(g => g.Name).ToListAsync(); return Results.Ok(context.User.IsInRole("ادمین") ? (object)groups : groups.Where(g => g.Members.Any(m => m.NationalId == context.User.FindFirstValue(ClaimTypes.NameIdentifier))).Select(g => new { g.Id, g.Name, Members = g.Members.Where(m => m.NationalId == context.User.FindFirstValue(ClaimTypes.NameIdentifier)).ToList() })); });
 app.MapPost("/api/groups", async (GroupCreate request, AppDb db) =>
 {
     var name = request.Name.Trim(); if (name.Length == 0) return Results.BadRequest(new { error = "نام گروه الزامی است." });
