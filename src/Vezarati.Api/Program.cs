@@ -195,7 +195,7 @@ app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context
         return Results.NoContent();
     }
     catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested) { return Results.NoContent(); }
-    catch { return Results.Problem("ارتباط با سرویس ورود برقرار نشد.", statusCode: StatusCodes.Status502BadGateway); }
+    catch (Exception exception) { logger.LogError(exception, "SSO login failed while processing the upstream response or saving the user."); return Results.Problem("ورود SSO با خطای داخلی مواجه شد؛ لاگ API را بررسی کنید.", statusCode: StatusCodes.Status502BadGateway); }
 });
 
 app.MapGet("/api/auth/me", async (HttpContext context, AppDb db) =>
