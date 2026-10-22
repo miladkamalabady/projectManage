@@ -774,7 +774,7 @@ app.MapGet("/api/reports", async (HttpContext context, AppDb db) =>
     var records = await db.Resolutions.Where(item => !item.IsArchived).Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Group).ThenInclude(g => g!.Members).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).ThenInclude(g => g!.Members).ToListAsync();
     var directory = await db.Directory.ToDictionaryAsync(u => u.NationalId, u => (DisplayName: u.DisplayName, Title: u.Title));
     var userTitles = await db.Users.ToDictionaryAsync(u => u.NationalId, u => u.OrgPositionDesc);
-    var rows = records.SelectMany(r => (r.Group?.Members.Select(m => (NationalId: m.NationalId, DisplayName: m.DisplayName, Title: userTitles.GetValueOrDefault(m.NationalId, m.Title))) ?? Enumerable.Empty<(string NationalId, string DisplayName, string Title)>())
+    var rows = records.SelectMany(r => (r.Group?.Members.Select(m => (NationalId: m.NationalId, DisplayName: m.DisplayName, Title: userTitles.GetValueOrDefault(m.NationalId, m.Title))) ?? Enumerable.Empty<(string NationalId, string DisplayName, string Title)>()))
         .Concat(r.GroupAssignments.SelectMany(a => a.Group!.Members.Select(m => (NationalId: m.NationalId, DisplayName: m.DisplayName, Title: userTitles.GetValueOrDefault(m.NationalId, m.Title))))
         .Concat(r.Assignments.Select(a => (NationalId: a.NationalId, DisplayName: directory.GetValueOrDefault(a.NationalId, (DisplayName: a.NationalId, Title: "")).DisplayName, Title: userTitles.GetValueOrDefault(a.NationalId, directory.GetValueOrDefault(a.NationalId, (DisplayName: a.NationalId, Title: "")).Title))))
         .DistinctBy(p => p.NationalId)
