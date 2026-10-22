@@ -707,8 +707,10 @@ app.MapDelete("/api/groups/{id:int}", async (int id, AppDb db) =>
             item.Id,
             item.Number,
             item.Text,
+            item.MeetingDate,
             item.MeetingDateJalali,
             item.IsArchived,
+            MatchingGroupNames = item.GroupAssignments.Where(assignment => assignment.GroupId == id).Select(assignment => assignment.Group!.Name).ToList(),
             GroupNames = item.GroupAssignments.Select(assignment => assignment.Group!.Name).ToList(),
             LegacyReference = !item.GroupAssignments.Any(),
             LegacyGroupName = item.Group == null ? "" : item.Group.Name
