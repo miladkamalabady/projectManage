@@ -428,9 +428,12 @@ app.MapPost("/api/resolutions/{id:int}/events", async (int id, ResolutionEventCr
     var nationalId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
     if (text.Length == 0) return Results.BadRequest(new { error = "شرح رویداد را وارد کنید." });
     if (text.Length > 2000) return Results.BadRequest(new { error = "شرح رویداد حداکثر ۲۰۰۰ نویسه باشد." });
-    var resolution = await db.Resolutions.FirstOrDefaultAsync(r => r.Id == id);
+    var resolution = await db.Resolutions.Include(r => r.Progress).FirstOrDefaultAsync(r => r.Id == id);
     if (resolution is null) return Results.NotFound();
-    if (!context.User.IsInRole("ادمین"))
+    var isAdmin = context.User.IsInRole("ادمین");
+    if (!isAdmin && resolution.Status == "cancelled") return Results.Conflict(new { error = "این مصوبه لغو شده است." });
+    if (!isAdmin && resolution.Progress.Any(item => item.NationalId == nationalId && item.Status == "rejected")) return Results.Conflict(new { error = "وضعیت شما برای این مصوبه رد شده و امکان اقدام ندارید." });
+    if (!isAdmin)
     {
         var direct = await db.Assignments.AnyAsync(a => a.ResolutionId == id && a.NationalId == nationalId);
         var inGroup = await db.GroupMembers.AnyAsync(m => m.NationalId == nationalId &&
@@ -447,9 +450,17 @@ app.MapPost("/api/resolutions/{id:int}/events", async (int id, ResolutionEventCr
         Text = text, CreatedAt = DateTimeOffset.UtcNow
     };
     db.Events.Add(eventEntry);
-    if (!context.User.IsInRole("ادمین"))
+    if (!isAdmin)
         db.Notifications.Add(new UserNotification { NationalId = primaryAdminNationalId, ResolutionId = id, Type = "event", DateKey = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(), Text = eventEntry.UserName + " رویداد جدیدی برای مصوبه " + resolution.Number + " ثبت کرد.", CreatedAt = DateTimeOffset.UtcNow });
+    if (!isAdmin)
+    {
+        var progress = resolution.Progress.FirstOrDefault(item => item.NationalId == nationalId);
+        if (progress is null) { progress = new ResolutionProgress { ResolutionId = id, NationalId = nationalId }; resolution.Progress.Add(progress); }
+        if (progress.Status is not ("completed" or "rejected")) progress.Status = "in_progress";
+        progress.UpdatedAt = DateTimeOffset.UtcNow;
+    }
     await db.SaveChangesAsync();
+    await RefreshResolutionStatuses(db);
     return Results.Created($"/api/resolutions/{id}/events/{eventEntry.Id}", eventEntry);
 });
 
@@ -462,6 +473,8 @@ app.MapPost("/api/resolutions/{id:int}/completion-report", async (int id, Comple
     if (text.Length == 0) return Results.BadRequest(new { error = "شرح اقدام را وارد کنید." });
     var resolution = await db.Resolutions.Include(item => item.Progress).FirstOrDefaultAsync(item => item.Id == id);
     if (resolution is null || resolution.IsArchived) return Results.NotFound();
+    if (resolution.Status == "cancelled") return Results.Conflict(new { error = "این مصوبه لغو شده است." });
+    if (resolution.Progress.Any(item => item.NationalId == nationalId && item.Status == "rejected")) return Results.Conflict(new { error = "وضعیت شما برای این مصوبه رد شده و امکان اقدام ندارید." });
     var direct = await db.Assignments.AnyAsync(item => item.ResolutionId == id && item.NationalId == nationalId);
     var inGroup = await db.GroupMembers.AnyAsync(member => member.NationalId == nationalId &&
         ((resolution.GroupId.HasValue && member.GroupId == resolution.GroupId.Value) ||
@@ -481,6 +494,7 @@ app.MapPost("/api/resolutions/{id:int}/completion-report", async (int id, Comple
     var notifyKey = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
     db.Notifications.Add(new UserNotification { NationalId = primaryAdminNationalId, ResolutionId = id, Type = "report", DateKey = id + ":" + notifyKey, Text = "گزارش اقدام جدید برای مصوبه " + resolution.Number + " ثبت شد.", CreatedAt = DateTimeOffset.UtcNow });
     await db.SaveChangesAsync();
+    await RefreshResolutionStatuses(db);
     return Results.Ok(progress);
 });
 
@@ -489,6 +503,8 @@ app.MapPost("/api/resolutions/{id:int}/reports", async (int id, ResolutionSubmis
     var nationalId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
     var resolution = await db.Resolutions.FirstOrDefaultAsync(item => item.Id == id && !item.IsArchived);
     if (resolution is null) return Results.NotFound();
+    if (resolution.Status == "cancelled") return Results.Conflict(new { error = "این مصوبه لغو شده است." });
+    if (await db.Progress.AnyAsync(item => item.ResolutionId == id && item.NationalId == nationalId && item.Status == "rejected")) return Results.Conflict(new { error = "وضعیت شما برای این مصوبه رد شده و امکان اقدام ندارید." });
     if (!resolution.RequiresPeriodicReport) return Results.BadRequest(new { error = "برای این مصوبه گزارش مستمر تعریف نشده است." });
     var direct = await db.Assignments.AnyAsync(item => item.ResolutionId == id && item.NationalId == nationalId);
     var inGroup = await db.GroupMembers.AnyAsync(member => member.NationalId == nationalId &&
@@ -511,6 +527,7 @@ app.MapPost("/api/resolutions/{id:int}/reports", async (int id, ResolutionSubmis
     db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = "گزارش دوره‌ای (" + period.Key + ") برای مصوبه " + resolution.Number + " ثبت شد.", CreatedAt = submittedAt });
     db.Notifications.Add(new UserNotification { NationalId = primaryAdminNationalId, ResolutionId = id, Type = "periodic-report", DateKey = id + ":" + submittedAt.ToUnixTimeMilliseconds(), Text = "گزارش دوره‌ای جدید از " + personName + " برای مصوبه " + resolution.Number + " ثبت شد.", CreatedAt = submittedAt });
     await db.SaveChangesAsync();
+    await RefreshResolutionStatuses(db);
     return Results.Ok(new { submitted = true, periodKey = period.Key, dueDate = period.DueDate });
 });
 
@@ -624,8 +641,10 @@ app.MapPost("/api/resolutions/{id:int}/attachments", async (int id, HttpRequest 
     if (file.Length > maxAttachmentSize) return Results.BadRequest(new { error = "حداکثر حجم هر فایل ۵۰ مگابایت است." });
     var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
     if (!AttachmentFileTypes.Allowed.Contains(extension)) return Results.BadRequest(new { error = "نوع فایل مجاز نیست." });
-    var resolution = await db.Resolutions.Include(r => r.GroupAssignments).FirstOrDefaultAsync(r => r.Id == id);
+    var resolution = await db.Resolutions.Include(r => r.GroupAssignments).Include(r => r.Progress).FirstOrDefaultAsync(r => r.Id == id);
     if (resolution is null) return Results.NotFound();
+    if (!context.User.IsInRole("ادمین") && resolution.Status == "cancelled") return Results.Conflict(new { error = "این مصوبه لغو شده است." });
+    if (!context.User.IsInRole("ادمین") && resolution.Progress.Any(item => item.NationalId == nationalId && item.Status == "rejected")) return Results.Conflict(new { error = "وضعیت شما برای این مصوبه رد شده و امکان اقدام ندارید." });
     if (string.IsNullOrWhiteSpace(nationalId)) return Results.BadRequest(new { error = "شناسه کاربر ارسال نشده است." });
     if (!context.User.IsInRole("ادمین"))
     {
