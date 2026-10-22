@@ -14,7 +14,7 @@ builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 
 builder.Services.Configure<FormOptions>(options => options.MultipartBodyLengthLimit = maxAttachmentSize);
 builder.Services.AddDbContext<AppDb>(options => options.UseSqlite(builder.Configuration.GetConnectionString("Default") ?? "Data Source=data/vezarati.db"));
 builder.Services.AddScoped<NationalIdLookup, LocalNationalIdLookup>();
-builder.Services.AddHttpClient("MeduSso", client => client.Timeout = TimeSpan.FromSeconds(20)).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.AddHttpClient("MeduSso", client => client.Timeout = TimeSpan.FromSeconds(60)).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme).AddCookie(options =>
 {
     options.Cookie.Name = "vezarati.auth";
