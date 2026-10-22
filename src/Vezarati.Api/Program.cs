@@ -698,6 +698,7 @@ app.MapDelete("/api/groups/{id:int}", async (int id, AppDb db) =>
     if (group.Members.Count != 0) return Results.Conflict(new { error = "برای حذف گروه، ابتدا همه اعضای آن را حذف کنید." });
     var references = await db.Resolutions.AsNoTracking()
         .Include(item => item.GroupAssignments).ThenInclude(assignment => assignment.Group)
+        .Include(item => item.Group)
         .Where(item => item.GroupAssignments.Any(assignment => assignment.GroupId == id) ||
             (item.GroupId == id && !item.GroupAssignments.Any()))
         .OrderByDescending(item => item.MeetingDate)
@@ -709,7 +710,8 @@ app.MapDelete("/api/groups/{id:int}", async (int id, AppDb db) =>
             item.MeetingDateJalali,
             item.IsArchived,
             GroupNames = item.GroupAssignments.Select(assignment => assignment.Group!.Name).ToList(),
-            LegacyReference = !item.GroupAssignments.Any()
+            LegacyReference = !item.GroupAssignments.Any(),
+            LegacyGroupName = item.Group == null ? "" : item.Group.Name
         })
         .ToListAsync();
     if (references.Count > 0)
