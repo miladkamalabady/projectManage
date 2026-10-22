@@ -53,6 +53,7 @@ app.Use(async (context, next) =>
             || (path.Equals("/api/users", StringComparison.OrdinalIgnoreCase) && (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsPost(context.Request.Method)))
             || path.Equals("/api/users/search", StringComparison.OrdinalIgnoreCase)
             || path.Equals("/api/reports", StringComparison.OrdinalIgnoreCase)
+            || path.Equals("/api/reports/submissions", StringComparison.OrdinalIgnoreCase)
             || (path.StartsWith("/api/reports/warnings/", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPost(context.Request.Method))
             || (path.StartsWith("/api/resolutions", StringComparison.OrdinalIgnoreCase) &&
                 ((path.Equals("/api/resolutions", StringComparison.OrdinalIgnoreCase) && (HttpMethods.IsPost(context.Request.Method) || HttpMethods.IsDelete(context.Request.Method)))
@@ -287,9 +288,12 @@ app.MapGet("/api/resolutions", async (HttpContext context, AppDb db) =>
 app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpContext http) =>
 {
     if (string.IsNullOrWhiteSpace(request.Number) || string.IsNullOrWhiteSpace(request.Text)) return Results.BadRequest(new { error = "شماره و متن مصوبه الزامی است." });
+    if (request.Status == "cancelled" && string.IsNullOrWhiteSpace(request.CancellationReason)) return Results.BadRequest(new { error = "برای لغو مصوبه، توضیحات لغو الزامی است." });
+    if (request.RequiresPeriodicReport && !ResolutionStatuses.Frequencies.Contains(request.ReportFrequency ?? "")) return Results.BadRequest(new { error = "دوره دریافت گزارش را انتخاب کنید." });
+    if (request.StartDate is null) return Results.BadRequest(new { error = "زمان شروع مصوبه الزامی است." });
     if (request.GroupId.HasValue && !await db.Groups.AnyAsync(g => g.Id == request.GroupId)) return Results.BadRequest(new { error = "گروه انتخاب‌شده پیدا نشد." });
     if (!ResolutionStatuses.All.Contains(request.Status)) return Results.BadRequest(new { error = "وضعیت نامعتبر است." });
-    var record = new Resolution { PublishToAll = request.PublishToAll, DueDate = request.DueDate, DueDateJalali = request.DueDate is null ? "" : (request.DueDateJalali ?? JalaliDate.FromGregorian(request.DueDate.Value)), MeetingDate = request.MeetingDate, MeetingDateJalali = string.IsNullOrWhiteSpace(request.MeetingDateJalali) ? JalaliDate.FromGregorian(request.MeetingDate) : request.MeetingDateJalali, Number = request.Number.Trim(), Text = request.Text.Trim(), Notes = request.Notes?.Trim() ?? "", Status = request.Status, GroupId = request.GroupId, CreatedAt = DateTimeOffset.UtcNow, CreatedBy = http.User.Identity?.Name ?? "کاربر" };
+    var record = new Resolution { PublishToAll = request.PublishToAll, StartDate = request.StartDate, StartDateJalali = request.StartDate is null ? "" : (request.StartDateJalali ?? JalaliDate.FromGregorian(request.StartDate.Value)), DueDate = request.DueDate, DueDateJalali = request.DueDate is null ? "" : (request.DueDateJalali ?? JalaliDate.FromGregorian(request.DueDate.Value)), RequiresPeriodicReport = request.RequiresPeriodicReport, ReportFrequency = request.RequiresPeriodicReport ? request.ReportFrequency ?? "" : "", CancellationReason = request.CancellationReason?.Trim() ?? "", MeetingDate = request.MeetingDate, MeetingDateJalali = string.IsNullOrWhiteSpace(request.MeetingDateJalali) ? JalaliDate.FromGregorian(request.MeetingDate) : request.MeetingDateJalali, Number = request.Number.Trim(), Text = request.Text.Trim(), Notes = request.Notes?.Trim() ?? "", Status = request.Status, GroupId = request.GroupId, CreatedAt = DateTimeOffset.UtcNow, CreatedBy = http.User.Identity?.Name ?? "کاربر" };
     if (request.GroupIds is not null) foreach (var groupId in request.GroupIds.Distinct()) { if (!await db.Groups.AnyAsync(g => g.Id == groupId)) return Results.BadRequest(new { error = "گروه انتخاب‌شده پیدا نشد." }); record.GroupAssignments.Add(new ResolutionGroupAssignment { GroupId = groupId }); }
     foreach (var id in request.People.Distinct()) record.Assignments.Add(new ResolutionAssignment { NationalId = id });
     db.Resolutions.Add(record);
@@ -323,6 +327,9 @@ app.MapPut("/api/resolutions/{id:int}", async (int id, ResolutionCreate request,
 {
     if (string.IsNullOrWhiteSpace(request.Number) || string.IsNullOrWhiteSpace(request.Text)) return Results.BadRequest(new { error = "شماره و متن مصوبه الزامی است." });
     if (!ResolutionStatuses.All.Contains(request.Status)) return Results.BadRequest(new { error = "وضعیت نامعتبر است." });
+    if (request.Status == "cancelled" && string.IsNullOrWhiteSpace(request.CancellationReason)) return Results.BadRequest(new { error = "برای لغو مصوبه، توضیحات لغو الزامی است." });
+    if (request.RequiresPeriodicReport && !ResolutionStatuses.Frequencies.Contains(request.ReportFrequency ?? "")) return Results.BadRequest(new { error = "دوره دریافت گزارش را انتخاب کنید." });
+    if (request.StartDate is null) return Results.BadRequest(new { error = "زمان شروع مصوبه الزامی است." });
     var record = await db.Resolutions.Include(r => r.Assignments).Include(r => r.GroupAssignments).FirstOrDefaultAsync(r => r.Id == id);
     if (record is null) return Results.NotFound();
     var groupIds = (request.GroupIds ?? (request.GroupId.HasValue ? [request.GroupId.Value] : [])).Distinct().ToList();
@@ -332,8 +339,13 @@ app.MapPut("/api/resolutions/{id:int}", async (int id, ResolutionCreate request,
     priorRecipients.UnionWith(await db.GroupMembers.Where(member => priorGroupIds.Contains(member.GroupId)).Select(member => member.NationalId).ToListAsync());
     var wasPublic = record.PublishToAll;
     record.MeetingDate = request.MeetingDate;
+    record.StartDate = request.StartDate;
+    record.StartDateJalali = request.StartDate is null ? "" : (request.StartDateJalali ?? JalaliDate.FromGregorian(request.StartDate.Value));
     record.DueDate = request.DueDate;
     record.DueDateJalali = request.DueDate is null ? "" : (request.DueDateJalali ?? JalaliDate.FromGregorian(request.DueDate.Value));
+    record.RequiresPeriodicReport = request.RequiresPeriodicReport;
+    record.ReportFrequency = request.RequiresPeriodicReport ? request.ReportFrequency ?? "" : "";
+    record.CancellationReason = request.CancellationReason?.Trim() ?? "";
     record.PublishToAll = request.PublishToAll;
     record.MeetingDateJalali = string.IsNullOrWhiteSpace(request.MeetingDateJalali) ? JalaliDate.FromGregorian(request.MeetingDate) : request.MeetingDateJalali;
     record.Number = request.Number.Trim(); record.Text = request.Text.Trim(); record.Notes = request.Notes?.Trim() ?? "";
@@ -362,6 +374,10 @@ app.MapPatch("/api/resolutions/{id:int}/status", async (int id, ResolutionStatus
     var record = await db.Resolutions.Include(r => r.Progress).FirstOrDefaultAsync(r => r.Id == id);
     if (record is null) return Results.NotFound();
     var nationalId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+    var isAdmin = context.User.IsInRole("ادمین");
+    if (!isAdmin && request.Status == "delayed") return Results.StatusCode(StatusCodes.Status403Forbidden);
+    if (!isAdmin && request.Status == "cancelled") return Results.StatusCode(StatusCodes.Status403Forbidden);
+    if (isAdmin && request.Status == "cancelled" && string.IsNullOrWhiteSpace(request.Notes)) return Results.BadRequest(new { error = "برای لغو مصوبه، توضیحات لغو الزامی است." });
     if (!context.User.IsInRole("ادمین"))
     {
         var directAssignment = await db.Assignments.AnyAsync(a => a.ResolutionId == id && a.NationalId == nationalId);
@@ -389,6 +405,7 @@ app.MapPatch("/api/resolutions/{id:int}/status", async (int id, ResolutionStatus
     }
     if (!context.User.IsInRole("ادمین")) return Results.StatusCode(StatusCodes.Status403Forbidden);
     record.Status = request.Status;
+    if (request.Status == "cancelled") record.CancellationReason = request.Notes!.Trim();
     record.Notes = request.Notes ?? record.Notes;
     record.UpdatedAt = DateTimeOffset.UtcNow;
     db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = primaryAdminNationalId, UserName = "مدیر دفتر وزارتی", Text = "وضعیت کلی مصوبه به «" + request.Status + "» تغییر کرد.", CreatedAt = DateTimeOffset.UtcNow });
@@ -451,11 +468,65 @@ app.MapPost("/api/resolutions/{id:int}/completion-report", async (int id, Comple
     progress.UpdatedAt = DateTimeOffset.UtcNow;
     if (progress.Status != "completed") progress.Status = "in_progress";
     var personName = await db.Directory.Where(person => person.NationalId == nationalId).Select(person => person.DisplayName).FirstOrDefaultAsync() ?? request.UserName;
+    var submittedAt = DateTimeOffset.UtcNow;
+    db.ResolutionReports.Add(new ResolutionReport { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = text, ReportType = "completion", PeriodKey = "completion:" + submittedAt.ToUnixTimeMilliseconds(), SubmittedAt = submittedAt });
     db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = "گزارش اقدام برای بررسی ادمین ارسال شد.", CreatedAt = DateTimeOffset.UtcNow });
     var notifyKey = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
     db.Notifications.Add(new UserNotification { NationalId = primaryAdminNationalId, ResolutionId = id, Type = "report", DateKey = id + ":" + notifyKey, Text = "گزارش اقدام جدید برای مصوبه " + resolution.Number + " ثبت شد.", CreatedAt = DateTimeOffset.UtcNow });
     await db.SaveChangesAsync();
     return Results.Ok(progress);
+});
+
+app.MapPost("/api/resolutions/{id:int}/reports", async (int id, ResolutionSubmissionRequest request, HttpContext context, AppDb db) =>
+{
+    var nationalId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+    var resolution = await db.Resolutions.FirstOrDefaultAsync(item => item.Id == id && !item.IsArchived);
+    if (resolution is null) return Results.NotFound();
+    if (!resolution.RequiresPeriodicReport) return Results.BadRequest(new { error = "برای این مصوبه گزارش مستمر تعریف نشده است." });
+    var direct = await db.Assignments.AnyAsync(item => item.ResolutionId == id && item.NationalId == nationalId);
+    var inGroup = await db.GroupMembers.AnyAsync(member => member.NationalId == nationalId &&
+        ((resolution.GroupId.HasValue && member.GroupId == resolution.GroupId.Value) ||
+         db.ResolutionGroups.Any(group => group.ResolutionId == id && group.GroupId == member.GroupId)));
+    if (!direct && !inGroup && !resolution.PublishToAll) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    var text = request.Text?.Trim() ?? "";
+    if (text.Length == 0) return Results.BadRequest(new { error = "متن گزارش را وارد کنید." });
+    if (text.Length > 5000) return Results.BadRequest(new { error = "متن گزارش حداکثر ۵۰۰۰ نویسه باشد." });
+    var today = DateOnly.FromDateTime(DateTime.Today);
+    var startDate = resolution.StartDate ?? resolution.MeetingDate;
+    var duePeriods = BuildDueReportPeriods(startDate, resolution.ReportFrequency, today);
+    if (duePeriods.Count == 0) return Results.BadRequest(new { error = "هنوز موعد نخستین گزارش این مصوبه نرسیده است." });
+    var submittedPeriods = await db.ResolutionReports.Where(report => report.ResolutionId == id && report.NationalId == nationalId && report.ReportType == "periodic").Select(report => report.PeriodKey).ToListAsync();
+    var period = duePeriods.FirstOrDefault(value => !submittedPeriods.Contains(value.Key));
+    if (string.IsNullOrEmpty(period.Key)) return Results.Conflict(new { error = "گزارش این دوره قبلاً ثبت شده و موعد بعدی هنوز نرسیده است." });
+    var personName = await db.Directory.Where(person => person.NationalId == nationalId).Select(person => person.DisplayName).FirstOrDefaultAsync() ?? context.User.Identity?.Name ?? nationalId;
+    var submittedAt = DateTimeOffset.UtcNow;
+    db.ResolutionReports.Add(new ResolutionReport { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = text, ReportType = "periodic", PeriodKey = period.Key, SubmittedAt = submittedAt });
+    db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = "گزارش دوره‌ای (" + period.Key + ") برای مصوبه " + resolution.Number + " ثبت شد.", CreatedAt = submittedAt });
+    db.Notifications.Add(new UserNotification { NationalId = primaryAdminNationalId, ResolutionId = id, Type = "periodic-report", DateKey = id + ":" + submittedAt.ToUnixTimeMilliseconds(), Text = "گزارش دوره‌ای جدید از " + personName + " برای مصوبه " + resolution.Number + " ثبت شد.", CreatedAt = submittedAt });
+    await db.SaveChangesAsync();
+    return Results.Ok(new { submitted = true, periodKey = period.Key, dueDate = period.DueDate });
+});
+
+app.MapGet("/api/reports/submissions", async (AppDb db) =>
+{
+    var reports = await db.ResolutionReports.Include(report => report.Resolution).OrderByDescending(report => report.SubmittedAt).ToListAsync();
+    var directory = await db.Directory.AsNoTracking().ToDictionaryAsync(person => person.NationalId, person => (person.DisplayName, person.Title));
+    var positions = await db.Users.AsNoTracking().ToDictionaryAsync(user => user.NationalId, user => user.OrgPositionDesc);
+    return Results.Ok(reports.Select(report => new
+    {
+        report.Id,
+        report.ResolutionId,
+        ResolutionNumber = report.Resolution!.Number,
+        ResolutionText = report.Resolution.Text,
+        report.NationalId,
+        UserName = string.IsNullOrWhiteSpace(report.UserName) ? directory.GetValueOrDefault(report.NationalId, (DisplayName: report.NationalId, Title: "")).DisplayName : report.UserName,
+        UserTitle = !string.IsNullOrWhiteSpace(positions.GetValueOrDefault(report.NationalId)) ? positions.GetValueOrDefault(report.NationalId) : directory.GetValueOrDefault(report.NationalId, (DisplayName: "", Title: "")).Title,
+        report.Text,
+        report.ReportType,
+        report.PeriodKey,
+        report.SubmittedAt,
+        DueDate = report.ReportType == "periodic" ? report.PeriodKey.Split(':').LastOrDefault() : null
+    }));
 });
 
 app.MapPatch("/api/resolutions/{id:int}/completion-review", async (int id, CompletionReviewRequest request, HttpContext context, AppDb db) =>
@@ -734,6 +805,34 @@ app.MapPost("/api/reports/warnings/{nationalId}", async (string nationalId, AppD
     if (!sent) return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
     return Results.Ok(new { sent = true, count = delayed.Count });
 });
+static List<(string Key, DateOnly DueDate)> BuildDueReportPeriods(DateOnly startDate, string frequency, DateOnly today)
+{
+    var periods = new List<(string Key, DateOnly DueDate)>();
+    if (today < startDate) return periods;
+    if (frequency == "daily")
+    {
+        for (var date = startDate; date <= today; date = date.AddDays(1))
+            periods.Add(("daily:" + date.ToString("yyyy-MM-dd"), date));
+    }
+    else if (frequency == "weekly")
+    {
+        for (var dueDate = startDate.AddDays(7); dueDate <= today; dueDate = dueDate.AddDays(7))
+            periods.Add(("weekly:" + dueDate.ToString("yyyy-MM-dd"), dueDate));
+    }
+    else if (frequency == "monthly")
+    {
+        for (var month = 1; ; month++)
+        {
+            DateOnly dueDate;
+            try { dueDate = startDate.AddMonths(month); }
+            catch (ArgumentOutOfRangeException) { break; }
+            if (dueDate > today) break;
+            periods.Add(("monthly:" + dueDate.ToString("yyyy-MM-dd"), dueDate));
+        }
+    }
+    return periods;
+}
+
 static string? ExtractProvince(string title)
 {
     var clean = title.Trim();
@@ -746,17 +845,18 @@ static string? ExtractProvince(string title)
 app.MapFallbackToFile("index.html");
 app.Run();
 
-record ResolutionCreate(DateOnly MeetingDate, string? MeetingDateJalali, string Number, string Text, string? Notes, string Status, int? GroupId, List<int>? GroupIds, List<string> People, bool PublishToAll, DateOnly? DueDate, string? DueDateJalali);
+record ResolutionCreate(DateOnly MeetingDate, string? MeetingDateJalali, string Number, string Text, string? Notes, string Status, int? GroupId, List<int>? GroupIds, List<string> People, bool PublishToAll, DateOnly? DueDate, string? DueDateJalali, DateOnly? StartDate, string? StartDateJalali, bool RequiresPeriodicReport, string? ReportFrequency, string? CancellationReason);
 record ResolutionStatusUpdate(string Status, string? Notes, string? NationalId);
 record GroupCreate(string Name);
 record ResolutionEventCreate(string Text, string NationalId, string? UserName);
 record AttachmentApprovalRequest(string NationalId, bool ApprovedForAll);
 record CompletionReportRequest(string NationalId, string UserName, string Text);
+record ResolutionSubmissionRequest(string Text);
 record CompletionReviewRequest(string NationalId, string AssigneeNationalId, bool Approved, string? Feedback);
 record ArchiveUpdateRequest(string NationalId, bool IsArchived);
 record NotificationReadRequest(string NationalId);
 record MemberLookupRequest(string NationalId);
-static class ResolutionStatuses { public static readonly string[] All = ["before", "in_progress", "completed", "delayed"]; }
+static class ResolutionStatuses { public static readonly string[] All = ["before", "in_progress", "completed", "delayed", "cancelled"]; public static readonly string[] Frequencies = ["daily", "weekly", "monthly"]; }
 static class AttachmentFileTypes
 {
     public static readonly HashSet<string> Allowed = new(StringComparer.OrdinalIgnoreCase)
