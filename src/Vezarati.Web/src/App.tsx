@@ -70,9 +70,10 @@ const jalaliToGregorian = (value: string) => { const [jy,jm,jd] = value.split(".
 const gregorianToJalali = (value: string) => new Intl.DateTimeFormat("en-US-u-ca-persian-nu-latn", {year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(`${value}T12:00:00`)).replace(/(\d+)\/(\d+)\/(\d+)/,"$3.$1.$2");
 const jalaliToday = () => gregorianToJalali(today());
 const jalaliParts = (value: string) => value.split(".").map(Number);
-const jalaliMonthTitle = (value: string) => new Intl.DateTimeFormat("fa-IR-u-ca-persian", { month: "long", year: "numeric", numberingSystem: "arabext" }).format(new Date(`${jalaliToGregorian(value)}T12:00:00`));
+const normalizeJalaliMonth = (value: string) => { const [year,month]=String(value||"").split(".").map(Number); if(Number.isInteger(year)&&year>=1300&&year<=1600&&Number.isInteger(month)&&month>=1&&month<=12) return `${year}.${String(month).padStart(2,"0")}.01`; const [fallbackYear,fallbackMonth]=jalaliParts(jalaliToday()); return `${fallbackYear}.${String(fallbackMonth).padStart(2,"0")}.01`; };
+const jalaliMonthTitle = (value: string) => { const safeMonth=normalizeJalaliMonth(value); const date=new Date(`${jalaliToGregorian(safeMonth)}T12:00:00`); return new Intl.DateTimeFormat("fa-IR-u-ca-persian", { month: "long", year: "numeric", numberingSystem: "arabext" }).format(Number.isNaN(date.getTime())?new Date():date); };
 const jalaliMonthDays = (value: string) => { const [year,month]=jalaliParts(value); return month<=6?31:month<=11?30:((year-979)%33===1||(year-979)%33===5||(year-979)%33===9||(year-979)%33===13||(year-979)%33===17||(year-979)%33===22||(year-979)%33===26||(year-979)%33===30?30:29); };
-const jalaliDayOffset = (value: string) => (new Date(`${jalaliToGregorian(value)}T12:00:00`).getDay()+1)%7;
+const jalaliDayOffset = (value: string) => { const date=new Date(`${jalaliToGregorian(normalizeJalaliMonth(value))}T12:00:00`); return Number.isNaN(date.getTime())?0:(date.getDay()+1)%7; };
 const shiftJalaliMonth = (value: string, delta: number) => { let [year,month]=jalaliParts(value); month+=delta; if(month<1){month=12;year--;} if(month>12){month=1;year++;} return `${year}.${String(month).padStart(2,"0")}.01`; };
 const jalaliDateAt = (monthValue: string, day: number) => { const [year,month]=jalaliParts(monthValue); return `${year}.${String(month).padStart(2,"0")}.${String(day).padStart(2,"0")}`; };
 
