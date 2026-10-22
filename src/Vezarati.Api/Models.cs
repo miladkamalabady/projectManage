@@ -415,3 +415,26 @@ public static class SchemaCompatibility
         return columns;
     }
 }
+
+public sealed class MessageDispatcher(IHttpClientFactory clients, IConfiguration configuration, ILogger<MessageDispatcher> logger)
+{
+    public async Task<bool> SendAsync(string nationalId, string text, CancellationToken cancellationToken = default)
+    {
+        var url = configuration["Messaging:ApiUrl"]?.Trim();
+        if (string.IsNullOrWhiteSpace(url)) return false;
+        using var request = new HttpRequestMessage(HttpMethod.Post, url)
+        {
+            Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(new { nationalId, text }), System.Text.Encoding.UTF8, "application/json")
+        };
+        var authorization = configuration["Messaging:Authorization"];
+        if (!string.IsNullOrWhiteSpace(authorization)) request.Headers.TryAddWithoutValidation("Authorization", authorization);
+        try
+        {
+            using var response = await clients.CreateClient("MessageApi").SendAsync(request, cancellationToken);
+            if (!response.IsSuccessStatusCode) logger.LogWarning("Messaging API returned HTTP {StatusCode}.", (int)response.StatusCode);
+            return response.IsSuccessStatusCode;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception exception) { logger.LogWarning(exception, "Messaging API request failed."); return false; }
+    }
+}
