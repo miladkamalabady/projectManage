@@ -248,8 +248,8 @@ export default function App() {
       const response = await fetch(`/api/groups/${group.id}`, { method: "DELETE" });
       const result = response.status === 204 ? null : await response.json();
       if (!response.ok) {
-        const references = Array.isArray(result?.resolutions) ? result.resolutions as { number: string; isArchived: boolean; groupNames: string[]; legacyReference: boolean; legacyGroupName: string }[] : [];
-        const detail = references.length ? ` مصوبه‌های مرتبط: ${references.map(item => `${item.number}${item.isArchived ? " (بایگانی‌شده)" : ""}${item.groupNames?.length ? " — ارجاع گروه: " + item.groupNames.join("، ") : item.legacyReference ? " — ارجاع قدیمی به گروه «" + item.legacyGroupName + "»" : ""}`).join("؛ ")}.` : "";
+        const references = Array.isArray(result?.resolutions) ? result.resolutions as { id: number; number: string; text: string; meetingDate: string; meetingDateJalali?: string; isArchived: boolean; matchingGroupNames: string[]; groupNames: string[]; legacyReference: boolean; legacyGroupName: string }[] : [];
+        const detail = references.length ? ` مصوبه‌های مرتبط: ${references.map(item => { const matched = item.matchingGroupNames?.join("، ") || (item.legacyReference ? item.legacyGroupName + " (ارجاع قدیمی)" : "نامشخص"); const otherGroups = item.groupNames?.filter(name => !item.matchingGroupNames?.includes(name)) ?? []; const text = (item.text || "").replace(/\s+/g, " ").slice(0, 90); return `#${item.number} [شناسه ${item.id}]${item.isArchived ? " (بایگانی‌شده)" : ""} · تاریخ ${item.meetingDateJalali || item.meetingDate} · ارجاعِ مانع حذف: ${matched}${otherGroups.length ? " · سایر گروه‌ها: " + otherGroups.join("، ") : ""} · متن: ${text}`; }).join("؛ ")}.` : "";
         setGroupDeleteError((result?.error || "حذف گروه انجام نشد.") + detail);
         return;
       }
