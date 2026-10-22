@@ -14,6 +14,8 @@ builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 
 builder.Services.Configure<FormOptions>(options => options.MultipartBodyLengthLimit = maxAttachmentSize);
 builder.Services.AddDbContext<AppDb>(options => options.UseSqlite(builder.Configuration.GetConnectionString("Default") ?? "Data Source=data/vezarati.db"));
 builder.Services.AddScoped<NationalIdLookup, LocalNationalIdLookup>();
+builder.Services.AddScoped<MessageDispatcher>();
+builder.Services.AddHttpClient("MessageApi", client => client.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddHttpClient("MeduSso", client => client.Timeout = TimeSpan.FromSeconds(60)).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme).AddCookie(options =>
 {
@@ -51,6 +53,7 @@ app.Use(async (context, next) =>
             || (path.Equals("/api/users", StringComparison.OrdinalIgnoreCase) && (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsPost(context.Request.Method)))
             || path.Equals("/api/users/search", StringComparison.OrdinalIgnoreCase)
             || path.Equals("/api/reports", StringComparison.OrdinalIgnoreCase)
+            || (path.StartsWith("/api/reports/warnings/", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPost(context.Request.Method))
             || (path.StartsWith("/api/resolutions", StringComparison.OrdinalIgnoreCase) &&
                 ((path.Equals("/api/resolutions", StringComparison.OrdinalIgnoreCase) && (HttpMethods.IsPost(context.Request.Method) || HttpMethods.IsDelete(context.Request.Method)))
                  || (path.StartsWith("/api/resolutions/", StringComparison.OrdinalIgnoreCase) &&
@@ -184,6 +187,8 @@ app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context
         if (directory is null) { directory = new DirectoryUser { NationalId = nationalId }; db.Directory.Add(directory); }
         directory.DisplayName = displayName;
         directory.Title = string.IsNullOrWhiteSpace(position) ? ReadString("orgPositionTypeDesc") : position;
+        var memberships = await db.GroupMembers.Where(member => member.NationalId == nationalId).ToListAsync(context.RequestAborted);
+        foreach (var member in memberships) { member.DisplayName = displayName; member.Title = directory.Title; }
         await db.SaveChangesAsync(context.RequestAborted);
         var claims = new[]
         {
@@ -297,6 +302,15 @@ app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpC
         db.Notifications.Add(new UserNotification { NationalId = recipient, ResolutionId = record.Id, Type = "assigned", DateKey = record.Id.ToString(), Text = "مصوبه " + record.Number + " برای پیگیری به شما ارجاع شد.", CreatedAt = DateTimeOffset.UtcNow });
     db.Events.Add(new ResolutionEvent { ResolutionId = record.Id, NationalId = primaryAdminNationalId, UserName = record.CreatedBy, Text = "مصوبه ثبت و برای پیگیری ارجاع شد.", CreatedAt = DateTimeOffset.UtcNow });
     await db.SaveChangesAsync();
+    var messageSender = http.RequestServices.GetRequiredService<MessageDispatcher>();
+    var dueText = record.DueDateJalali.Length > 0 ? " مهلت پیگیری: " + record.DueDateJalali + "." : "";
+    var externalMessage = "مصوبه شماره " + record.Number + " ثبت شد. لطفاً متن مصوبه را بررسی و پیگیری کنید." + dueText;
+    foreach (var recipient in recipientIds)
+    {
+        try { await messageSender.SendAsync(recipient, externalMessage, http.RequestAborted); }
+        catch (OperationCanceledException) when (http.RequestAborted.IsCancellationRequested) { throw; }
+        catch { /* external delivery must not roll back a saved resolution */ }
+    }
     return Results.Created("/api/resolutions/" + record.Id, record);
 });
 app.MapPut("/api/resolutions/{id:int}", async (int id, ResolutionCreate request, AppDb db) =>
@@ -577,6 +591,17 @@ app.MapPatch("/api/attachments/{id:int}/approval", async (int id, AttachmentAppr
 });
 
 app.MapGet("/api/groups", async (HttpContext context, AppDb db) => { var groups = await db.Groups.Include(g => g.Members).OrderBy(g => g.Name).ToListAsync(); return Results.Ok(context.User.IsInRole("ادمین") ? (object)groups : groups.Where(g => g.Members.Any(m => m.NationalId == context.User.FindFirstValue(ClaimTypes.NameIdentifier))).Select(g => new { g.Id, g.Name, Members = g.Members.Where(m => m.NationalId == context.User.FindFirstValue(ClaimTypes.NameIdentifier)).ToList() })); });
+app.MapDelete("/api/groups/{id:int}", async (int id, AppDb db) =>
+{
+    var group = await db.Groups.Include(g => g.Members).FirstOrDefaultAsync(g => g.Id == id);
+    if (group is null) return Results.NotFound(new { error = "گروه پیدا نشد." });
+    if (group.Members.Count != 0) return Results.Conflict(new { error = "برای حذف گروه، ابتدا همه اعضای آن را حذف کنید." });
+    if (await db.ResolutionGroups.AnyAsync(item => item.GroupId == id) || await db.Resolutions.AnyAsync(item => item.GroupId == id))
+        return Results.Conflict(new { error = "این گروه به مصوبه ارجاع شده و قابل حذف نیست." });
+    db.Groups.Remove(group);
+    await db.SaveChangesAsync();
+    return Results.NoContent();
+});
 app.MapPost("/api/groups", async (GroupCreate request, AppDb db) =>
 {
     var name = request.Name.Trim(); if (name.Length == 0) return Results.BadRequest(new { error = "نام گروه الزامی است." });
@@ -593,18 +618,14 @@ app.MapGet("/api/users/search", async (string? q, AppDb db) =>
         .Trim().ToLowerInvariant();
     var normalized = Normalize(term);
     var digits = new string(term.Where(char.IsDigit).ToArray());
-    var groupTitles = await db.GroupMembers.AsNoTracking()
-        .Where(member => !string.IsNullOrWhiteSpace(member.Title))
-        .GroupBy(member => member.NationalId)
-        .Select(group => new { NationalId = group.Key, Title = group.Select(member => member.Title).First() })
-        .ToDictionaryAsync(item => item.NationalId, item => item.Title);
     var directory = await db.Directory.AsNoTracking().ToListAsync();
+    var users = await db.Users.AsNoTracking().ToDictionaryAsync(user => user.NationalId, user => user.OrgPositionDesc);
     var people = directory
         .Where(person => Normalize(person.DisplayName).Contains(normalized) ||
             (digits.Length >= 2 && person.NationalId.Contains(digits)))
         .OrderBy(person => person.DisplayName)
         .Take(30)
-        .Select(person => new { person.NationalId, person.DisplayName, Title = !string.IsNullOrWhiteSpace(person.Title) ? person.Title : groupTitles.GetValueOrDefault(person.NationalId, "") })
+        .Select(person => new { person.NationalId, person.DisplayName, Title = string.IsNullOrWhiteSpace(users.GetValueOrDefault(person.NationalId)) ? person.Title : users.GetValueOrDefault(person.NationalId) })
         .ToList();
     return Results.Ok(people);
 });
@@ -612,7 +633,12 @@ app.MapPost("/api/groups/{id:int}/members/lookup", async (int id, MemberLookupRe
 {
     var group = await db.Groups.Include(g => g.Members).FirstOrDefaultAsync(g => g.Id == id); if (group is null) return Results.NotFound();
     var person = await lookup.FindAsync(request.NationalId); if (person is null) return Results.NotFound(new { error = "کاربری با این کد ملی در فهرست کاربران پیدا نشد." });
-    if (group.Members.All(m => m.NationalId != person.NationalId)) group.Members.Add(new GroupMember { NationalId = person.NationalId, DisplayName = person.DisplayName, Title = request.Title?.Trim() ?? "" });
+    var appUser = await db.Users.AsNoTracking().FirstOrDefaultAsync(user => user.NationalId == person.NationalId);
+    var directoryUser = await db.Directory.AsNoTracking().FirstOrDefaultAsync(user => user.NationalId == person.NationalId);
+    var title = !string.IsNullOrWhiteSpace(appUser?.OrgPositionDesc) ? appUser.OrgPositionDesc : directoryUser?.Title ?? "";
+    var existingMember = group.Members.FirstOrDefault(member => member.NationalId == person.NationalId);
+    if (existingMember is null) group.Members.Add(new GroupMember { NationalId = person.NationalId, DisplayName = person.DisplayName, Title = title });
+    else { existingMember.DisplayName = person.DisplayName; existingMember.Title = title; }
     await db.SaveChangesAsync(); return Results.Ok(group);
 });
 app.MapDelete("/api/groups/{id:int}/members/{nationalId}", async (int id, string nationalId, AppDb db) =>
@@ -625,7 +651,7 @@ app.MapPost("/api/users", async (CreateDirectoryPerson request, AppDb db) =>
     var nationalId = NormalizeDigits(request.NationalId.Trim());
     var firstName = request.FirstName.Trim();
     var lastName = request.LastName.Trim();
-    var title = request.Title?.Trim() ?? "";
+    var title = "";
     if (nationalId.Length is < 8 or > 11 || !nationalId.All(char.IsDigit))
         return Results.BadRequest(new { error = "کد ملی باید بین ۸ تا ۱۱ رقم باشد." });
     if (string.IsNullOrWhiteSpace(firstName) || string.IsNullOrWhiteSpace(lastName))
@@ -652,10 +678,7 @@ app.MapGet("/api/users", async (HttpContext context, AppDb db) =>
 {
     if (!context.User.IsInRole("ادمین")) return Results.StatusCode(StatusCodes.Status403Forbidden);
     var directory = await db.Directory.AsNoTracking().OrderBy(u => u.DisplayName).ToListAsync();
-    var titlesByUser = await db.GroupMembers.AsNoTracking().Where(member => !string.IsNullOrWhiteSpace(member.Title))
-        .GroupBy(member => member.NationalId)
-        .Select(group => new { NationalId = group.Key, Title = group.Select(member => member.Title).First() })
-        .ToDictionaryAsync(item => item.NationalId, item => item.Title);
+    var titlesByUser = await db.Users.AsNoTracking().ToDictionaryAsync(user => user.NationalId, user => user.OrgPositionDesc);
     return Results.Ok(directory.Select(user => new
     {
         user.NationalId,
@@ -672,16 +695,38 @@ app.MapGet("/api/reports", async (HttpContext context, AppDb db) =>
     var isAdmin = context.User.IsInRole("ادمین");
     var records = await db.Resolutions.Where(item => !item.IsArchived).Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Group).ThenInclude(g => g!.Members).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).ThenInclude(g => g!.Members).ToListAsync();
     var directory = await db.Directory.ToDictionaryAsync(u => u.NationalId, u => (DisplayName: u.DisplayName, Title: u.Title));
-    var rows = records.SelectMany(r => (r.Group?.Members.Select(m => (NationalId: m.NationalId, DisplayName: m.DisplayName, Title: m.Title)) ?? Enumerable.Empty<(string NationalId, string DisplayName, string Title)>())
-        .Concat(r.GroupAssignments.SelectMany(a => a.Group!.Members.Select(m => (NationalId: m.NationalId, DisplayName: m.DisplayName, Title: m.Title))))
-        .Concat(r.Assignments.Select(a => (NationalId: a.NationalId, DisplayName: directory.GetValueOrDefault(a.NationalId, (DisplayName: a.NationalId, Title: "")).DisplayName, Title: directory.GetValueOrDefault(a.NationalId, (DisplayName: a.NationalId, Title: "")).Title)))
+    var userTitles = await db.Users.ToDictionaryAsync(u => u.NationalId, u => u.OrgPositionDesc);
+    var rows = records.SelectMany(r => (r.Group?.Members.Select(m => (NationalId: m.NationalId, DisplayName: m.DisplayName, Title: userTitles.GetValueOrDefault(m.NationalId, m.Title))) ?? Enumerable.Empty<(string NationalId, string DisplayName, string Title)>())
+        .Concat(r.GroupAssignments.SelectMany(a => a.Group!.Members.Select(m => (NationalId: m.NationalId, DisplayName: m.DisplayName, Title: userTitles.GetValueOrDefault(m.NationalId, m.Title))))
+        .Concat(r.Assignments.Select(a => (NationalId: a.NationalId, DisplayName: directory.GetValueOrDefault(a.NationalId, (DisplayName: a.NationalId, Title: "")).DisplayName, Title: userTitles.GetValueOrDefault(a.NationalId, directory.GetValueOrDefault(a.NationalId, (DisplayName: a.NationalId, Title: "")).Title))))
         .DistinctBy(p => p.NationalId)
-        .Select(p => new { p.NationalId, p.DisplayName, p.Title, Status = r.Progress.FirstOrDefault(progress => progress.NationalId == p.NationalId)?.Status ?? r.Status }))
+        .Select(p => new { p.NationalId, p.DisplayName, p.Title, ResolutionId = r.Id, Number = r.Number, Text = r.Text, DueDateJalali = r.DueDateJalali, Status = r.Progress.FirstOrDefault(progress => progress.NationalId == p.NationalId)?.Status ?? r.Status }))
         .GroupBy(x => new { x.NationalId, x.DisplayName, x.Title })
-        .Select(g => new { g.Key.NationalId, g.Key.DisplayName, g.Key.Title, Total = g.Count(), Completed = g.Count(x => x.Status == "completed"), Delayed = g.Count(x => x.Status == "delayed"), Pending = g.Count(x => x.Status is "before" or "in_progress") })
+        .Select(g => new { g.Key.NationalId, g.Key.DisplayName, g.Key.Title, Total = g.Count(), Completed = g.Count(x => x.Status == "completed"), Delayed = g.Count(x => x.Status == "delayed"), Pending = g.Count(x => x.Status is "before" or "in_progress"), Tasks = g.Select(x => new { x.ResolutionId, x.Number, x.Text, x.DueDateJalali, x.Status }).ToList() })
         .OrderByDescending(x => x.Total).ToList();
     if (!isAdmin) rows = rows.Where(row => row.NationalId == id).ToList();
     return Results.Ok(new { total = records.Count, completed = records.Count(r => r.Status == "completed"), delayed = records.Count(r => r.Status == "delayed"), pending = records.Count(r => r.Status is "before" or "in_progress"), people = rows });
+});
+app.MapPost("/api/reports/warnings/{nationalId}", async (string nationalId, AppDb db, MessageDispatcher sender, HttpContext context) =>
+{
+    var today = DateOnly.FromDateTime(DateTime.Today);
+    var records = await db.Resolutions.Where(item => !item.IsArchived)
+        .Include(item => item.Assignments).Include(item => item.Progress).Include(item => item.Group).ThenInclude(group => group!.Members)
+        .Include(item => item.GroupAssignments).ThenInclude(assignment => assignment.Group).ThenInclude(group => group!.Members).ToListAsync();
+    var delayed = records.Where(item =>
+        (item.Progress.FirstOrDefault(progress => progress.NationalId == nationalId)?.Status ?? item.Status) == "delayed"
+        || (((item.Progress.FirstOrDefault(progress => progress.NationalId == nationalId)?.Status ?? item.Status) != "completed")
+            && item.DueDate.HasValue && item.DueDate.Value < today))
+        .Where(item => item.Assignments.Any(assignment => assignment.NationalId == nationalId)
+            || item.Group?.Members.Any(member => member.NationalId == nationalId) == true
+            || item.GroupAssignments.Any(assignment => assignment.Group?.Members.Any(member => member.NationalId == nationalId) == true))
+        .ToList();
+    if (delayed.Count == 0) return Results.Conflict(new { error = "برای این شخص مصوبه دارای تأخیر پیدا نشد." });
+    var numbers = string.Join("، ", delayed.Select(item => item.Number).Distinct());
+    var message = "یادآوری دفتر وزارتی: پیگیری مصوبه‌های شماره " + numbers + " از مهلت مقرر گذشته است. لطفاً وضعیت اجرا را در سامانه ثبت و اقدام لازم را انجام دهید.";
+    var sent = await sender.SendAsync(nationalId, message, context.RequestAborted);
+    if (!sent) return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+    return Results.Ok(new { sent = true, count = delayed.Count });
 });
 static string? ExtractProvince(string title)
 {
@@ -704,7 +749,7 @@ record CompletionReportRequest(string NationalId, string UserName, string Text);
 record CompletionReviewRequest(string NationalId, string AssigneeNationalId, bool Approved, string? Feedback);
 record ArchiveUpdateRequest(string NationalId, bool IsArchived);
 record NotificationReadRequest(string NationalId);
-record MemberLookupRequest(string NationalId, string? Title);
+record MemberLookupRequest(string NationalId);
 static class ResolutionStatuses { public static readonly string[] All = ["before", "in_progress", "completed", "delayed"]; }
 static class AttachmentFileTypes
 {
@@ -718,7 +763,7 @@ static class AttachmentFileTypes
     };
 }
 
-record CreateDirectoryPerson(string NationalId, string FirstName, string LastName, string? Title);
+record CreateDirectoryPerson(string NationalId, string FirstName, string LastName);
 record SsoLoginRequest(string? Code);
 
 sealed class RawUpstreamResult(byte[] body, string? contentType, int statusCode) : IResult
