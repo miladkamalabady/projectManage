@@ -73,3 +73,10 @@
 .form-grid>.date-field .rmdp-container,.form-grid>.date-field .rmdp-input{width:100%}
 
 .date-validation-error{padding:9px 11px;border:1px solid #efb5ae;border-radius:8px;background:#fff0ee;color:#9b2c23;font-size:11px;font-weight:700}
+
+.status.rejected{background:#f3e8ff!important;color:#6b21a8!important;border:1px solid #a855f7!important;font-weight:800}
+.progress-segment.rejected{background:#a855f7}
+.personal-status-control{display:flex;align-items:center;justify-content:flex-start;gap:10px;margin:10px 0;padding:9px 11px;border:1px solid #e5ecee;border-radius:9px;background:#f8fbfb;color:#435960;font-size:11px;font-weight:700}
+.personal-status-control select{min-width:135px}
+.rejected-lock{margin:10px 0;background:#f5effa;color:#5c2683;border-color:#d8b4fe}
+.member-progress-row .status.rejected{display:inline-flex}
