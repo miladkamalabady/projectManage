@@ -195,7 +195,26 @@ app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context
         return Results.NoContent();
     }
     catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested) { return Results.NoContent(); }
-    catch (Exception exception) { logger.LogError(exception, "SSO login failed while processing the upstream response or saving the user."); return Results.Problem("ورود SSO با خطای داخلی مواجه شد؛ لاگ API را بررسی کنید.", statusCode: StatusCodes.Status502BadGateway); }
+    catch (OperationCanceledException exception)
+    {
+        logger.LogError(exception, "Medu SSO request timed out.");
+        return Results.Problem("پاسخ سرویس SSO در زمان مجاز نرسید.", statusCode: StatusCodes.Status504GatewayTimeout);
+    }
+    catch (HttpRequestException exception)
+    {
+        logger.LogError(exception, "Could not connect to Medu SSO.");
+        return Results.Problem("سرور به سرویس SSO دسترسی ندارد؛ اتصال شبکه و DNS سرور را بررسی کنید.", statusCode: StatusCodes.Status502BadGateway);
+    }
+    catch (JsonException exception)
+    {
+        logger.LogError(exception, "Medu SSO returned invalid JSON.");
+        return Results.Problem("پاسخ سرویس SSO قابل‌خواندن نیست.", statusCode: StatusCodes.Status502BadGateway);
+    }
+    catch (Exception exception)
+    {
+        logger.LogError(exception, "Internal SSO login failure while saving the user or creating the session.");
+        return Results.Problem("خطای داخلی هنگام ثبت کاربر یا ساخت نشست رخ داد؛ لاگ API را بررسی کنید.", statusCode: StatusCodes.Status500InternalServerError);
+    }
 });
 
 app.MapGet("/api/auth/me", async (HttpContext context, AppDb db) =>
