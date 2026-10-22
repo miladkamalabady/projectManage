@@ -65,6 +65,7 @@ function getResolutionRouting(item: Resolution, groups: Group[]) {
   return parts.join(" · ") || (item.assignments?.length ? "ارجاع مستقیم به افراد" : "بدون ارجاع");
 }
 const today = () => new Date().toISOString().slice(0, 10);
+const tomorrow = () => { const date=new Date(`${today()}T12:00:00`); date.setDate(date.getDate()+1); return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`; };
 const formatDate = (value: string, jalali?: string) => jalali || new Intl.DateTimeFormat("fa-IR-u-ca-persian", { dateStyle: "medium", numberingSystem: "arabext" }).format(new Date(`${value}T12:00:00`));
 const jalaliToGregorian = (value: string) => { const [jy,jm,jd] = jalaliParts(value); let days=365*(jy-979)+Math.floor((jy-979)/33)*8+Math.floor(((jy-979)%33+3)/4)+79; for(let m=1;m<jm;m++) days+=m<=6?31:30; days+=jd-1; let gy=1600+400*Math.floor(days/146097); days%=146097; let leap=true; if(days>=36525){days--;gy+=100*Math.floor(days/36524);days%=36524;if(days>=365)days++;else leap=false;}gy+=4*Math.floor(days/1461);days%=1461;if(days>=366){leap=false;days--;gy+=Math.floor(days/365);days%=365;}const md=[31,leap?29:28,31,30,31,30,31,31,30,31,30,31];let gm=0;while(gm<11&&days>=md[gm]){days-=md[gm++];}return `${gy}-${String(gm+1).padStart(2,"0")}-${String(days+1).padStart(2,"0")}`;};
 const gregorianToJalali = (value: string) => new Intl.DateTimeFormat("en-US-u-ca-persian-nu-latn", {year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(`${value}T12:00:00`)).replace(/(\d+)\/(\d+)\/(\d+)/,"$3.$1.$2");
@@ -113,7 +114,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const [form, setForm] = useState({ meetingDate: today(), meetingDateJalali: jalaliToday(), number: "", text: "", notes: "", status: "before", groupIds: [] as string[], unitIds: [] as string[], people: [] as string[], publishToAll: false, startDate: today(), startDateJalali: jalaliToday(), dueDate: "", dueDateJalali: "", requiresPeriodicReport: false, reportFrequency: "weekly", cancellationReason: "" });
+  const [form, setForm] = useState({ meetingDate: today(), meetingDateJalali: jalaliToday(), number: "", text: "", notes: "", status: "before", groupIds: [] as string[], unitIds: [] as string[], people: [] as string[], publishToAll: false, startDate: tomorrow(), startDateJalali: gregorianToJalali(tomorrow()), dueDate: "", dueDateJalali: "", requiresPeriodicReport: false, reportFrequency: "weekly", cancellationReason: "" });
   const [groupName, setGroupName] = useState("");
   const [groupDeleteError, setGroupDeleteError] = useState("");
   const [selectedGroup, setSelectedGroup] = useState("");
@@ -254,7 +255,7 @@ export default function App() {
   }
   function openCreateResolution() {
     setEditingResolutionId(null); setPeopleQuery("");
-    setForm({ meetingDate: today(), meetingDateJalali: jalaliToday(), number: "", text: "", notes: "", status: "before", groupIds: [], unitIds: [], people: [], publishToAll: false, startDate: today(), startDateJalali: jalaliToday(), dueDate: "", dueDateJalali: "", requiresPeriodicReport: false, reportFrequency: "weekly", cancellationReason: "" });
+    setForm({ meetingDate: today(), meetingDateJalali: jalaliToday(), number: "", text: "", notes: "", status: "before", groupIds: [], unitIds: [], people: [], publishToAll: false, startDate: tomorrow(), startDateJalali: gregorianToJalali(tomorrow()), dueDate: "", dueDateJalali: "", requiresPeriodicReport: false, reportFrequency: "weekly", cancellationReason: "" });
     setModalOpen(true);
   }
   function openEditResolution(item: Resolution) {
@@ -267,7 +268,7 @@ export default function App() {
     if (dateValidationError) { setMessage(dateValidationError); return; }
     const url = editingResolutionId ? `/api/resolutions/${editingResolutionId}` : "/api/resolutions";
     const ok = await request(url, editingResolutionId ? "PUT" : "POST", { ...form, groupId: form.groupIds.length ? Number(form.groupIds[0]) : null, groupIds: [...form.groupIds, ...form.unitIds].map(Number), people: form.people, publishToAll: form.publishToAll, dueDate: form.dueDate || null, dueDateJalali: form.dueDateJalali, startDate: form.startDate || null, startDateJalali: form.startDateJalali, requiresPeriodicReport: form.requiresPeriodicReport, reportFrequency: form.reportFrequency, cancellationReason: form.cancellationReason });
-    if (ok) { setModalOpen(false); setEditingResolutionId(null); setForm({ meetingDate: today(), meetingDateJalali: jalaliToday(), number: "", text: "", notes: "", status: "before", groupIds: [], unitIds: [], people: [], publishToAll: false, startDate: today(), startDateJalali: jalaliToday(), dueDate: "", dueDateJalali: "", requiresPeriodicReport: false, reportFrequency: "weekly", cancellationReason: "" }); }
+    if (ok) { setModalOpen(false); setEditingResolutionId(null); setForm({ meetingDate: today(), meetingDateJalali: jalaliToday(), number: "", text: "", notes: "", status: "before", groupIds: [], unitIds: [], people: [], publishToAll: false, startDate: tomorrow(), startDateJalali: gregorianToJalali(tomorrow()), dueDate: "", dueDateJalali: "", requiresPeriodicReport: false, reportFrequency: "weekly", cancellationReason: "" }); }
   }
   async function updateResolutionStatus(resolutionId: number, status: string, nationalId?: string) {
     if (status === "cancelled") {
