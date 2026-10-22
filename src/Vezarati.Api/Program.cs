@@ -386,6 +386,7 @@ app.MapPatch("/api/resolutions/{id:int}/status", async (int id, ResolutionStatus
     var targetNationalId = isAdmin ? request.NationalId?.Trim() : nationalId;
     if (!isAdmin && !string.IsNullOrWhiteSpace(request.NationalId) && request.NationalId != nationalId)
         return Results.StatusCode(StatusCodes.Status403Forbidden);
+    if (!isAdmin && record.Progress.Any(item => item.NationalId == nationalId && item.Status == "rejected")) return Results.Conflict(new { error = "وضعیت شما برای این مصوبه رد شده و امکان اقدام ندارید." });
 
     if (!string.IsNullOrWhiteSpace(targetNationalId))
     {
