@@ -991,6 +991,7 @@ static async Task RefreshResolutionStatuses(AppDb db)
                 var done = item.Progress.Where(progress => progress.Status == "completed").Select(progress => progress.NationalId).ToHashSet(StringComparer.Ordinal);
                 var dueDate = item.DueDate.Value;
                 done.UnionWith(item.Events.Where(entry => !string.IsNullOrWhiteSpace(entry.NationalId)
+                    && !entry.Text.StartsWith("وضعیت پیگیری", StringComparison.Ordinal)
                     && DateOnly.FromDateTime(entry.CreatedAt.LocalDateTime) > dueDate).Select(entry => entry.NationalId));
                 if (recipients.All(done.Contains)) computed = "completed";
             }
