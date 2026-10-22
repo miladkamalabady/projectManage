@@ -71,3 +71,5 @@
 .form-grid>.date-field{display:grid;gap:6px;font-size:11px;color:#63757b}
 .form-grid>.date-field>span{font-size:11px;color:#63757b}
 .form-grid>.date-field .rmdp-container,.form-grid>.date-field .rmdp-input{width:100%}
+
+.date-validation-error{padding:9px 11px;border:1px solid #efb5ae;border-radius:8px;background:#fff0ee;color:#9b2c23;font-size:11px;font-weight:700}
