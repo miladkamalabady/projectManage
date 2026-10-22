@@ -951,6 +951,9 @@ static string TimeBasedResolutionStatus(DateOnly meetingDate, DateOnly startDate
 
 static async Task RefreshResolutionStatuses(AppDb db)
 {
+    await ResolutionStatusRefresh.Gate.WaitAsync();
+    try
+    {
     var today = DateOnly.FromDateTime(DateTime.Today);
     var records = await db.Resolutions
         .Where(item => !item.IsArchived && item.Status != "completed" && item.Status != "cancelled")
@@ -995,7 +998,14 @@ static async Task RefreshResolutionStatuses(AppDb db)
         if (item.Status != computed) { item.Status = computed; item.UpdatedAt = DateTimeOffset.UtcNow; changed = true; }
     }
     if (changed) await db.SaveChangesAsync();
+    }
+    finally
+    {
+        ResolutionStatusRefresh.Gate.Release();
+    }
 }
+
+static class ResolutionStatusRefresh { public static readonly SemaphoreSlim Gate = new(1, 1); }
 
 static class ResolutionStatuses { public static readonly string[] All = ["before", "in_progress", "completed", "delayed", "cancelled"]; public static readonly string[] Frequencies = ["daily", "weekly", "monthly"]; }
 static class AttachmentFileTypes
