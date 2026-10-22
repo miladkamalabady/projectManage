@@ -88,7 +88,7 @@ app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context
     if (string.IsNullOrWhiteSpace(authorization)) return Results.Problem("تنظیم اتصال SSO روی سرور انجام نشده است.", statusCode: StatusCodes.Status503ServiceUnavailable);
     try
     {
-        var currentUri = new Uri(configuration["SSO:UserInfoUrl"] ?? "http://my1.medu.ir/api/sso/UserInfo");
+        var currentUri = new Uri(configuration["SSO:UserInfoUrl"] ?? "https://my.medu.ir/api/sso/UserInfo");
         using var client = clients.CreateClient("MeduSso");
         HttpResponseMessage? pendingResponse = null;
         for (var redirectCount = 0; redirectCount <= 5; redirectCount++)
