@@ -240,6 +240,21 @@ app.MapPost("/api/auth/logout", async (HttpContext context) =>
 
 app.MapGet("/api/dashboard", async (HttpContext context, AppDb db) =>
 {
+    var starting = await db.Resolutions.Include(item => item.Progress).Where(item => !item.IsArchived && item.Status == "before" && item.StartDate.HasValue && item.StartDate.Value <= DateOnly.FromDateTime(DateTime.Today)).ToListAsync();
+    if (starting.Count > 0)
+    {
+        foreach (var item in starting)
+        {
+            item.Status = "in_progress";
+            item.UpdatedAt = DateTimeOffset.UtcNow;
+            foreach (var progress in item.Progress.Where(progress => progress.Status == "before"))
+            {
+                progress.Status = "in_progress";
+                progress.UpdatedAt = DateTimeOffset.UtcNow;
+            }
+        }
+        await db.SaveChangesAsync();
+    }
     var id = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
     var isAdmin = context.User.IsInRole("ادمین");
     var groups = await db.Groups.Include(g => g.Members).ToListAsync();
@@ -271,6 +286,21 @@ app.MapGet("/api/dashboard", async (HttpContext context, AppDb db) =>
 
 app.MapGet("/api/resolutions", async (HttpContext context, AppDb db) =>
 {
+    var starting = await db.Resolutions.Include(item => item.Progress).Where(item => !item.IsArchived && item.Status == "before" && item.StartDate.HasValue && item.StartDate.Value <= DateOnly.FromDateTime(DateTime.Today)).ToListAsync();
+    if (starting.Count > 0)
+    {
+        foreach (var item in starting)
+        {
+            item.Status = "in_progress";
+            item.UpdatedAt = DateTimeOffset.UtcNow;
+            foreach (var progress in item.Progress.Where(progress => progress.Status == "before"))
+            {
+                progress.Status = "in_progress";
+                progress.UpdatedAt = DateTimeOffset.UtcNow;
+            }
+        }
+        await db.SaveChangesAsync();
+    }
     var id = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
     var isAdmin = context.User.IsInRole("ادمین");
     var records = await db.Resolutions.AsNoTracking().Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Attachments.Where(attachment => isAdmin || attachment.ApprovedForAll)).Include(r => r.Events).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).OrderByDescending(r => r.MeetingDate).ToListAsync();
@@ -294,7 +324,7 @@ app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpC
     if (request.StartDate is null) return Results.BadRequest(new { error = "زمان شروع مصوبه الزامی است." });
     if (request.GroupId.HasValue && !await db.Groups.AnyAsync(g => g.Id == request.GroupId)) return Results.BadRequest(new { error = "گروه انتخاب‌شده پیدا نشد." });
     if (!ResolutionStatuses.All.Contains(request.Status)) return Results.BadRequest(new { error = "وضعیت نامعتبر است." });
-    var record = new Resolution { PublishToAll = request.PublishToAll, StartDate = request.StartDate, StartDateJalali = request.StartDate is null ? "" : (request.StartDateJalali ?? JalaliDate.FromGregorian(request.StartDate.Value)), DueDate = request.DueDate, DueDateJalali = request.DueDate is null ? "" : (request.DueDateJalali ?? JalaliDate.FromGregorian(request.DueDate.Value)), RequiresPeriodicReport = request.RequiresPeriodicReport, ReportFrequency = request.RequiresPeriodicReport ? request.ReportFrequency ?? "" : "", CancellationReason = request.CancellationReason?.Trim() ?? "", MeetingDate = request.MeetingDate, MeetingDateJalali = string.IsNullOrWhiteSpace(request.MeetingDateJalali) ? JalaliDate.FromGregorian(request.MeetingDate) : request.MeetingDateJalali, Number = request.Number.Trim(), Text = request.Text.Trim(), Notes = request.Notes?.Trim() ?? "", Status = request.Status, GroupId = request.GroupId, CreatedAt = DateTimeOffset.UtcNow, CreatedBy = http.User.Identity?.Name ?? "کاربر" };
+    var record = new Resolution { PublishToAll = request.PublishToAll, StartDate = request.StartDate, StartDateJalali = request.StartDate is null ? "" : (request.StartDateJalali ?? JalaliDate.FromGregorian(request.StartDate.Value)), DueDate = request.DueDate, DueDateJalali = request.DueDate is null ? "" : (request.DueDateJalali ?? JalaliDate.FromGregorian(request.DueDate.Value)), RequiresPeriodicReport = request.RequiresPeriodicReport, ReportFrequency = request.RequiresPeriodicReport ? request.ReportFrequency ?? "" : "", CancellationReason = request.CancellationReason?.Trim() ?? "", MeetingDate = request.MeetingDate, MeetingDateJalali = string.IsNullOrWhiteSpace(request.MeetingDateJalali) ? JalaliDate.FromGregorian(request.MeetingDate) : request.MeetingDateJalali, Number = request.Number.Trim(), Text = request.Text.Trim(), Notes = request.Notes?.Trim() ?? "", Status = request.Status == "before" && request.StartDate <= DateOnly.FromDateTime(DateTime.Today) ? "in_progress" : request.Status, GroupId = request.GroupId, CreatedAt = DateTimeOffset.UtcNow, CreatedBy = http.User.Identity?.Name ?? "کاربر" };
     if (request.GroupIds is not null) foreach (var groupId in request.GroupIds.Distinct()) { if (!await db.Groups.AnyAsync(g => g.Id == groupId)) return Results.BadRequest(new { error = "گروه انتخاب‌شده پیدا نشد." }); record.GroupAssignments.Add(new ResolutionGroupAssignment { GroupId = groupId }); }
     foreach (var id in request.People.Distinct()) record.Assignments.Add(new ResolutionAssignment { NationalId = id });
     db.Resolutions.Add(record);
@@ -374,37 +404,29 @@ app.MapPatch("/api/resolutions/{id:int}/status", async (int id, ResolutionStatus
     if (!ResolutionStatuses.All.Contains(request.Status)) return Results.BadRequest(new { error = "وضعیت نامعتبر است." });
     var record = await db.Resolutions.Include(r => r.Progress).FirstOrDefaultAsync(r => r.Id == id);
     if (record is null) return Results.NotFound();
-    var nationalId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
-    var isAdmin = context.User.IsInRole("ادمین");
-    if (!isAdmin && request.Status == "delayed") return Results.StatusCode(StatusCodes.Status403Forbidden);
-    if (!isAdmin && request.Status == "cancelled") return Results.StatusCode(StatusCodes.Status403Forbidden);
-    if (isAdmin && request.Status == "cancelled" && string.IsNullOrWhiteSpace(request.Notes)) return Results.BadRequest(new { error = "برای لغو مصوبه، توضیحات لغو الزامی است." });
-    if (!context.User.IsInRole("ادمین"))
+    if (!context.User.IsInRole("ادمین")) return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+    var targetNationalId = request.NationalId?.Trim();
+    if (!string.IsNullOrWhiteSpace(targetNationalId))
     {
-        var directAssignment = await db.Assignments.AnyAsync(a => a.ResolutionId == id && a.NationalId == nationalId);
-        var groupAssignment = await db.GroupMembers.AnyAsync(m => m.NationalId == nationalId &&
-            ((record.GroupId.HasValue && m.GroupId == record.GroupId.Value) ||
-             db.ResolutionGroups.Any(rg => rg.ResolutionId == id && rg.GroupId == m.GroupId)));
-        if (!directAssignment && !groupAssignment && !record.PublishToAll) return Results.StatusCode(StatusCodes.Status403Forbidden);
-        var progress = record.Progress.FirstOrDefault(p => p.NationalId == nationalId);
-        if (request.Status == "completed" && progress?.ApprovalStatus != "approved") return Results.BadRequest(new { error = "برای ثبت اجرای نهایی، ابتدا گزارش اقدام را ارسال کنید تا ادمین آن را تأیید کند." });
+        if (request.Status == "cancelled") return Results.BadRequest(new { error = "لغو، وضعیت کلی مصوبه است و برای هر فرد جداگانه ثبت نمی‌شود." });
+        var progress = record.Progress.FirstOrDefault(item => item.NationalId == targetNationalId);
         if (progress is null)
         {
-            progress = new ResolutionProgress { ResolutionId = id, NationalId = nationalId };
+            progress = new ResolutionProgress { ResolutionId = id, NationalId = targetNationalId };
             record.Progress.Add(progress);
         }
         progress.Status = request.Status;
-        if (request.Status != "completed" && progress.ApprovalStatus == "approved") { progress.ApprovalStatus = "none"; progress.AdminFeedback = ""; }
         progress.Notes = request.Notes?.Trim() ?? progress.Notes;
         progress.UpdatedAt = DateTimeOffset.UtcNow;
+        if (request.Status != "completed") { progress.ApprovalStatus = "none"; progress.AdminFeedback = ""; }
+        db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = primaryAdminNationalId, UserName = "مدیر دفتر وزارتی", Text = "وضعیت پیگیری " + targetNationalId + " به «" + request.Status + "» تغییر کرد.", CreatedAt = DateTimeOffset.UtcNow });
         record.UpdatedAt = DateTimeOffset.UtcNow;
-        var personName = await db.Directory.Where(person => person.NationalId == nationalId).Select(person => person.DisplayName).FirstOrDefaultAsync() ?? nationalId;
-        db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = "وضعیت پیگیری به «" + request.Status + "» تغییر کرد.", CreatedAt = DateTimeOffset.UtcNow });
-        db.Notifications.Add(new UserNotification { NationalId = primaryAdminNationalId, ResolutionId = id, Type = "status", DateKey = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(), Text = personName + " وضعیت پیگیری مصوبه " + record.Number + " را تغییر داد.", CreatedAt = DateTimeOffset.UtcNow });
         await db.SaveChangesAsync();
         return Results.Ok(progress);
     }
-    if (!context.User.IsInRole("ادمین")) return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+    if (request.Status == "cancelled" && string.IsNullOrWhiteSpace(request.Notes)) return Results.BadRequest(new { error = "برای لغو مصوبه، توضیحات لغو الزامی است." });
     record.Status = request.Status;
     if (request.Status == "cancelled") record.CancellationReason = request.Notes!.Trim();
     record.Notes = request.Notes ?? record.Notes;
@@ -413,9 +435,6 @@ app.MapPatch("/api/resolutions/{id:int}/status", async (int id, ResolutionStatus
     await db.SaveChangesAsync();
     return Results.Ok(record);
 });
-
-
-
 app.MapPost("/api/resolutions/{id:int}/events", async (int id, ResolutionEventCreate request, HttpContext context, AppDb db) =>
 {
     var text = request.Text?.Trim() ?? "";
