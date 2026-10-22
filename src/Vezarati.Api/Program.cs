@@ -377,31 +377,42 @@ app.MapDelete("/api/resolutions/{id:int}", async (int id, AppDb db) =>
 });
 app.MapPatch("/api/resolutions/{id:int}/status", async (int id, ResolutionStatusUpdate request, HttpContext context, AppDb db) =>
 {
-    if (!ResolutionStatuses.All.Contains(request.Status)) return Results.BadRequest(new { error = "وضعیت نامعتبر است." });
+    var isAdmin = context.User.IsInRole("ادمین");
+    var nationalId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
     var record = await db.Resolutions.Include(r => r.Progress).FirstOrDefaultAsync(r => r.Id == id);
     if (record is null) return Results.NotFound();
-    if (!context.User.IsInRole("ادمین")) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    if (record.Status == "cancelled") return Results.Conflict(new { error = "این مصوبه لغو شده و امکان تغییر وضعیت آن وجود ندارد." });
 
-    var targetNationalId = request.NationalId?.Trim();
+    var targetNationalId = isAdmin ? request.NationalId?.Trim() : nationalId;
+    if (!isAdmin && !string.IsNullOrWhiteSpace(request.NationalId) && request.NationalId != nationalId)
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+
     if (!string.IsNullOrWhiteSpace(targetNationalId))
     {
-        if (request.Status == "cancelled") return Results.BadRequest(new { error = "لغو، وضعیت کلی مصوبه است و برای هر فرد جداگانه ثبت نمی‌شود." });
+        var assigned = await db.Assignments.AnyAsync(item => item.ResolutionId == id && item.NationalId == targetNationalId);
+        var groupIds = await db.ResolutionGroups.Where(item => item.ResolutionId == id).Select(item => item.GroupId).ToListAsync();
+        if (record.GroupId.HasValue) groupIds.Add(record.GroupId.Value);
+        var inGroup = await db.GroupMembers.AnyAsync(member => member.NationalId == targetNationalId && groupIds.Contains(member.GroupId));
+        if (!assigned && !inGroup && !record.PublishToAll) return Results.BadRequest(new { error = "این فرد به مصوبه ارجاع نشده است." });
+
+        var allowedIndividualStatuses = isAdmin ? new[] { "completed", "rejected", "in_progress" } : new[] { "completed", "in_progress" };
+        if (!allowedIndividualStatuses.Contains(request.Status)) return Results.BadRequest(new { error = isAdmin ? "وضعیت فرد باید اجرا شده، رد شده یا در حال اجرا باشد." : "وضعیت شما باید اجرا شده یا در حال اجرا باشد." });
         var progress = record.Progress.FirstOrDefault(item => item.NationalId == targetNationalId);
-        if (progress is null)
-        {
-            progress = new ResolutionProgress { ResolutionId = id, NationalId = targetNationalId };
-            record.Progress.Add(progress);
-        }
+        if (progress is null) { progress = new ResolutionProgress { ResolutionId = id, NationalId = targetNationalId }; record.Progress.Add(progress); }
         progress.Status = request.Status;
         progress.Notes = request.Notes?.Trim() ?? progress.Notes;
         progress.UpdatedAt = DateTimeOffset.UtcNow;
-        if (request.Status != "completed") { progress.ApprovalStatus = "none"; progress.AdminFeedback = ""; }
-        db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = primaryAdminNationalId, UserName = "مدیر دفتر وزارتی", Text = "وضعیت پیگیری " + targetNationalId + " به «" + request.Status + "» تغییر کرد.", CreatedAt = DateTimeOffset.UtcNow });
+        progress.ApprovalStatus = "none";
+        if (request.Status != "completed") progress.AdminFeedback = "";
+        db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = isAdmin ? primaryAdminNationalId : nationalId, UserName = isAdmin ? "مدیر دفتر وزارتی" : (context.User.Identity?.Name ?? "کاربر"), Text = (isAdmin ? "وضعیت پیگیری " + targetNationalId : "وضعیت پیگیری کاربر") + " به «" + request.Status + "» تغییر کرد.", CreatedAt = DateTimeOffset.UtcNow });
         record.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync();
+        await RefreshResolutionStatuses(db);
         return Results.Ok(progress);
     }
 
+    if (!isAdmin) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    if (request.Status is not ("completed" or "cancelled")) return Results.BadRequest(new { error = "ادمین فقط می‌تواند وضعیت کلی را اجرا شده یا لغو شده کند." });
     if (request.Status == "cancelled" && string.IsNullOrWhiteSpace(request.Notes)) return Results.BadRequest(new { error = "برای لغو مصوبه، توضیحات لغو الزامی است." });
     record.Status = request.Status;
     if (request.Status == "cancelled") record.CancellationReason = request.Notes!.Trim();
