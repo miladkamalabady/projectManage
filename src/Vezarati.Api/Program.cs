@@ -696,8 +696,13 @@ app.MapDelete("/api/groups/{id:int}", async (int id, AppDb db) =>
     var group = await db.Groups.Include(g => g.Members).FirstOrDefaultAsync(g => g.Id == id);
     if (group is null) return Results.NotFound(new { error = "گروه پیدا نشد." });
     if (group.Members.Count != 0) return Results.Conflict(new { error = "برای حذف گروه، ابتدا همه اعضای آن را حذف کنید." });
-    if (await db.ResolutionGroups.AnyAsync(item => item.GroupId == id) || await db.Resolutions.AnyAsync(item => item.GroupId == id))
-        return Results.Conflict(new { error = "این گروه به مصوبه ارجاع شده و قابل حذف نیست." });
+    var references = await db.Resolutions.AsNoTracking()
+        .Where(item => item.GroupId == id || item.GroupAssignments.Any(assignment => assignment.GroupId == id))
+        .OrderByDescending(item => item.MeetingDate)
+        .Select(item => new { item.Id, item.Number, item.Text, item.MeetingDateJalali, item.IsArchived })
+        .ToListAsync();
+    if (references.Count > 0)
+        return Results.Conflict(new { error = "این گروه به مصوبه ارجاع شده و قابل حذف نیست.", resolutions = references });
     db.Groups.Remove(group);
     await db.SaveChangesAsync();
     return Results.NoContent();
