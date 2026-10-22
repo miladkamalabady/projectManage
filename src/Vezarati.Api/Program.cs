@@ -305,11 +305,17 @@ app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpC
     var messageSender = http.RequestServices.GetRequiredService<MessageDispatcher>();
     var dueText = record.DueDateJalali.Length > 0 ? " مهلت پیگیری: " + record.DueDateJalali + "." : "";
     var externalMessage = "مصوبه شماره " + record.Number + " ثبت شد. لطفاً متن مصوبه را بررسی و پیگیری کنید." + dueText;
-    foreach (var recipient in recipientIds)
+    using (var sendLimit = new SemaphoreSlim(8))
     {
-        try { await messageSender.SendAsync(recipient, externalMessage, http.RequestAborted); }
-        catch (OperationCanceledException) when (http.RequestAborted.IsCancellationRequested) { throw; }
-        catch { /* external delivery must not roll back a saved resolution */ }
+        var deliveries = recipientIds.Select(async recipient =>
+        {
+            await sendLimit.WaitAsync(http.RequestAborted);
+            try { await messageSender.SendAsync(recipient, externalMessage, http.RequestAborted); }
+            catch (OperationCanceledException) when (http.RequestAborted.IsCancellationRequested) { throw; }
+            catch { /* external delivery must not roll back a saved resolution */ }
+            finally { sendLimit.Release(); }
+        });
+        await Task.WhenAll(deliveries);
     }
     return Results.Created("/api/resolutions/" + record.Id, record);
 });
