@@ -691,6 +691,16 @@ app.MapPatch("/api/attachments/{id:int}/approval", async (int id, AttachmentAppr
 });
 
 app.MapGet("/api/groups", async (HttpContext context, AppDb db) => { var groups = await db.Groups.Include(g => g.Members).OrderBy(g => g.Name).ToListAsync(); return Results.Ok(context.User.IsInRole("ادمین") ? (object)groups : groups.Where(g => g.Members.Any(m => m.NationalId == context.User.FindFirstValue(ClaimTypes.NameIdentifier))).Select(g => new { g.Id, g.Name, Members = g.Members.Where(m => m.NationalId == context.User.FindFirstValue(ClaimTypes.NameIdentifier)).ToList() })); });
+app.MapPut("/api/groups/{id:int}/category", async (int id, GroupCategoryRequest request, HttpContext context, AppDb db) =>
+{
+    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    if (request.Category is not ("group" or "unit")) return Results.BadRequest(new { error = "دسته‌بندی معتبر نیست." });
+    var group = await db.Groups.FirstOrDefaultAsync(item => item.Id == id);
+    if (group is null) return Results.NotFound(new { error = "گروه پیدا نشد." });
+    group.Category = request.Category;
+    await db.SaveChangesAsync();
+    return Results.Ok(new { group.Id, group.Name, group.Category });
+});
 app.MapDelete("/api/groups/{id:int}", async (int id, AppDb db) =>
 {
     var group = await db.Groups.Include(g => g.Members).FirstOrDefaultAsync(g => g.Id == id);
@@ -916,6 +926,7 @@ app.Run();
 record ResolutionCreate(DateOnly MeetingDate, string? MeetingDateJalali, string Number, string Text, string? Notes, string Status, int? GroupId, List<int>? GroupIds, List<string> People, bool PublishToAll, DateOnly? DueDate, string? DueDateJalali, DateOnly? StartDate, string? StartDateJalali, bool RequiresPeriodicReport, string? ReportFrequency, string? CancellationReason);
 record ResolutionStatusUpdate(string Status, string? Notes, string? NationalId);
 record GroupCreate(string Name);
+record GroupCategoryRequest(string Category);
 record ResolutionEventCreate(string Text, string NationalId, string? UserName);
 record AttachmentApprovalRequest(string NationalId, bool ApprovedForAll);
 record CompletionReportRequest(string NationalId, string UserName, string Text);
