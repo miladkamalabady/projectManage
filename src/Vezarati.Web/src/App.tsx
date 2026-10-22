@@ -78,7 +78,6 @@ export default function App() {
   const [reportQuery, setReportQuery] = useState("");
   const [reportPage, setReportPage] = useState(1);
   const [reportTaskSelection, setReportTaskSelection] = useState<{person: Report["people"][number]; status: "all" | "completed" | "pending" | "delayed"} | null>(null);
-  const [reportTaskSelection, setReportTaskSelection] = useState<{person: Report["people"][number]; status: "all" | "completed" | "pending" | "delayed"} | null>(null);
   const [peopleQuery, setPeopleQuery] = useState("");
   const [resolutionPage, setResolutionPage] = useState(1);
   const [modalOpen, setModalOpen] = useState(false);
