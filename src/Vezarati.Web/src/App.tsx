@@ -72,7 +72,7 @@ const jalaliToday = () => gregorianToJalali(today());
 const jalaliParts = (value: string) => value.split(".").map(Number);
 const normalizeJalaliMonth = (value: string) => { const [year,month]=String(value||"").split(".").map(Number); if(Number.isInteger(year)&&year>=1300&&year<=1600&&Number.isInteger(month)&&month>=1&&month<=12) return `${year}.${String(month).padStart(2,"0")}.01`; const [fallbackYear,fallbackMonth]=jalaliParts(jalaliToday()); return `${fallbackYear}.${String(fallbackMonth).padStart(2,"0")}.01`; };
 const jalaliMonthTitle = (value: string) => { const safeMonth=normalizeJalaliMonth(value); const date=new Date(`${jalaliToGregorian(safeMonth)}T12:00:00`); return new Intl.DateTimeFormat("fa-IR-u-ca-persian", { month: "long", year: "numeric", numberingSystem: "arabext" }).format(Number.isNaN(date.getTime())?new Date():date); };
-const jalaliMonthDays = (value: string) => { const [year,month]=jalaliParts(value); return month<=6?31:month<=11?30:((year-979)%33===1||(year-979)%33===5||(year-979)%33===9||(year-979)%33===13||(year-979)%33===17||(year-979)%33===22||(year-979)%33===26||(year-979)%33===30?30:29); };
+const jalaliMonthDays = (value: string) => { const [year,month]=jalaliParts(normalizeJalaliMonth(value)); return month<=6?31:month<=11?30:((year-979)%33===1||(year-979)%33===5||(year-979)%33===9||(year-979)%33===13||(year-979)%33===17||(year-979)%33===22||(year-979)%33===26||(year-979)%33===30?30:29); };
 const jalaliDayOffset = (value: string) => { const date=new Date(`${jalaliToGregorian(normalizeJalaliMonth(value))}T12:00:00`); return Number.isNaN(date.getTime())?0:(date.getDay()+1)%7; };
 const shiftJalaliMonth = (value: string, delta: number) => { let [year,month]=jalaliParts(value); month+=delta; if(month<1){month=12;year--;} if(month>12){month=1;year++;} return `${year}.${String(month).padStart(2,"0")}.01`; };
 const jalaliDateAt = (monthValue: string, day: number) => { const [year,month]=jalaliParts(monthValue); return `${year}.${String(month).padStart(2,"0")}.${String(day).padStart(2,"0")}`; };
@@ -172,7 +172,9 @@ export default function App() {
         .finally(() => { if (active) setAuthReady(true); });
     }
     return () => { active = false; };
-  }, []);  useEffect(() => { if (authUser) void load(); }, [authUser?.nationalId]);
+  }, []);  useEffect(() => { const safe=normalizeJalaliMonth(calendarMonth); if(safe!==calendarMonth) setCalendarMonth(safe); }, [calendarMonth]);
+  useEffect(() => { const [year,month,day]=jalaliParts(selectedDay); const valid=Number.isInteger(year)&&year>=1300&&year<=1600&&Number.isInteger(month)&&month>=1&&month<=12&&Number.isInteger(day)&&day>=1&&day<=jalaliMonthDays(`${year}.${String(month).padStart(2,"0")}.01`); if(!valid){const todayJalali=jalaliToday();setSelectedDay(todayJalali);setCalendarMonth(todayJalali.slice(0,7)+".01");} }, [selectedDay]);
+  useEffect(() => { if (authUser) void load(); }, [authUser?.nationalId]);
   useEffect(() => { if (calendarTargetId === null) return; const target = document.getElementById(`resolution-${calendarTargetId}`); if (target) { target.scrollIntoView({ behavior: "smooth", block: "center" }); setCalendarTargetId(null); } }, [calendarTargetId, selectedDay]);
   useEffect(() => { if(tab!=="wall"||wallStatusFilter!=="all") return; const [year,month,day]=jalaliParts(selectedDay); const monthKey=`${year}.${String(month).padStart(2,"0")}.01`; if(monthKey!==calendarMonth) return; const week=Math.floor((jalaliDayOffset(calendarMonth)+day-1)/7); document.getElementById(`calendar-week-${week}`)?.scrollIntoView({behavior:"smooth",block:"nearest",inline:"center"}); }, [selectedDay,calendarMonth,tab,wallStatusFilter]);
 
