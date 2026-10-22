@@ -52,6 +52,7 @@ public sealed class ResolutionGroup
 {
     public int Id { get; set; }
     public string Name { get; set; } = "";
+    public string Category { get; set; } = "";
     public List<GroupMember> Members { get; set; } = [];
     [JsonIgnore]
     public List<ResolutionGroupAssignment> Resolutions { get; set; } = [];
@@ -401,6 +402,8 @@ public static class SchemaCompatibility
         foreach (var (column, sql) in userNullableColumnSql)
             if (userColumns.Count > 0 && !userColumns.Contains(column))
                 await db.Database.ExecuteSqlRawAsync(sql);
+        var groupColumns = await ReadColumns(db, "Groups");
+        if (groupColumns.Count > 0 && !groupColumns.Contains("Category")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Groups ADD COLUMN Category TEXT NOT NULL DEFAULT '';");
         var directoryColumns = await ReadColumns(db, "Directory");
         if (directoryColumns.Count > 0 && !directoryColumns.Contains("Title")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Directory ADD COLUMN Title TEXT NOT NULL DEFAULT '';");
         await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS ResolutionReports (Id INTEGER NOT NULL CONSTRAINT PK_ResolutionReports PRIMARY KEY AUTOINCREMENT, ResolutionId INTEGER NOT NULL, NationalId TEXT NOT NULL, UserName TEXT NOT NULL DEFAULT '', Text TEXT NOT NULL DEFAULT '', ReportType TEXT NOT NULL DEFAULT 'completion', PeriodKey TEXT NOT NULL DEFAULT '', SubmittedAt TEXT NOT NULL, CONSTRAINT FK_ResolutionReports_Resolutions_ResolutionId FOREIGN KEY (ResolutionId) REFERENCES Resolutions (Id) ON DELETE CASCADE);");
