@@ -281,7 +281,7 @@ app.MapGet("/api/dashboard", async (HttpContext context, AppDb db) =>
         var role = titles.Count > 0 ? string.Join("، ", titles) : person?.Title ?? "کاربر";
         currentUser = person is null ? null : new { nationalId = person.NationalId, displayName = person.DisplayName, role };
     }
-    return Results.Ok(new { currentUser, groups = isAdmin ? (object)groups : groups.Where(g => g.Members.Any(m => m.NationalId == id)).Select(g => new { g.Id, g.Name, Members = g.Members.Where(m => m.NationalId == id).ToList() }), resolutions = mine });
+    return Results.Ok(new { currentUser, groups = isAdmin ? (object)groups : groups.Where(g => g.Members.Any(m => m.NationalId == id)).Select(g => new { g.Id, g.Name, g.Category, Members = g.Members.Where(m => m.NationalId == id).ToList() }), resolutions = mine });
 });
 
 app.MapGet("/api/resolutions", async (HttpContext context, AppDb db) =>
