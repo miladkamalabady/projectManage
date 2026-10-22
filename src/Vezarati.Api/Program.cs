@@ -510,15 +510,18 @@ app.MapPost("/api/resolutions/{id:int}/reports", async (int id, ResolutionSubmis
 
 app.MapGet("/api/reports/submissions", async (AppDb db) =>
 {
-    var reports = await db.ResolutionReports.Include(report => report.Resolution).OrderByDescending(report => report.SubmittedAt).ToListAsync();
+    // SQLite cannot reliably translate ordering for DateTimeOffset; sort after materializing.
+    var reports = (await db.ResolutionReports.Include(report => report.Resolution).ToListAsync())
+        .OrderByDescending(report => report.SubmittedAt)
+        .ToList();
     var directory = await db.Directory.AsNoTracking().ToDictionaryAsync(person => person.NationalId, person => (person.DisplayName, person.Title));
     var positions = await db.Users.AsNoTracking().ToDictionaryAsync(user => user.NationalId, user => user.OrgPositionDesc);
     return Results.Ok(reports.Select(report => new
     {
         report.Id,
         report.ResolutionId,
-        ResolutionNumber = report.Resolution!.Number,
-        ResolutionText = report.Resolution.Text,
+        ResolutionNumber = report.Resolution?.Number ?? "",
+        ResolutionText = report.Resolution?.Text ?? "",
         report.NationalId,
         UserName = string.IsNullOrWhiteSpace(report.UserName) ? directory.GetValueOrDefault(report.NationalId, (DisplayName: report.NationalId, Title: "")).DisplayName : report.UserName,
         UserTitle = !string.IsNullOrWhiteSpace(positions.GetValueOrDefault(report.NationalId)) ? positions.GetValueOrDefault(report.NationalId) : directory.GetValueOrDefault(report.NationalId, (DisplayName: "", Title: "")).Title,
