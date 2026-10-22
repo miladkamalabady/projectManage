@@ -450,13 +450,13 @@ function ResolutionCard({ item, groups, viewerId, isAdmin, onStatus, onUpload, e
   groups.filter(group => groupIds.has(group.id)).flatMap(group => group.members).forEach(member => memberMap.set(member.nationalId, member));
   const members = Array.from(memberMap.values());
   const personalProgress = item.progress?.find(progress => progress.nationalId === viewerId);
-  const effectiveMemberStatus = (nationalId: string) => { const saved=item.progress?.find(progress=>progress.nationalId===nationalId)?.status; return saved==="completed"||saved==="rejected" ? saved : item.status; };
+  const effectiveMemberStatus = (nationalId: string) => { const saved=item.progress?.find(progress=>progress.nationalId===nationalId)?.status; return saved==="completed"||saved==="rejected"||saved==="in_progress" ? saved : item.status; };
   const personalStatus = isAdmin ? item.status : effectiveMemberStatus(viewerId);
   const isRejected = !isAdmin && personalStatus === "rejected";
   const statusFor = (nationalId: string) => effectiveMemberStatus(nationalId);
   const completedCount = members.filter(member => statusFor(member.nationalId) === "completed").length;
   const completionPercent = members.length ? Math.round(completedCount * 100 / members.length) : 0;
-  const statusCounts = ["completed", "in_progress", "before", "delayed"].map(status => ({ status, count: members.filter(member => statusFor(member.nationalId) === status).length }));
+  const statusCounts = ["completed", "rejected", "in_progress", "before", "delayed"].map(status => ({ status, count: members.filter(member => statusFor(member.nationalId) === status).length }));
   return <article id={anchorId} className="resolution-card">
     <div className="card-top"><span className="resolution-no">مصوبه {item.number}</span><span className={`status ${personalStatus}`}>{labels[personalStatus] || personalStatus}</span></div>
     {!isAdmin && item.status !== "cancelled" && (isRejected ? <div className="rejected-lock notice" role="status">وضعیت پیگیری شما رد شده است؛ امکان ثبت گزارش، رویداد یا پیوست ندارید.</div> : <div className="personal-status-control"><span>وضعیت پیگیری من</span><select className={`status-select ${personalStatus}`} value={personalStatus==="completed"?"completed":"in_progress"} onChange={event=>onStatus(event.target.value,viewerId)}><option value="in_progress">در حال اجرا</option><option value="completed">اجرا شده</option></select></div>)}
