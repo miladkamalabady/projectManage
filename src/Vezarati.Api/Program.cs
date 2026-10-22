@@ -15,6 +15,7 @@ builder.Services.Configure<FormOptions>(options => options.MultipartBodyLengthLi
 builder.Services.AddDbContext<AppDb>(options => options.UseSqlite(builder.Configuration.GetConnectionString("Default") ?? "Data Source=data/vezarati.db"));
 builder.Services.AddScoped<NationalIdLookup, LocalNationalIdLookup>();
 builder.Services.AddScoped<MessageDispatcher>();
+builder.Services.AddHostedService<ResolutionStatusRefreshService>();
 builder.Services.AddHttpClient("MessageApi", client => client.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddHttpClient("MeduSso", client => client.Timeout = TimeSpan.FromSeconds(60)).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme).AddCookie(options =>
@@ -240,7 +241,7 @@ app.MapPost("/api/auth/logout", async (HttpContext context) =>
 
 app.MapGet("/api/dashboard", async (HttpContext context, AppDb db) =>
 {
-    await RefreshResolutionStatuses(db);
+    await ResolutionStatusUpdater.RefreshResolutionStatuses(db);
     var id = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
     var isAdmin = context.User.IsInRole("ادمین");
     var groups = await db.Groups.Include(g => g.Members).ToListAsync();
@@ -272,7 +273,7 @@ app.MapGet("/api/dashboard", async (HttpContext context, AppDb db) =>
 
 app.MapGet("/api/resolutions", async (HttpContext context, AppDb db) =>
 {
-    await RefreshResolutionStatuses(db);
+    await ResolutionStatusUpdater.RefreshResolutionStatuses(db);
     var id = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
     var isAdmin = context.User.IsInRole("ادمین");
     var records = await db.Resolutions.AsNoTracking().Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Attachments.Where(attachment => isAdmin || attachment.ApprovedForAll)).Include(r => r.Events).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).OrderByDescending(r => r.MeetingDate).ToListAsync();
@@ -298,7 +299,7 @@ app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpC
     if (request.DueDate.HasValue && request.DueDate.Value <= request.StartDate.Value) return Results.BadRequest(new { error = "زمان سررسید باید بعد از زمان شروع باشد." });
     if (request.GroupId.HasValue && !await db.Groups.AnyAsync(g => g.Id == request.GroupId)) return Results.BadRequest(new { error = "گروه انتخاب‌شده پیدا نشد." });
     if (!ResolutionStatuses.All.Contains(request.Status)) return Results.BadRequest(new { error = "وضعیت نامعتبر است." });
-    var record = new Resolution { PublishToAll = request.PublishToAll, StartDate = request.StartDate, StartDateJalali = request.StartDate is null ? "" : (request.StartDateJalali ?? JalaliDate.FromGregorian(request.StartDate.Value)), DueDate = request.DueDate, DueDateJalali = request.DueDate is null ? "" : (request.DueDateJalali ?? JalaliDate.FromGregorian(request.DueDate.Value)), RequiresPeriodicReport = request.RequiresPeriodicReport, ReportFrequency = request.RequiresPeriodicReport ? request.ReportFrequency ?? "" : "", CancellationReason = request.CancellationReason?.Trim() ?? "", MeetingDate = request.MeetingDate, MeetingDateJalali = string.IsNullOrWhiteSpace(request.MeetingDateJalali) ? JalaliDate.FromGregorian(request.MeetingDate) : request.MeetingDateJalali, Number = request.Number.Trim(), Text = request.Text.Trim(), Notes = request.Notes?.Trim() ?? "", Status = TimeBasedResolutionStatus(request.MeetingDate, request.StartDate.Value, request.DueDate, DateOnly.FromDateTime(DateTime.Today)), GroupId = request.GroupId, CreatedAt = DateTimeOffset.UtcNow, CreatedBy = http.User.Identity?.Name ?? "کاربر" };
+    var record = new Resolution { PublishToAll = request.PublishToAll, StartDate = request.StartDate, StartDateJalali = request.StartDate is null ? "" : (request.StartDateJalali ?? JalaliDate.FromGregorian(request.StartDate.Value)), DueDate = request.DueDate, DueDateJalali = request.DueDate is null ? "" : (request.DueDateJalali ?? JalaliDate.FromGregorian(request.DueDate.Value)), RequiresPeriodicReport = request.RequiresPeriodicReport, ReportFrequency = request.RequiresPeriodicReport ? request.ReportFrequency ?? "" : "", CancellationReason = request.CancellationReason?.Trim() ?? "", MeetingDate = request.MeetingDate, MeetingDateJalali = string.IsNullOrWhiteSpace(request.MeetingDateJalali) ? JalaliDate.FromGregorian(request.MeetingDate) : request.MeetingDateJalali, Number = request.Number.Trim(), Text = request.Text.Trim(), Notes = request.Notes?.Trim() ?? "", Status = ResolutionStatusUpdater.TimeBasedResolutionStatus(request.MeetingDate, request.StartDate.Value, request.DueDate, DateOnly.FromDateTime(DateTime.Today)), GroupId = request.GroupId, CreatedAt = DateTimeOffset.UtcNow, CreatedBy = http.User.Identity?.Name ?? "کاربر" };
     if (request.GroupIds is not null) foreach (var groupId in request.GroupIds.Distinct()) { if (!await db.Groups.AnyAsync(g => g.Id == groupId)) return Results.BadRequest(new { error = "گروه انتخاب‌شده پیدا نشد." }); record.GroupAssignments.Add(new ResolutionGroupAssignment { GroupId = groupId }); }
     foreach (var id in request.People.Distinct()) record.Assignments.Add(new ResolutionAssignment { NationalId = id });
     db.Resolutions.Add(record);
@@ -356,7 +357,7 @@ app.MapPut("/api/resolutions/{id:int}", async (int id, ResolutionCreate request,
     record.PublishToAll = request.PublishToAll;
     record.MeetingDateJalali = string.IsNullOrWhiteSpace(request.MeetingDateJalali) ? JalaliDate.FromGregorian(request.MeetingDate) : request.MeetingDateJalali;
     record.Number = request.Number.Trim(); record.Text = request.Text.Trim(); record.Notes = request.Notes?.Trim() ?? "";
-    if (record.Status is not ("completed" or "cancelled")) record.Status = TimeBasedResolutionStatus(record.MeetingDate, request.StartDate.Value, request.DueDate, DateOnly.FromDateTime(DateTime.Today)); record.GroupId = request.GroupId; record.UpdatedAt = DateTimeOffset.UtcNow;
+    if (record.Status is not ("completed" or "cancelled")) record.Status = ResolutionStatusUpdater.TimeBasedResolutionStatus(record.MeetingDate, request.StartDate.Value, request.DueDate, DateOnly.FromDateTime(DateTime.Today)); record.GroupId = request.GroupId; record.UpdatedAt = DateTimeOffset.UtcNow;
     db.ResolutionGroups.RemoveRange(record.GroupAssignments);
     foreach (var groupId in groupIds) record.GroupAssignments.Add(new ResolutionGroupAssignment { ResolutionId = id, GroupId = groupId });
     db.Assignments.RemoveRange(record.Assignments);
@@ -408,7 +409,7 @@ app.MapPatch("/api/resolutions/{id:int}/status", async (int id, ResolutionStatus
         db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = isAdmin ? primaryAdminNationalId : nationalId, UserName = isAdmin ? "مدیر دفتر وزارتی" : (context.User.Identity?.Name ?? "کاربر"), Text = (isAdmin ? "وضعیت پیگیری " + targetNationalId : "وضعیت پیگیری کاربر") + " به «" + request.Status + "» تغییر کرد.", CreatedAt = DateTimeOffset.UtcNow });
         record.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync();
-        await RefreshResolutionStatuses(db);
+        await ResolutionStatusUpdater.RefreshResolutionStatuses(db);
         return Results.Ok(progress);
     }
 
@@ -461,7 +462,7 @@ app.MapPost("/api/resolutions/{id:int}/events", async (int id, ResolutionEventCr
         progress.UpdatedAt = DateTimeOffset.UtcNow;
     }
     await db.SaveChangesAsync();
-    await RefreshResolutionStatuses(db);
+    await ResolutionStatusUpdater.RefreshResolutionStatuses(db);
     return Results.Created($"/api/resolutions/{id}/events/{eventEntry.Id}", eventEntry);
 });
 
@@ -495,7 +496,7 @@ app.MapPost("/api/resolutions/{id:int}/completion-report", async (int id, Comple
     var notifyKey = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
     db.Notifications.Add(new UserNotification { NationalId = primaryAdminNationalId, ResolutionId = id, Type = "report", DateKey = id + ":" + notifyKey, Text = "گزارش اقدام جدید برای مصوبه " + resolution.Number + " ثبت شد.", CreatedAt = DateTimeOffset.UtcNow });
     await db.SaveChangesAsync();
-    await RefreshResolutionStatuses(db);
+    await ResolutionStatusUpdater.RefreshResolutionStatuses(db);
     return Results.Ok(progress);
 });
 
@@ -528,7 +529,7 @@ app.MapPost("/api/resolutions/{id:int}/reports", async (int id, ResolutionSubmis
     db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = "گزارش دوره‌ای (" + period.Key + ") برای مصوبه " + resolution.Number + " ثبت شد.", CreatedAt = submittedAt });
     db.Notifications.Add(new UserNotification { NationalId = primaryAdminNationalId, ResolutionId = id, Type = "periodic-report", DateKey = id + ":" + submittedAt.ToUnixTimeMilliseconds(), Text = "گزارش دوره‌ای جدید از " + personName + " برای مصوبه " + resolution.Number + " ثبت شد.", CreatedAt = submittedAt });
     await db.SaveChangesAsync();
-    await RefreshResolutionStatuses(db);
+    await ResolutionStatusUpdater.RefreshResolutionStatuses(db);
     return Results.Ok(new { submitted = true, periodKey = period.Key, dueDate = period.DueDate });
 });
 
@@ -942,71 +943,83 @@ record CompletionReviewRequest(string NationalId, string AssigneeNationalId, boo
 record ArchiveUpdateRequest(string NationalId, bool IsArchived);
 record NotificationReadRequest(string NationalId);
 record MemberLookupRequest(string NationalId);
-static string TimeBasedResolutionStatus(DateOnly meetingDate, DateOnly startDate, DateOnly? dueDate, DateOnly today)
+static class ResolutionStatusUpdater
 {
-    if (today < startDate) return "before";
-    if (dueDate.HasValue && today > dueDate.Value) return "delayed";
-    return "in_progress";
-}
-
-static async Task RefreshResolutionStatuses(AppDb db)
-{
-    await ResolutionStatusRefresh.Gate.WaitAsync();
-    try
+    private static readonly SemaphoreSlim Gate = new(1, 1);
+    public static string TimeBasedResolutionStatus(DateOnly meetingDate, DateOnly startDate, DateOnly? dueDate, DateOnly today)
     {
-    var today = DateOnly.FromDateTime(DateTime.Today);
-    var records = await db.Resolutions
-        .Where(item => !item.IsArchived && item.Status != "completed" && item.Status != "cancelled")
-        .Include(item => item.Progress)
-        .Include(item => item.Assignments)
-        .Include(item => item.GroupAssignments)
-        .Include(item => item.Events)
-        .ToListAsync();
-    if (records.Count == 0) return;
-    var groupIds = records.SelectMany(item => item.GroupAssignments.Select(group => group.GroupId)
-        .Concat(item.GroupId.HasValue ? new[] { item.GroupId.Value } : Array.Empty<int>())).Distinct().ToList();
-    var memberships = groupIds.Count == 0
-        ? new List<(int GroupId, string NationalId)>()
-        : (await db.GroupMembers.Where(member => groupIds.Contains(member.GroupId))
-            .Select(member => new { member.GroupId, member.NationalId }).ToListAsync())
-            .Select(member => (member.GroupId, member.NationalId)).ToList();
-    var changed = false;
-    foreach (var item in records)
+        if (today < startDate) return "before";
+        if (dueDate.HasValue && today > dueDate.Value) return "delayed";
+        return "in_progress";
+    }
+    public static async Task RefreshResolutionStatuses(AppDb db)
     {
-        var startDate = item.StartDate ?? item.MeetingDate;
-        var computed = TimeBasedResolutionStatus(item.MeetingDate, startDate, item.DueDate, today);
-        if (item.DueDate.HasValue && today > item.DueDate.Value)
+        await Gate.WaitAsync();
+        try
         {
-            var recipients = item.Assignments.Select(assignment => assignment.NationalId).ToHashSet(StringComparer.Ordinal);
-            var linkedGroups = item.GroupAssignments.Select(group => group.GroupId).ToHashSet();
-            if (item.GroupId.HasValue) linkedGroups.Add(item.GroupId.Value);
-            recipients.UnionWith(memberships.Where(member => linkedGroups.Contains(member.GroupId)).Select(member => member.NationalId));
-            if (item.PublishToAll)
+            var today = DateOnly.FromDateTime(DateTime.Today);
+            var records = await db.Resolutions.Where(item => !item.IsArchived && item.Status != "completed" && item.Status != "cancelled")
+                .Include(item => item.Progress).Include(item => item.Assignments).Include(item => item.GroupAssignments).Include(item => item.Events).ToListAsync();
+            if (records.Count == 0) return;
+            var groupIds = records.SelectMany(item => item.GroupAssignments.Select(group => group.GroupId)
+                .Concat(item.GroupId.HasValue ? new[] { item.GroupId.Value } : Array.Empty<int>())).Distinct().ToList();
+            var memberships = groupIds.Count == 0 ? new List<(int GroupId, string NationalId)>()
+                : (await db.GroupMembers.Where(member => groupIds.Contains(member.GroupId)).Select(member => new { member.GroupId, member.NationalId }).ToListAsync())
+                    .Select(member => (member.GroupId, member.NationalId)).ToList();
+            var directoryIds = await db.Directory.Select(person => person.NationalId).ToListAsync();
+            var userIds = await db.Users.Select(user => user.NationalId).ToListAsync();
+            var changed = false;
+            foreach (var item in records)
             {
-                recipients.UnionWith(await db.Directory.Select(person => person.NationalId).ToListAsync());
-                recipients.UnionWith(await db.Users.Select(user => user.NationalId).ToListAsync());
+                var startDate = item.StartDate ?? item.MeetingDate;
+                var computed = TimeBasedResolutionStatus(item.MeetingDate, startDate, item.DueDate, today);
+                if (item.DueDate.HasValue && today > item.DueDate.Value)
+                {
+                    var recipients = item.Assignments.Select(assignment => assignment.NationalId).ToHashSet(StringComparer.Ordinal);
+                    var linkedGroups = item.GroupAssignments.Select(group => group.GroupId).ToHashSet();
+                    if (item.GroupId.HasValue) linkedGroups.Add(item.GroupId.Value);
+                    recipients.UnionWith(memberships.Where(member => linkedGroups.Contains(member.GroupId)).Select(member => member.NationalId));
+                    if (item.PublishToAll) { recipients.UnionWith(directoryIds); recipients.UnionWith(userIds); }
+                    if (recipients.Count > 0)
+                    {
+                        var done = item.Progress.Where(progress => progress.Status == "completed").Select(progress => progress.NationalId).ToHashSet(StringComparer.Ordinal);
+                        var dueDate = item.DueDate.Value;
+                        done.UnionWith(item.Events.Where(entry => !string.IsNullOrWhiteSpace(entry.NationalId)
+                            && !entry.Text.StartsWith("وضعیت پیگیری", StringComparison.Ordinal)
+                            && DateOnly.FromDateTime(entry.CreatedAt.LocalDateTime) > dueDate).Select(entry => entry.NationalId));
+                        if (recipients.All(done.Contains)) computed = "completed";
+                    }
+                }
+                if (item.Status != computed) { item.Status = computed; item.UpdatedAt = DateTimeOffset.UtcNow; changed = true; }
             }
-            if (recipients.Count > 0)
-            {
-                var done = item.Progress.Where(progress => progress.Status == "completed").Select(progress => progress.NationalId).ToHashSet(StringComparer.Ordinal);
-                var dueDate = item.DueDate.Value;
-                done.UnionWith(item.Events.Where(entry => !string.IsNullOrWhiteSpace(entry.NationalId)
-                    && !entry.Text.StartsWith("وضعیت پیگیری", StringComparison.Ordinal)
-                    && DateOnly.FromDateTime(entry.CreatedAt.LocalDateTime) > dueDate).Select(entry => entry.NationalId));
-                if (recipients.All(done.Contains)) computed = "completed";
-            }
+            if (changed) await db.SaveChangesAsync();
         }
-        if (item.Status != computed) { item.Status = computed; item.UpdatedAt = DateTimeOffset.UtcNow; changed = true; }
-    }
-    if (changed) await db.SaveChangesAsync();
-    }
-    finally
-    {
-        ResolutionStatusRefresh.Gate.Release();
+        finally { Gate.Release(); }
     }
 }
-
-static class ResolutionStatusRefresh { public static readonly SemaphoreSlim Gate = new(1, 1); }
+sealed class ResolutionStatusRefreshService : BackgroundService
+{
+    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly ILogger<ResolutionStatusRefreshService> _logger;
+    public ResolutionStatusRefreshService(IServiceScopeFactory scopeFactory, ILogger<ResolutionStatusRefreshService> logger)
+    { _scopeFactory = scopeFactory; _logger = logger; }
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<AppDb>();
+                await ResolutionStatusUpdater.RefreshResolutionStatuses(db);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+            catch (Exception error) { _logger.LogError(error, "Could not refresh resolution statuses."); }
+            try { await Task.Delay(TimeSpan.FromMinutes(5), stoppingToken); }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+        }
+    }
+}
 
 static class ResolutionStatuses { public static readonly string[] All = ["before", "in_progress", "completed", "delayed", "cancelled"]; public static readonly string[] Frequencies = ["daily", "weekly", "monthly"]; }
 static class AttachmentFileTypes
