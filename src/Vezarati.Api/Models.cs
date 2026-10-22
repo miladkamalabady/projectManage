@@ -8,8 +8,13 @@ public sealed class Resolution
     public int Id { get; set; }
     public DateOnly MeetingDate { get; set; }
     public string MeetingDateJalali { get; set; } = "";
+    public DateOnly? StartDate { get; set; }
+    public string StartDateJalali { get; set; } = "";
     public DateOnly? DueDate { get; set; }
     public string DueDateJalali { get; set; } = "";
+    public bool RequiresPeriodicReport { get; set; }
+    public string ReportFrequency { get; set; } = "";
+    public string CancellationReason { get; set; } = "";
     public string Number { get; set; } = "";
     public string Text { get; set; } = "";
     public string Notes { get; set; } = "";
@@ -27,6 +32,20 @@ public sealed class Resolution
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? UpdatedAt { get; set; }
     public string CreatedBy { get; set; } = "";
+}
+
+public sealed class ResolutionReport
+{
+    public int Id { get; set; }
+    public int ResolutionId { get; set; }
+    [JsonIgnore]
+    public Resolution? Resolution { get; set; }
+    public string NationalId { get; set; } = "";
+    public string UserName { get; set; } = "";
+    public string Text { get; set; } = "";
+    public string ReportType { get; set; } = "completion";
+    public string PeriodKey { get; set; } = "";
+    public DateTimeOffset SubmittedAt { get; set; }
 }
 
 public sealed class ResolutionGroup
@@ -155,6 +174,7 @@ public sealed class AppUser
 public sealed class AppDb(DbContextOptions<AppDb> options) : DbContext(options)
 {
     public DbSet<Resolution> Resolutions => Set<Resolution>();
+    public DbSet<ResolutionReport> ResolutionReports => Set<ResolutionReport>();
     public DbSet<ResolutionGroup> Groups => Set<ResolutionGroup>();
     public DbSet<ResolutionGroupAssignment> ResolutionGroups => Set<ResolutionGroupAssignment>();
     public DbSet<GroupMember> GroupMembers => Set<GroupMember>();
@@ -178,6 +198,9 @@ public sealed class AppDb(DbContextOptions<AppDb> options) : DbContext(options)
         model.Entity<ResolutionAttachment>().ToTable("ResolutionAttachments");
         model.Entity<UserNotification>().HasIndex(x => new { x.NationalId, x.ResolutionId, x.Type, x.DateKey }).IsUnique();
         model.Entity<ResolutionEvent>().ToTable("ResolutionEvents");
+        model.Entity<ResolutionReport>().ToTable("ResolutionReports");
+        model.Entity<ResolutionReport>().HasIndex(x => new { x.ResolutionId, x.NationalId, x.PeriodKey }).IsUnique();
+        model.Entity<ResolutionReport>().HasOne(x => x.Resolution).WithMany().HasForeignKey(x => x.ResolutionId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<ResolutionEvent>().HasOne(x => x.Resolution).WithMany(x => x.Events).HasForeignKey(x => x.ResolutionId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<ResolutionAttachment>().HasOne(x => x.Resolution).WithMany(x => x.Attachments).HasForeignKey(x => x.ResolutionId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<ResolutionProgress>().HasIndex(x => new { x.ResolutionId, x.NationalId }).IsUnique();
@@ -339,6 +362,11 @@ public static class SchemaCompatibility
         var columns = await ReadColumns(db, "Resolutions");
         if (columns.Count > 0 && !columns.Contains("MeetingDateJalali")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN MeetingDateJalali TEXT NOT NULL DEFAULT '';");
         if (columns.Count > 0 && !columns.Contains("SourceKey")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN SourceKey TEXT NULL;");
+        if (columns.Count > 0 && !columns.Contains("StartDate")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN StartDate TEXT NULL;");
+        if (columns.Count > 0 && !columns.Contains("StartDateJalali")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN StartDateJalali TEXT NOT NULL DEFAULT '';");
+        if (columns.Count > 0 && !columns.Contains("RequiresPeriodicReport")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN RequiresPeriodicReport INTEGER NOT NULL DEFAULT 0;");
+        if (columns.Count > 0 && !columns.Contains("ReportFrequency")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN ReportFrequency TEXT NOT NULL DEFAULT '';");
+        if (columns.Count > 0 && !columns.Contains("CancellationReason")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN CancellationReason TEXT NOT NULL DEFAULT '';");
         if (columns.Count > 0 && !columns.Contains("DueDate")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN DueDate TEXT NULL;");
         if (columns.Count > 0 && !columns.Contains("DueDateJalali")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN DueDateJalali TEXT NOT NULL DEFAULT '';");
         if (columns.Count > 0 && !columns.Contains("IsArchived")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN IsArchived INTEGER NOT NULL DEFAULT 0;");
@@ -374,6 +402,8 @@ public static class SchemaCompatibility
                 await db.Database.ExecuteSqlRawAsync(sql);
         var directoryColumns = await ReadColumns(db, "Directory");
         if (directoryColumns.Count > 0 && !directoryColumns.Contains("Title")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Directory ADD COLUMN Title TEXT NOT NULL DEFAULT '';");
+        await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS ResolutionReports (Id INTEGER NOT NULL CONSTRAINT PK_ResolutionReports PRIMARY KEY AUTOINCREMENT, ResolutionId INTEGER NOT NULL, NationalId TEXT NOT NULL, UserName TEXT NOT NULL DEFAULT '', Text TEXT NOT NULL DEFAULT '', ReportType TEXT NOT NULL DEFAULT 'completion', PeriodKey TEXT NOT NULL DEFAULT '', SubmittedAt TEXT NOT NULL, CONSTRAINT FK_ResolutionReports_Resolutions_ResolutionId FOREIGN KEY (ResolutionId) REFERENCES Resolutions (Id) ON DELETE CASCADE);");
+        await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_ResolutionReports_ResolutionId_NationalId_PeriodKey ON ResolutionReports (ResolutionId, NationalId, PeriodKey);");
         await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS ResolutionGroups (ResolutionId INTEGER NOT NULL, GroupId INTEGER NOT NULL, CONSTRAINT PK_ResolutionGroups PRIMARY KEY (ResolutionId, GroupId), CONSTRAINT FK_ResolutionGroups_Resolutions_ResolutionId FOREIGN KEY (ResolutionId) REFERENCES Resolutions (Id) ON DELETE CASCADE, CONSTRAINT FK_ResolutionGroups_Groups_GroupId FOREIGN KEY (GroupId) REFERENCES Groups (Id) ON DELETE CASCADE);");
         await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS ResolutionProgress (Id INTEGER NOT NULL CONSTRAINT PK_ResolutionProgress PRIMARY KEY AUTOINCREMENT, ResolutionId INTEGER NOT NULL, NationalId TEXT NOT NULL, Status TEXT NOT NULL DEFAULT 'before', Notes TEXT NOT NULL DEFAULT '', UpdatedAt TEXT NOT NULL, CONSTRAINT FK_ResolutionProgress_Resolutions_ResolutionId FOREIGN KEY (ResolutionId) REFERENCES Resolutions (Id) ON DELETE CASCADE);");
         await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_ResolutionProgress_ResolutionId_NationalId ON ResolutionProgress (ResolutionId, NationalId);");
@@ -381,6 +411,7 @@ public static class SchemaCompatibility
         if (progressColumns.Count > 0 && !progressColumns.Contains("ReportText")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE ResolutionProgress ADD COLUMN ReportText TEXT NOT NULL DEFAULT '';");
         if (progressColumns.Count > 0 && !progressColumns.Contains("ApprovalStatus")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE ResolutionProgress ADD COLUMN ApprovalStatus TEXT NOT NULL DEFAULT 'none';");
         if (progressColumns.Count > 0 && !progressColumns.Contains("AdminFeedback")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE ResolutionProgress ADD COLUMN AdminFeedback TEXT NOT NULL DEFAULT '';");
+        await db.Database.ExecuteSqlRawAsync("INSERT INTO ResolutionReports (ResolutionId, NationalId, UserName, Text, ReportType, PeriodKey, SubmittedAt) SELECT p.ResolutionId, p.NationalId, COALESCE(d.DisplayName, p.NationalId), p.ReportText, 'completion', 'legacy:' || p.ResolutionId || ':' || p.NationalId, p.UpdatedAt FROM ResolutionProgress p LEFT JOIN Directory d ON d.NationalId = p.NationalId WHERE length(trim(p.ReportText)) > 0 AND NOT EXISTS (SELECT 1 FROM ResolutionReports r WHERE r.ResolutionId = p.ResolutionId AND r.NationalId = p.NationalId AND r.PeriodKey = 'legacy:' || p.ResolutionId || ':' || p.NationalId);");
         await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS ResolutionAttachments (Id INTEGER NOT NULL CONSTRAINT PK_ResolutionAttachments PRIMARY KEY AUTOINCREMENT, ResolutionId INTEGER NOT NULL, OriginalName TEXT NOT NULL, StoredName TEXT NOT NULL, ContentType TEXT NOT NULL DEFAULT 'application/octet-stream', Size INTEGER NOT NULL, UploadedBy TEXT NOT NULL, UploaderName TEXT NOT NULL DEFAULT '', ApprovedForAll INTEGER NOT NULL DEFAULT 0, UploadedAt TEXT NOT NULL, CONSTRAINT FK_ResolutionAttachments_Resolutions_ResolutionId FOREIGN KEY (ResolutionId) REFERENCES Resolutions (Id) ON DELETE CASCADE);");
         var attachmentColumns = await ReadColumns(db, "ResolutionAttachments");
         if (attachmentColumns.Count > 0 && !attachmentColumns.Contains("UploaderName")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE ResolutionAttachments ADD COLUMN UploaderName TEXT NOT NULL DEFAULT '';");
