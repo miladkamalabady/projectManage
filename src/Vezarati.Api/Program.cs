@@ -240,21 +240,7 @@ app.MapPost("/api/auth/logout", async (HttpContext context) =>
 
 app.MapGet("/api/dashboard", async (HttpContext context, AppDb db) =>
 {
-    var starting = await db.Resolutions.Include(item => item.Progress).Where(item => !item.IsArchived && item.Status == "before" && item.StartDate.HasValue && item.StartDate.Value <= DateOnly.FromDateTime(DateTime.Today)).ToListAsync();
-    if (starting.Count > 0)
-    {
-        foreach (var item in starting)
-        {
-            item.Status = "in_progress";
-            item.UpdatedAt = DateTimeOffset.UtcNow;
-            foreach (var progress in item.Progress.Where(progress => progress.Status == "before"))
-            {
-                progress.Status = "in_progress";
-                progress.UpdatedAt = DateTimeOffset.UtcNow;
-            }
-        }
-        await db.SaveChangesAsync();
-    }
+    await RefreshResolutionStatuses(db);
     var id = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
     var isAdmin = context.User.IsInRole("ادمین");
     var groups = await db.Groups.Include(g => g.Members).ToListAsync();
@@ -267,7 +253,7 @@ app.MapGet("/api/dashboard", async (HttpContext context, AppDb db) =>
         foreach (var attachment in resolution.Attachments) attachment.UploadedBy = "";
     }
     var groupIds = groups.Where(g => g.Members.Any(m => m.NationalId == id)).Select(g => g.Id).ToHashSet();
-    var mine = isAdmin ? records : records.Where(r => !r.IsArchived && (r.PublishToAll || (r.GroupId.HasValue && groupIds.Contains(r.GroupId.Value)) || r.GroupAssignments.Any(a => groupIds.Contains(a.GroupId)) || r.Assignments.Any(a => a.NationalId == id))).ToList();
+    var mine = isAdmin ? records : records.Where(r => !r.IsArchived && r.Status != "cancelled" && (r.PublishToAll || (r.GroupId.HasValue && groupIds.Contains(r.GroupId.Value)) || r.GroupAssignments.Any(a => groupIds.Contains(a.GroupId)) || r.Assignments.Any(a => a.NationalId == id))).ToList();
     object? currentUser;
     if (isAdmin)
     {
@@ -286,27 +272,13 @@ app.MapGet("/api/dashboard", async (HttpContext context, AppDb db) =>
 
 app.MapGet("/api/resolutions", async (HttpContext context, AppDb db) =>
 {
-    var starting = await db.Resolutions.Include(item => item.Progress).Where(item => !item.IsArchived && item.Status == "before" && item.StartDate.HasValue && item.StartDate.Value <= DateOnly.FromDateTime(DateTime.Today)).ToListAsync();
-    if (starting.Count > 0)
-    {
-        foreach (var item in starting)
-        {
-            item.Status = "in_progress";
-            item.UpdatedAt = DateTimeOffset.UtcNow;
-            foreach (var progress in item.Progress.Where(progress => progress.Status == "before"))
-            {
-                progress.Status = "in_progress";
-                progress.UpdatedAt = DateTimeOffset.UtcNow;
-            }
-        }
-        await db.SaveChangesAsync();
-    }
+    await RefreshResolutionStatuses(db);
     var id = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
     var isAdmin = context.User.IsInRole("ادمین");
     var records = await db.Resolutions.AsNoTracking().Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Attachments.Where(attachment => isAdmin || attachment.ApprovedForAll)).Include(r => r.Events).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).OrderByDescending(r => r.MeetingDate).ToListAsync();
     if (isAdmin) return Results.Ok(records);
     var groupIds = (await db.GroupMembers.Where(member => member.NationalId == id).Select(member => member.GroupId).ToListAsync()).ToHashSet();
-    var mine = records.Where(r => !r.IsArchived && (r.PublishToAll || (r.GroupId.HasValue && groupIds.Contains(r.GroupId.Value)) || r.GroupAssignments.Any(a => groupIds.Contains(a.GroupId)) || r.Assignments.Any(a => a.NationalId == id))).ToList();
+    var mine = records.Where(r => !r.IsArchived && r.Status != "cancelled" && (r.PublishToAll || (r.GroupId.HasValue && groupIds.Contains(r.GroupId.Value)) || r.GroupAssignments.Any(a => groupIds.Contains(a.GroupId)) || r.Assignments.Any(a => a.NationalId == id))).ToList();
     foreach (var resolution in mine)
     {
         foreach (var progress in resolution.Progress.Where(progress => progress.NationalId != id)) { progress.ReportText = ""; progress.AdminFeedback = ""; progress.NationalId = ""; }
