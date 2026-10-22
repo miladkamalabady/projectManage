@@ -963,8 +963,9 @@ static async Task RefreshResolutionStatuses(AppDb db)
         .Concat(item.GroupId.HasValue ? new[] { item.GroupId.Value } : Array.Empty<int>())).Distinct().ToList();
     var memberships = groupIds.Count == 0
         ? new List<(int GroupId, string NationalId)>()
-        : await db.GroupMembers.Where(member => groupIds.Contains(member.GroupId))
-            .Select(member => new ValueTuple<int, string>(member.GroupId, member.NationalId)).ToListAsync();
+        : (await db.GroupMembers.Where(member => groupIds.Contains(member.GroupId))
+            .Select(member => new { member.GroupId, member.NationalId }).ToListAsync())
+            .Select(member => (member.GroupId, member.NationalId)).ToList();
     var changed = false;
     foreach (var item in records)
     {
