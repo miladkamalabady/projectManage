@@ -774,14 +774,39 @@ app.MapGet("/api/reports", async (HttpContext context, AppDb db) =>
     var records = await db.Resolutions.Where(item => !item.IsArchived).Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Group).ThenInclude(g => g!.Members).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).ThenInclude(g => g!.Members).ToListAsync();
     var directory = await db.Directory.ToDictionaryAsync(u => u.NationalId, u => (DisplayName: u.DisplayName, Title: u.Title));
     var userTitles = await db.Users.ToDictionaryAsync(u => u.NationalId, u => u.OrgPositionDesc);
-    var rows = records.SelectMany(r => (r.Group?.Members.Select(m => (NationalId: m.NationalId, DisplayName: m.DisplayName, Title: userTitles.GetValueOrDefault(m.NationalId, m.Title))) ?? Enumerable.Empty<(string NationalId, string DisplayName, string Title)>()))
-        .Concat(r.GroupAssignments.SelectMany(a => a.Group!.Members.Select(m => (NationalId: m.NationalId, DisplayName: m.DisplayName, Title: userTitles.GetValueOrDefault(m.NationalId, m.Title))))
-        .Concat(r.Assignments.Select(a => (NationalId: a.NationalId, DisplayName: directory.GetValueOrDefault(a.NationalId, (DisplayName: a.NationalId, Title: "")).DisplayName, Title: userTitles.GetValueOrDefault(a.NationalId, directory.GetValueOrDefault(a.NationalId, (DisplayName: a.NationalId, Title: "")).Title))))
-        .DistinctBy(p => p.NationalId)
-        .Select(p => new { p.NationalId, p.DisplayName, p.Title, ResolutionId = r.Id, Number = r.Number, Text = r.Text, DueDateJalali = r.DueDateJalali, Status = r.Progress.FirstOrDefault(progress => progress.NationalId == p.NationalId)?.Status ?? r.Status }))
-        .GroupBy(x => new { x.NationalId, x.DisplayName, x.Title })
-        .Select(g => new { g.Key.NationalId, g.Key.DisplayName, g.Key.Title, Total = g.Count(), Completed = g.Count(x => x.Status == "completed"), Delayed = g.Count(x => x.Status == "delayed"), Pending = g.Count(x => x.Status is "before" or "in_progress"), Tasks = g.Select(x => new { x.ResolutionId, x.Number, x.Text, x.DueDateJalali, x.Status }).ToList() })
-        .OrderByDescending(x => x.Total).ToList();
+    var personRows = new List<(string NationalId, string DisplayName, string Title, int ResolutionId, string Number, string Text, string? DueDateJalali, string Status)>();
+    foreach (var record in records)
+    {
+        var participants = (record.Group?.Members.Select(member => (NationalId: member.NationalId, DisplayName: member.DisplayName, Title: userTitles.GetValueOrDefault(member.NationalId, member.Title))) ?? Enumerable.Empty<(string NationalId, string DisplayName, string Title)>())
+            .Concat(record.GroupAssignments.SelectMany(assignment => assignment.Group!.Members.Select(member => (NationalId: member.NationalId, DisplayName: member.DisplayName, Title: userTitles.GetValueOrDefault(member.NationalId, member.Title)))))
+            .Concat(record.Assignments.Select(assignment =>
+            {
+                var person = directory.GetValueOrDefault(assignment.NationalId, (DisplayName: assignment.NationalId, Title: ""));
+                return (NationalId: assignment.NationalId, DisplayName: person.DisplayName, Title: userTitles.GetValueOrDefault(assignment.NationalId, person.Title));
+            }))
+            .DistinctBy(person => person.NationalId);
+
+        foreach (var person in participants)
+        {
+            var personStatus = record.Progress.FirstOrDefault(progress => progress.NationalId == person.NationalId)?.Status ?? record.Status;
+            personRows.Add((person.NationalId, person.DisplayName, person.Title, record.Id, record.Number, record.Text, record.DueDateJalali, personStatus));
+        }
+    }
+
+    var rows = personRows
+        .GroupBy(person => new { person.NationalId, person.DisplayName, person.Title })
+        .Select(group => new
+        {
+            group.Key.NationalId,
+            group.Key.DisplayName,
+            group.Key.Title,
+            Total = group.Count(),
+            Completed = group.Count(person => person.Status == "completed"),
+            Delayed = group.Count(person => person.Status == "delayed"),
+            Pending = group.Count(person => person.Status is "before" or "in_progress"),
+            Tasks = group.Select(person => new { ResolutionId = person.ResolutionId, Number = person.Number, Text = person.Text, DueDateJalali = person.DueDateJalali, Status = person.Status }).ToList()
+        })
+        .OrderByDescending(person => person.Total).ToList();
     if (!isAdmin) rows = rows.Where(row => row.NationalId == id).ToList();
     return Results.Ok(new { total = records.Count, completed = records.Count(r => r.Status == "completed"), delayed = records.Count(r => r.Status == "delayed"), pending = records.Count(r => r.Status is "before" or "in_progress"), people = rows });
 });
