@@ -67,3 +67,7 @@
 .week-jump input{width:145px;min-height:32px}
 .calendar-week.selected-week{border-color:#4d9b91;box-shadow:0 0 0 2px #4d9b9126}
 @media(max-width:720px){.calendar-filters{grid-template-columns:1fr}.calendar-heading{gap:8px}.calendar-heading>.secondary{padding:7px;font-size:10px}.calendar-period h3{font-size:13px}}
+
+.form-grid>.date-field{display:grid;gap:6px;font-size:11px;color:#63757b}
+.form-grid>.date-field>span{font-size:11px;color:#63757b}
+.form-grid>.date-field .rmdp-container,.form-grid>.date-field .rmdp-input{width:100%}
