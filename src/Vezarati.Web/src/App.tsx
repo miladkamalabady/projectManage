@@ -580,19 +580,17 @@ export default function App() {
         options.push({ key: `unit:${group.id}`, kind: "unit", label: group.name, detail: group.members.length ? `معاونت/اداره‌کل · ${group.members.length} مسئول` : "معاونت/اداره‌کل · مسئول ثبت نشده", groupId: group.id });
       }
     }
-    const usersById = new Map(users.map(user => [user.nationalId, user]));
+    const groupMemberIds = new Set(groups.flatMap(group => group.members.map(member => member.nationalId)));
     const postOptions = new Map<string, AssignmentOption>();
-    for (const group of groups) {
-      if (isIndividualRecipientGroup(group.name)) continue;
-      for (const member of group.members) {
-        const user = usersById.get(member.nationalId);
-        const rawTitle = user?.title?.trim() || member.title?.trim() || "";
-        if (!rawTitle || /^(عضو|کاربر)(\s|$)/.test(rawTitle)) continue;
-        const title = rawTitle.replace(/^مدیرکل\s+(?:استان|شهر)\s+/, "مدیرکل ").replace(/^مدیر\s+کل\s+(?:استان|شهر)\s+/, "مدیرکل ");
-        const key = `post:${member.nationalId}`;
-        const detail = [user?.organizationUnit, group.name].filter(Boolean).join(" · ");
-        if (!postOptions.has(key)) postOptions.set(key, { key, kind: "post", label: `${title} (${member.displayName})`, detail: `پست مسئول · ${detail}`, nationalId: member.nationalId });
-      }
+    for (const user of users) {
+      const rawTitle = user.title?.trim() || "";
+      if (!rawTitle || /^(عضو|کاربر)(\\s|$)/.test(rawTitle)) continue;
+      const isManagerOrUnitLead = /مدیر\\s*کل|معاون|رئیس|سرپرست/.test(rawTitle);
+      if (!groupMemberIds.has(user.nationalId) && !isManagerOrUnitLead) continue;
+      const title = rawTitle.replace(/^مدیرکل\\s+(?:استان|شهر)\\s+/, "مدیرکل ").replace(/^مدیر\\s+کل\\s+(?:استان|شهر)\\s+/, "مدیرکل ");
+      const key = `post:${user.nationalId}`;
+      const detail = [user.organizationUnit, user.province].filter(Boolean).join(" · ") || "پست ثبت‌شده در فهرست کاربران";
+      postOptions.set(key, { key, kind: "post", label: `${title} (${user.displayName})`, detail: `پست مسئول · ${detail}`, nationalId: user.nationalId });
     }
     options.push(...postOptions.values());
     return options;
