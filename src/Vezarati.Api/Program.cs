@@ -52,6 +52,7 @@ app.Use(async (context, next) =>
             || (path.StartsWith("/api/groups/", StringComparison.OrdinalIgnoreCase) && (HttpMethods.IsPost(context.Request.Method) || HttpMethods.IsDelete(context.Request.Method)))
             || (path.Equals("/api/attachments", StringComparison.OrdinalIgnoreCase) == false && path.StartsWith("/api/attachments/", StringComparison.OrdinalIgnoreCase) && path.EndsWith("/approval", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPatch(context.Request.Method))
             || (path.Equals("/api/users", StringComparison.OrdinalIgnoreCase) && (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsPost(context.Request.Method)))
+            || (path.StartsWith("/api/users/", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPatch(context.Request.Method))
             || path.Equals("/api/users/search", StringComparison.OrdinalIgnoreCase)
             || path.Equals("/api/reports", StringComparison.OrdinalIgnoreCase)
             || path.Equals("/api/reports/submissions", StringComparison.OrdinalIgnoreCase)
@@ -167,7 +168,7 @@ app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context
         var displayName = string.Join(" ", new[] { firstName, lastName }.Where(value => value.Length > 0));
         var position = ReadString("orgPositionDesc");
         var user = await db.Users.FirstOrDefaultAsync(item => item.NationalId == nationalId, context.RequestAborted);
-        var role = nationalId == primaryAdminNationalId ? "ادمین" : "کاربر";
+        var role = nationalId == primaryAdminNationalId ? "ادمین" : user?.Role == "ادمین" ? "ادمین" : "کاربر";
         if (user is null) { user = new AppUser { NationalId = nationalId }; db.Users.Add(user); }
         user.DisplayName = displayName;
         user.Role = role;
@@ -903,16 +904,46 @@ app.MapGet("/api/users", async (HttpContext context, AppDb db) =>
 {
     if (!context.User.IsInRole("ادمین")) return Results.StatusCode(StatusCodes.Status403Forbidden);
     var directory = await db.Directory.AsNoTracking().OrderBy(u => u.DisplayName).ToListAsync();
-    var titlesByUser = await db.Users.AsNoTracking().ToDictionaryAsync(user => user.NationalId, user => user.OrgPositionDesc);
-    return Results.Ok(directory.Select(user => new
+    var usersById = await db.Users.AsNoTracking().ToDictionaryAsync(user => user.NationalId, user => user);
+    return Results.Ok(directory.Select(user =>
     {
-        user.NationalId,
-        user.DisplayName,
-        Title = titlesByUser.GetValueOrDefault(user.NationalId, user.Title),
-        Province = titlesByUser.GetValueOrDefault(user.NationalId, user.Title).Contains("مدیر کل", StringComparison.OrdinalIgnoreCase)
-            ? ExtractProvince(titlesByUser.GetValueOrDefault(user.NationalId, user.Title))
-            : null
+        var account = usersById.GetValueOrDefault(user.NationalId);
+        var title = account?.OrgPositionDesc ?? user.Title;
+        return new
+        {
+            user.NationalId,
+            user.DisplayName,
+            Title = title,
+            Role = account?.Role ?? "کاربر",
+            Province = title.Contains("مدیر کل", StringComparison.OrdinalIgnoreCase) ? ExtractProvince(title) : null
+        };
     }));
+});
+app.MapPatch("/api/users/{nationalId}/role", async (string nationalId, SetUserRoleRequest request, HttpContext context, AppDb db) =>
+{
+    var normalizedId = NormalizeDigits(nationalId.Trim());
+    var person = await db.Directory.FirstOrDefaultAsync(user => user.NationalId == normalizedId);
+    if (person is null) return Results.NotFound(new { error = "کاربر در فهرست اشخاص پیدا نشد." });
+    if (!request.IsAdmin && normalizedId == primaryAdminNationalId)
+        return Results.Conflict(new { error = "دسترسی ادمین اصلی قابل حذف نیست." });
+    if (!request.IsAdmin && normalizedId == context.User.FindFirstValue(ClaimTypes.NameIdentifier))
+        return Results.Conflict(new { error = "نمی‌توانید دسترسی ادمین حساب فعلی خودتان را حذف کنید." });
+
+    var account = await db.Users.FirstOrDefaultAsync(user => user.NationalId == normalizedId);
+    if (account is null)
+    {
+        account = new AppUser { NationalId = normalizedId, DisplayName = person.DisplayName };
+        db.Users.Add(account);
+    }
+    if (!request.IsAdmin && account.Role == "ادمین")
+    {
+        var adminCount = await db.Users.CountAsync(user => user.Role == "ادمین");
+        if (adminCount <= 1) return Results.Conflict(new { error = "حداقل یک ادمین باید در سامانه باقی بماند." });
+    }
+    account.DisplayName = person.DisplayName;
+    account.Role = request.IsAdmin ? "ادمین" : "کاربر";
+    await db.SaveChangesAsync();
+    return Results.Ok(new { nationalId = normalizedId, displayName = person.DisplayName, role = account.Role });
 });
 app.MapGet("/api/reports", async (HttpContext context, AppDb db) =>
 {
