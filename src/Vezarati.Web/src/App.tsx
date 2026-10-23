@@ -7,13 +7,13 @@ import { Archive, Bell, CalendarDays, CheckCheck, CircleAlert, ClipboardList, Fi
 type Member = { id: number; nationalId: string; displayName: string; title: string; organizationUnit?: string; mobile?: string };
 type Group = { id: number; name: string; category?: string; members: Member[] };
 type AssignmentOption = { key: string; kind: "group" | "unit" | "post"; label: string; detail: string; groupId?: number; nationalId?: string };
-type ResolutionReport = { id: number; resolutionId: number; resolutionNumber: string; resolutionText: string; nationalId: string; userName: string; text: string; reportType: string; periodKey: string; submittedAt: string; userTitle?: string; dueDate?: string | null; approvalStatus?: string; adminFeedback?: string; attachments?: { id: number; originalName: string; contentType: string; size: number; uploaderName: string; approvedForAll: boolean; uploadedAt: string }[] };
+type ResolutionReport = { id: number; resolutionId: number; resolutionNumber: string; resolutionText: string; nationalId: string; userName: string; text: string; reportType: string; periodKey: string; submittedAt: string; userTitle?: string; dueDate?: string | null; approvalStatus?: string; adminFeedback?: string; attachments?: { id: number; resolutionReportId?: number | null; originalName: string; contentType: string; size: number; uploaderName: string; approvedForAll: boolean; uploadedAt: string }[] };
 type ResolutionProgress = { nationalId: string; status: string; notes: string; reportText?: string; approvalStatus?: string; adminFeedback?: string; updatedAt: string };
 type UserNotification = { id: number; resolutionId?: number; resolutionNumber?: string; type: string; text: string; isRead: boolean; createdAt: string };
 type BaleMessageReportItem = { id: number; displayName: string; mobile: string; text: string; status: string; attempts: number; createdAt: string; sentAt?: string | null; lastError: string };
 type BaleMessageReport = { total: number; page: number; pageSize: number; items: BaleMessageReportItem[] };
 type ResolutionEvent = { id: number; nationalId: string; userName: string; text: string; createdAt: string };
-type ResolutionAttachment = { id: number; originalName: string; contentType: string; size: number; uploadedBy: string; uploaderName: string; approvedForAll: boolean; uploadedAt: string };
+type ResolutionAttachment = { id: number; resolutionReportId?: number | null; originalName: string; contentType: string; size: number; uploadedBy: string; uploaderName: string; approvedForAll: boolean; uploadedAt: string };
 type Resolution = { publishToAll?: boolean; isArchived?: boolean; updatedAt?: string | null; startDate?: string | null; startDateJalali?: string; dueDate?: string | null; dueDateJalali?: string; requiresPeriodicReport?: boolean; reportFrequency?: string; cancellationReason?: string; id: number; meetingDate: string; meetingDateJalali?: string; number: string; text: string; notes: string; status: string; groupId: number | null; groupAssignments?: { groupId: number; group?: { name: string } }[]; assignments: { nationalId: string }[]; progress?: ResolutionProgress[]; attachments?: ResolutionAttachment[]; events?: ResolutionEvent[] };
 type DirectoryUser = { nationalId: string; displayName: string; title?: string; organizationUnit?: string; province?: string | null; role?: string; canChangeRole?: boolean };
 type Dashboard = { currentUser: { nationalId: string; displayName: string; role: string; title?: string; organizationUnit?: string }; groups: Group[]; resolutions: Resolution[] };
@@ -371,11 +371,32 @@ export default function App() {
     if (ok) setEventDrafts(current => ({ ...current, [resolutionId]: "" }));
   }
 
-  async function submitCompletionReport(resolutionId: number) {
+  async function submitCompletionReport(resolutionId: number, files: File[]) {
     const text = (reportDrafts[resolutionId] ?? "").trim();
-    if (!text) { setMessage("شرح اقدام را وارد کنید."); return; }
-    const ok = await request(`/api/resolutions/${resolutionId}/completion-report`, "POST", { nationalId: viewerId, userName: dashboard?.currentUser.displayName ?? viewerId, text });
-    if (ok) setReportDrafts(current => ({ ...current, [resolutionId]: "" }));
+    if (!text) { setMessage("شرح اقدام را وارد کنید."); return false; }
+    setBusy(true); setMessage("");
+    try {
+      const formData = new FormData();
+      formData.append("text", text);
+      formData.append("userName", dashboard?.currentUser.displayName ?? viewerId);
+      files.forEach(file => formData.append("files", file));
+      const response = await fetch(`/api/resolutions/${resolutionId}/completion-report`, { method: "POST", body: formData });
+      const result = response.status === 204 ? null : await response.json();
+      if (!response.ok) throw new Error(result?.error || "ارسال گزارش انجام نشد.");
+      setMessage("گزارش اقدام و فایل‌های پیوست برای بررسی ادمین ارسال شد.");
+      setReportDrafts(current => ({ ...current, [resolutionId]: "" }));
+      await load();
+      return true;
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "ارسال گزارش انجام نشد.");
+      return false;
+    } finally { setBusy(false); }
+  }
+  async function reviewUserReport(resolutionId: number, nationalId: string, approved: boolean) {
+    const report = reportSubmissions.filter(item => item.resolutionId === resolutionId && item.nationalId === nationalId)
+      .sort((left, right) => right.submittedAt.localeCompare(left.submittedAt))[0];
+    if (!report) { setMessage("گزارش ارسالی این کاربر پیدا نشد."); return; }
+    await reviewReportSubmission(report, approved);
   }
   async function reviewReportSubmission(report: ResolutionReport, approved: boolean) {
     const feedback = window.prompt(approved ? "توضیح تأیید گزارش (اختیاری)" : "علت رد گزارش را بنویسید");
