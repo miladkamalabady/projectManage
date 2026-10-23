@@ -331,8 +331,17 @@ app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpC
     var groupIdsToNotify = (request.GroupIds ?? (request.GroupId.HasValue ? [request.GroupId.Value] : [])).Distinct().ToHashSet();
     recipientIds.UnionWith(await db.GroupMembers.Where(member => groupIdsToNotify.Contains(member.GroupId)).Select(member => member.NationalId).ToListAsync());
     if (record.PublishToAll) recipientIds.UnionWith(await db.Directory.Select(person => person.NationalId).ToListAsync());
+    var recipientIdList = recipientIds.ToList();
+    var recipientProfiles = await db.Directory.AsNoTracking().Where(person => recipientIdList.Contains(person.NationalId)).ToListAsync();
+    var recipientAccounts = await db.Users.AsNoTracking().Where(user => recipientIdList.Contains(user.NationalId)).ToListAsync();
     foreach (var recipient in recipientIds)
-        db.Notifications.Add(new UserNotification { NationalId = recipient, ResolutionId = record.Id, Type = "assigned", DateKey = record.Id.ToString(), Text = BaleMessageText.ForAssignment(record), CreatedAt = DateTimeOffset.UtcNow });
+    {
+        var profile = recipientProfiles.FirstOrDefault(person => person.NationalId == recipient);
+        var account = recipientAccounts.FirstOrDefault(user => user.NationalId == recipient);
+        var displayName = profile?.DisplayName ?? account?.DisplayName ?? "کاربر";
+        var title = string.IsNullOrWhiteSpace(profile?.Title) ? account?.OrgPositionDesc : profile.Title;
+        db.Notifications.Add(new UserNotification { NationalId = recipient, ResolutionId = record.Id, Type = "assigned", DateKey = record.Id.ToString(), Text = BaleMessageText.ForAssignment(record, displayName, title), CreatedAt = DateTimeOffset.UtcNow });
+    }
     db.Events.Add(new ResolutionEvent { ResolutionId = record.Id, NationalId = primaryAdminNationalId, UserName = record.CreatedBy, Text = "مصوبه ثبت و برای پیگیری ارجاع شد.", CreatedAt = DateTimeOffset.UtcNow });
     await db.SaveChangesAsync();
     return Results.Created("/api/resolutions/" + record.Id, record);
@@ -384,8 +393,17 @@ app.MapPut("/api/resolutions/{id:int}", async (int id, ResolutionCreate request,
     var newRecipients = request.People.Distinct().ToHashSet();
     newRecipients.UnionWith(await db.GroupMembers.Where(member => groupIds.Contains(member.GroupId)).Select(member => member.NationalId).ToListAsync());
     if (request.PublishToAll && !wasPublic) newRecipients.UnionWith(await db.Directory.Select(person => person.NationalId).ToListAsync());
-    foreach (var recipient in newRecipients.Except(priorRecipients))
-        db.Notifications.Add(new UserNotification { NationalId = recipient, ResolutionId = id, Type = "assigned", DateKey = id + ":" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), Text = BaleMessageText.ForAssignment(record), CreatedAt = DateTimeOffset.UtcNow });
+    var newlyAssigned = newRecipients.Except(priorRecipients).ToList();
+    var recipientProfiles = await db.Directory.AsNoTracking().Where(person => newlyAssigned.Contains(person.NationalId)).ToListAsync();
+    var recipientAccounts = await db.Users.AsNoTracking().Where(user => newlyAssigned.Contains(user.NationalId)).ToListAsync();
+    foreach (var recipient in newlyAssigned)
+    {
+        var profile = recipientProfiles.FirstOrDefault(person => person.NationalId == recipient);
+        var account = recipientAccounts.FirstOrDefault(user => user.NationalId == recipient);
+        var displayName = profile?.DisplayName ?? account?.DisplayName ?? "کاربر";
+        var title = string.IsNullOrWhiteSpace(profile?.Title) ? account?.OrgPositionDesc : profile.Title;
+        db.Notifications.Add(new UserNotification { NationalId = recipient, ResolutionId = id, Type = "assigned", DateKey = id + ":" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), Text = BaleMessageText.ForAssignment(record, displayName, title), CreatedAt = DateTimeOffset.UtcNow });
+    }
     db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = primaryAdminNationalId, UserName = "مدیر دفتر وزارتی", Text = "اطلاعات مصوبه، مهلت و ارجاع‌های آن ویرایش شد.", CreatedAt = DateTimeOffset.UtcNow });
     await db.SaveChangesAsync();
     await ResolutionStatusUpdater.RefreshResolutionStatuses(db);
@@ -1146,7 +1164,7 @@ app.MapPost("/api/resolutions/{id:int}/warnings", async (int id, WarningRecipien
 
     var directory = await db.Directory.AsNoTracking()
         .Where(person => nationalIds.Contains(person.NationalId))
-        .ToDictionaryAsync(person => person.NationalId, person => person.DisplayName, context.RequestAborted);
+        .ToDictionaryAsync(person => person.NationalId, context.RequestAborted);
     var accounts = await db.Users.AsNoTracking()
         .Where(user => nationalIds.Contains(user.NationalId))
         .ToDictionaryAsync(user => user.NationalId, context.RequestAborted);
@@ -1160,7 +1178,9 @@ app.MapPost("/api/resolutions/{id:int}/warnings", async (int id, WarningRecipien
         var isAssigned = resolution.Assignments.Any(assignment => assignment.NationalId == nationalId)
             || resolution.Group?.Members.Any(member => member.NationalId == nationalId) == true
             || resolution.GroupAssignments.Any(assignment => assignment.Group?.Members.Any(member => member.NationalId == nationalId) == true);
-        var name = directory.GetValueOrDefault(nationalId, accounts.GetValueOrDefault(nationalId)?.DisplayName ?? "کاربر");
+        var profile = directory.GetValueOrDefault(nationalId);
+        var account = accounts.GetValueOrDefault(nationalId);
+        var name = profile?.DisplayName ?? account?.DisplayName ?? "کاربر";
         if (!isAssigned || memberStatus is not ("delayed" or "in_progress"))
         {
             results.Add(new { nationalId, displayName = name, queued = false, inApp = false, reason = "وظیفهٔ با تأخیر یا در حال اجرا ندارد." });
@@ -1168,7 +1188,8 @@ app.MapPost("/api/resolutions/{id:int}/warnings", async (int id, WarningRecipien
         }
 
         var statusText = memberStatus == "delayed" ? "دارای تأخیر" : "در حال اجرا";
-        var message = BaleMessageText.ForWarning(resolution, name, statusText);
+        var title = string.IsNullOrWhiteSpace(profile?.Title) ? account?.OrgPositionDesc : profile.Title;
+        var message = BaleMessageText.ForWarning(resolution, name, statusText, title);
         var now = DateTimeOffset.UtcNow;
         db.Notifications.Add(new UserNotification
         {
@@ -1181,7 +1202,7 @@ app.MapPost("/api/resolutions/{id:int}/warnings", async (int id, WarningRecipien
         });
         inAppCount++;
 
-        var mobile = accounts.GetValueOrDefault(nationalId)?.Mobile;
+        var mobile = account?.Mobile;
         if (string.IsNullOrWhiteSpace(mobile))
         {
             results.Add(new { nationalId, displayName = name, queued = false, inApp = true, reason = "هشدار داخل سامانه ثبت شد؛ شمارهٔ موبایل ثبت نشده است." });
@@ -1222,9 +1243,10 @@ app.MapPost("/api/reports/warnings/{nationalId}", async (string nationalId, AppD
     if (delayed.Count == 0) return Results.Conflict(new { error = "برای این شخص مصوبه دارای تأخیر پیدا نشد." });
 
     var account = await db.Users.AsNoTracking().FirstOrDefaultAsync(user => user.NationalId == normalizedId, context.RequestAborted);
-    var displayName = await db.Directory.AsNoTracking().Where(person => person.NationalId == normalizedId).Select(person => person.DisplayName).FirstOrDefaultAsync(context.RequestAborted)
-        ?? account?.DisplayName ?? "کاربر";
-    var message = BaleMessageText.ForOverdueWarnings(displayName, delayed, normalizedId);
+    var directoryProfile = await db.Directory.AsNoTracking().FirstOrDefaultAsync(person => person.NationalId == normalizedId, context.RequestAborted);
+    var displayName = directoryProfile?.DisplayName ?? account?.DisplayName ?? "کاربر";
+    var title = string.IsNullOrWhiteSpace(directoryProfile?.Title) ? account?.OrgPositionDesc : directoryProfile.Title;
+    var message = BaleMessageText.ForOverdueWarnings(displayName, delayed, normalizedId, title);
     var now = DateTimeOffset.UtcNow;
     db.Notifications.Add(new UserNotification
     {
