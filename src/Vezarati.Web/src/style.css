@@ -135,3 +135,7 @@
 .notification-tabs button span{display:inline-grid;place-items:center;min-width:22px;height:20px;padding:0 5px;border-radius:99px;background:#e2eaec;color:#435960;font-size:10px}
 .notification-tabs button.active span{background:#c9e9e2;color:#075d52}
 @media(max-width:500px){.notification-tabs button{flex:1;justify-content:center}}
+
+
+.event-report-filters .rmdp-container,.event-report-filters .rmdp-input{width:100%}
+.event-report-filters .rmdp-input{min-height:36px;padding:6px 9px;border:1px solid #dce5e7;border-radius:8px;background:#fff;color:#30474d}
