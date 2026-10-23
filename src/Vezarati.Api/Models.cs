@@ -498,8 +498,13 @@ public static class SchemaCompatibility
 {
     public static async Task UpgradeAsync(AppDb db)
     {
-        // SQL Server receives the complete current schema from EnsureCreatedAsync; the compatibility DDL below is SQLite-specific.
-        if (db.Database.IsSqlServer()) return;
+        // EnsureCreatedAsync creates the schema for a new SQL Server database. Existing installations need additive compatibility columns.
+        if (db.Database.IsSqlServer())
+        {
+            await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.ResolutionReports', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.ResolutionReports', N'ApprovalStatus') IS NULL ALTER TABLE dbo.ResolutionReports ADD ApprovalStatus nvarchar(max) NOT NULL CONSTRAINT DF_ResolutionReports_ApprovalStatus DEFAULT N'pending';");
+            await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.ResolutionReports', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.ResolutionReports', N'AdminFeedback') IS NULL ALTER TABLE dbo.ResolutionReports ADD AdminFeedback nvarchar(max) NOT NULL CONSTRAINT DF_ResolutionReports_AdminFeedback DEFAULT N'';");
+            return;
+        }
         var columns = await ReadColumns(db, "Resolutions");
         if (columns.Count > 0 && !columns.Contains("MeetingDateJalali")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN MeetingDateJalali TEXT NOT NULL DEFAULT '';");
         if (columns.Count > 0 && !columns.Contains("SourceKey")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN SourceKey TEXT NULL;");
