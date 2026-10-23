@@ -188,7 +188,18 @@ public sealed class WarningRecipientsRequest
     public List<string> NationalIds { get; set; } = new();
 }
 
-public sealed class AppDb(DbContextOptions<AppDb> options) : DbContext(options)
+public sealed class BaleNotificationSettingRequest
+{
+    public bool Enabled { get; set; }
+}
+
+public sealed class AppSetting
+{
+    public string Key { get; set; } = "";
+    public string Value { get; set; } = "";
+}
+
+public sealed class AppDb(DbContextOptions<AppDb> options, MessageDispatcher messageSender, ILogger<AppDb> logger) : DbContext(options)
 {
     public DbSet<Resolution> Resolutions => Set<Resolution>();
     public DbSet<ResolutionReport> ResolutionReports => Set<ResolutionReport>();
@@ -202,9 +213,45 @@ public sealed class AppDb(DbContextOptions<AppDb> options) : DbContext(options)
     public DbSet<UserNotification> Notifications => Set<UserNotification>();
     public DbSet<DirectoryUser> Directory => Set<DirectoryUser>();
     public DbSet<AppUser> Users => Set<AppUser>();
+    public DbSet<AppSetting> Settings => Set<AppSetting>();
+
+    public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        var pendingNotifications = ChangeTracker.Entries<UserNotification>()
+            .Where(entry => entry.State == EntityState.Added)
+            .Select(entry => entry.Entity)
+            .ToList();
+
+        var saved = await base.SaveChangesAsync(cancellationToken);
+        if (pendingNotifications.Count == 0) return saved;
+
+        try
+        {
+            var enabled = await Settings.AsNoTracking().AnyAsync(
+                setting => setting.Key == "BaleNotificationsEnabled" && setting.Value == "true",
+                CancellationToken.None);
+            if (!enabled) return saved;
+
+            var recipientIds = pendingNotifications.Select(notification => notification.NationalId).Distinct().ToList();
+            var mobiles = await Users.AsNoTracking()
+                .Where(user => recipientIds.Contains(user.NationalId) && user.Mobile != "")
+                .ToDictionaryAsync(user => user.NationalId, user => user.Mobile, CancellationToken.None);
+
+            foreach (var notification in pendingNotifications)
+                if (mobiles.TryGetValue(notification.NationalId, out var mobile))
+                    await messageSender.SendAsync(mobile, notification.Text, CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "Automatic Bale notification delivery failed.");
+        }
+
+        return saved;
+    }
 
     protected override void OnModelCreating(ModelBuilder model)
     {
+        model.Entity<AppSetting>().ToTable("Settings").HasKey(x => x.Key);
         model.Entity<ResolutionGroup>().HasIndex(x => x.Name).IsUnique();
         model.Entity<GroupMember>().HasIndex(x => new { x.GroupId, x.NationalId }).IsUnique();
         model.Entity<DirectoryUser>().HasIndex(x => x.NationalId).IsUnique();
@@ -455,6 +502,7 @@ public static class SchemaCompatibility
             if (notificationColumns.Count > 0 && !notificationColumns.Contains(column))
                 await db.Database.ExecuteSqlRawAsync(sql);
         await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_Notifications_NationalId_ResolutionId_Type_DateKey ON Notifications (NationalId, ResolutionId, Type, DateKey);");
+        await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS Settings (Key TEXT NOT NULL CONSTRAINT PK_Settings PRIMARY KEY, Value TEXT NOT NULL DEFAULT '');");
     }
 
     private static async Task<HashSet<string>> ReadColumns(AppDb db, string table)
