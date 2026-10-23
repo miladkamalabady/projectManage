@@ -440,7 +440,7 @@ export default function App() {
       const result = await response.json();
       if (!response.ok) throw new Error(result?.error || "گزارش ارسال‌های بله دریافت نشد.");
       const rows = [["نام گیرنده","موبایل","وضعیت ارسال","تعداد تلاش","زمان ثبت","زمان ارسال","متن پیام","آخرین خطا"], ...(result.items ?? []).map((item: BaleMessageReportItem) => [item.displayName,item.mobile,baleMessageStatusLabel(item.status),item.attempts,formatDateTime(item.createdAt),item.sentAt?formatDateTime(item.sentAt):"",item.text,item.lastError])];
-      const csv = "\uFEFF" + rows.map(row => row.map(value => '"' + String(value ?? "").replace(/"/g, '""') + '"').join(",")).join("\r\n");
+      const csv = "\uFEFF" + rows.map(row => row.map(value => '"' + String(value ?? "").split('"').join('""') + '"').join(",")).join("\r\n");
       const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
       const link = document.createElement("a"); link.href = url; link.download = "bale-message-report.csv"; link.click(); URL.revokeObjectURL(url);
     } catch (cause) { setMessage(cause instanceof Error ? cause.message : "خروجی گزارش ارسال‌های بله آماده نشد."); }
