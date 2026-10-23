@@ -272,13 +272,12 @@ app.MapPost("/api/push/subscriptions", async (SaveBrowserPushSubscriptionRequest
         || string.IsNullOrWhiteSpace(request.Keys.Auth) || request.Keys.Auth.Length > 512)
         return Results.BadRequest(new { error = "اطلاعات اشتراک اعلان مرورگر معتبر نیست." });
     var subscription = await db.BrowserPushSubscriptions.FirstOrDefaultAsync(item => item.Endpoint == request.Endpoint, context.RequestAborted);
-    if (subscription is not null && subscription.NationalId != nationalId)
-        return Results.Conflict(new { error = "این اشتراک مرورگر به حساب دیگری تعلق دارد." });
     if (subscription is null)
     {
         subscription = new BrowserPushSubscription { NationalId = nationalId, Endpoint = request.Endpoint, CreatedAt = DateTimeOffset.UtcNow };
         db.BrowserPushSubscriptions.Add(subscription);
     }
+    subscription.NationalId = nationalId;
     subscription.P256dh = request.Keys.P256dh;
     subscription.Auth = request.Keys.Auth;
     subscription.LastUsedAt = DateTimeOffset.UtcNow;
