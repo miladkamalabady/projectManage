@@ -1011,22 +1011,6 @@ static string? ExtractProvince(string title)
     return null;
 }
 
-app.MapFallbackToFile("index.html");
-app.Run();
-
-record ResolutionCreate(DateOnly MeetingDate, string? MeetingDateJalali, string Number, string Text, string? Notes, string Status, int? GroupId, List<int>? GroupIds, List<string> People, bool PublishToAll, DateOnly? DueDate, string? DueDateJalali, DateOnly? StartDate, string? StartDateJalali, bool RequiresPeriodicReport, string? ReportFrequency, string? CancellationReason);
-record ResolutionStatusUpdate(string Status, string? Notes, string? NationalId);
-record ResolutionBulkStatusUpdate(string Status, string? Notes);
-record GroupCreate(string Name);
-record GroupCategoryRequest(string Category);
-record ResolutionEventCreate(string Text, string NationalId, string? UserName);
-record AttachmentApprovalRequest(string NationalId, bool ApprovedForAll);
-record CompletionReportRequest(string NationalId, string UserName, string Text);
-record ResolutionSubmissionRequest(string Text);
-record CompletionReviewRequest(string NationalId, string AssigneeNationalId, bool Approved, string? Feedback);
-record ArchiveUpdateRequest(string NationalId, bool IsArchived);
-record NotificationReadRequest(string NationalId);
-record MemberLookupRequest(string NationalId);
 static async Task<Dictionary<string, string>> LoadPersonDisplayNames(AppDb db)
 {
     var names = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -1055,6 +1039,22 @@ static string NormalizeStatusEventText(ResolutionEvent entry, IReadOnlyDictionar
     return prefix + name + detail;
 }
 
+app.MapFallbackToFile("index.html");
+app.Run();
+
+record ResolutionCreate(DateOnly MeetingDate, string? MeetingDateJalali, string Number, string Text, string? Notes, string Status, int? GroupId, List<int>? GroupIds, List<string> People, bool PublishToAll, DateOnly? DueDate, string? DueDateJalali, DateOnly? StartDate, string? StartDateJalali, bool RequiresPeriodicReport, string? ReportFrequency, string? CancellationReason);
+record ResolutionStatusUpdate(string Status, string? Notes, string? NationalId);
+record ResolutionBulkStatusUpdate(string Status, string? Notes);
+record GroupCreate(string Name);
+record GroupCategoryRequest(string Category);
+record ResolutionEventCreate(string Text, string NationalId, string? UserName);
+record AttachmentApprovalRequest(string NationalId, bool ApprovedForAll);
+record CompletionReportRequest(string NationalId, string UserName, string Text);
+record ResolutionSubmissionRequest(string Text);
+record CompletionReviewRequest(string NationalId, string AssigneeNationalId, bool Approved, string? Feedback);
+record ArchiveUpdateRequest(string NationalId, bool IsArchived);
+record NotificationReadRequest(string NationalId);
+record MemberLookupRequest(string NationalId);
 static class ResolutionStatusUpdater
 {
     private static readonly SemaphoreSlim Gate = new(1, 1);
