@@ -46,6 +46,11 @@ internal static class Program
         var tables = ReadTableNames(connection);
         if (tables.Count == 0)
             throw new InvalidOperationException("هیچ جدول برنامه‌ای در دیتابیس SQLite پیدا نشد.");
+        var dependencies = tables.ToDictionary(
+            table => table,
+            table => ReadForeignParents(connection, table),
+            StringComparer.OrdinalIgnoreCase);
+        var orderedTables = SortByDependencies(tables, dependencies);
 
         var outputDirectory = Path.GetDirectoryName(outputPath);
         if (!string.IsNullOrWhiteSpace(outputDirectory))
@@ -59,14 +64,18 @@ internal static class Program
         writer.WriteLine("SET NOCOUNT ON;");
         writer.WriteLine("SET XACT_ABORT ON;");
         writer.WriteLine("BEGIN TRY");
+        foreach (var table in orderedTables)
+        {
+            var objectName = ("dbo." + table).Replace("'", "''");
+            var errorText = ($"جدول مقصد dbo.{table} پیدا نشد. API را یک بار به SQL Server وصل و اجرا کنید تا ساختار دیتابیس ساخته شود.").Replace("'", "''");
+            writer.WriteLine($"    IF OBJECT_ID(N'{objectName}', N'U') IS NULL THROW 51000, N'{errorText}', 1;");
+        }
         writer.WriteLine("    BEGIN TRANSACTION;");
 
-        foreach (var table in tables)
-            writer.WriteLine($"    ALTER TABLE [dbo].{QuoteSqlServer(table)} NOCHECK CONSTRAINT ALL;");
-        foreach (var table in tables)
+        foreach (var table in orderedTables.AsEnumerable().Reverse())
             writer.WriteLine($"    DELETE FROM [dbo].{QuoteSqlServer(table)};");
 
-        foreach (var table in tables)
+        foreach (var table in orderedTables)
         {
             var columns = ReadColumns(connection, table);
             if (columns.Count == 0)
@@ -97,8 +106,6 @@ internal static class Program
             Console.WriteLine($"{table}: {imported} ردیف");
         }
 
-        foreach (var table in tables)
-            writer.WriteLine($"    ALTER TABLE [dbo].{QuoteSqlServer(table)} WITH CHECK CHECK CONSTRAINT ALL;");
         writer.WriteLine("    COMMIT TRANSACTION;");
         writer.WriteLine("END TRY");
         writer.WriteLine("BEGIN CATCH");
@@ -120,6 +127,42 @@ internal static class Program
         while (reader.Read())
             tables.Add(reader.GetString(0));
         return tables;
+    }
+
+    private static HashSet<string> ReadForeignParents(SqliteConnection connection, string table)
+    {
+        var parents = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        using var command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA foreign_key_list({QuoteSqlite(table)});";
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+            parents.Add(reader.GetString(2));
+        return parents;
+    }
+
+    private static List<string> SortByDependencies(
+        IReadOnlyList<string> tables,
+        IReadOnlyDictionary<string, HashSet<string>> dependencies)
+    {
+        var remaining = new HashSet<string>(tables, StringComparer.OrdinalIgnoreCase);
+        var ordered = new List<string>();
+        while (remaining.Count > 0)
+        {
+            var ready = remaining
+                .Where(table => !dependencies[table].Any(parent =>
+                    remaining.Contains(parent) && !parent.Equals(table, StringComparison.OrdinalIgnoreCase)))
+                .OrderBy(table => table, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (ready.Count == 0)
+                ready = remaining.OrderBy(table => table, StringComparer.OrdinalIgnoreCase).ToList();
+
+            foreach (var table in ready)
+            {
+                remaining.Remove(table);
+                ordered.Add(table);
+            }
+        }
+        return ordered;
     }
 
     private static List<ColumnInfo> ReadColumns(SqliteConnection connection, string table)
