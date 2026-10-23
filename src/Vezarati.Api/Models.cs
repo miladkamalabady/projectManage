@@ -506,6 +506,7 @@ public static class SchemaCompatibility
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.ResolutionReports', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.ResolutionReports', N'ApprovalStatus') IS NULL ALTER TABLE dbo.ResolutionReports ADD ApprovalStatus nvarchar(max) NOT NULL CONSTRAINT DF_ResolutionReports_ApprovalStatus DEFAULT N'pending';");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.ResolutionReports', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.ResolutionReports', N'AdminFeedback') IS NULL ALTER TABLE dbo.ResolutionReports ADD AdminFeedback nvarchar(max) NOT NULL CONSTRAINT DF_ResolutionReports_AdminFeedback DEFAULT N'';");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.ResolutionAttachments', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.ResolutionAttachments', N'ResolutionReportId') IS NULL ALTER TABLE dbo.ResolutionAttachments ADD ResolutionReportId int NULL;");
+            await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.ResolutionAttachments', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.ResolutionAttachments', N'ResolutionReportId') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_ResolutionAttachments_ResolutionReportId' AND object_id = OBJECT_ID(N'dbo.ResolutionAttachments')) CREATE INDEX IX_ResolutionAttachments_ResolutionReportId ON dbo.ResolutionAttachments (ResolutionReportId);");
             return;
         }
         var columns = await ReadColumns(db, "Resolutions");
@@ -527,6 +528,7 @@ public static class SchemaCompatibility
         if (reportColumns.Count > 0 && !reportColumns.Contains("AdminFeedback")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE ResolutionReports ADD COLUMN AdminFeedback TEXT NOT NULL DEFAULT '';");
         var attachmentColumns = await ReadColumns(db, "ResolutionAttachments");
         if (attachmentColumns.Count > 0 && !attachmentColumns.Contains("ResolutionReportId")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE ResolutionAttachments ADD COLUMN ResolutionReportId INTEGER NULL;");
+        await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS IX_ResolutionAttachments_ResolutionReportId ON ResolutionAttachments (ResolutionReportId);");
         var userColumns = await ReadColumns(db, "Users");
         var userTextColumnSql = new Dictionary<string, string>
         {
