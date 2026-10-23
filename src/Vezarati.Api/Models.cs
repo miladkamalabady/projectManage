@@ -962,7 +962,25 @@ public sealed class BaleMessageQueueService(IServiceScopeFactory scopeFactory, I
                 }
                 await db.SaveChangesAsync(stoppingToken);
 
-                var deliveries = await Task.WhenAll(batch.Select(async message =>
+                // Always resolve the current directory mobile immediately before delivery.
+                var recipientIds = batch.Select(message => message.NationalId).Distinct().ToList();
+                var currentMobiles = await db.Users.AsNoTracking()
+                    .Where(user => recipientIds.Contains(user.NationalId))
+                    .ToDictionaryAsync(user => user.NationalId, user => user.Mobile, stoppingToken);
+                foreach (var message in batch)
+                {
+                    var currentMobile = currentMobiles.GetValueOrDefault(message.NationalId, "");
+                    if (!string.IsNullOrWhiteSpace(currentMobile))
+                        message.Mobile = currentMobile;
+                    else
+                    {
+                        message.Status = "failed";
+                        message.LastError = "شماره موبایل گیرنده در فهرست کاربران ثبت نشده است.";
+                    }
+                }
+                await db.SaveChangesAsync(stoppingToken);
+                var deliverableBatch = batch.Where(message => message.Status == "processing").ToList();
+                var deliveries = await Task.WhenAll(deliverableBatch.Select(async message =>
                     (Message: message, Result: await sender.SendWithResultAsync(message.Mobile, message.Text, stoppingToken))));
 
                 foreach (var (message, result) in deliveries)
