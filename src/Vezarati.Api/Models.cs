@@ -245,6 +245,19 @@ public sealed class BaleNotificationSettingRequest
     public bool Enabled { get; set; }
 }
 
+public sealed class SaveBrowserPushSubscriptionRequest
+{
+    public string Endpoint { get; set; } = "";
+    public BrowserPushKeys Keys { get; set; } = new();
+}
+
+public sealed class BrowserPushKeys
+{
+    public string P256dh { get; set; } = "";
+    public string Auth { get; set; } = "";
+}
+
+
 public sealed class AppSetting
 {
     public string Key { get; set; } = "";
@@ -1205,7 +1218,7 @@ public sealed class BrowserPushQueueService(IServiceScopeFactory scopeFactory, I
                         try
                         {
                             var pushSubscription = new PushSubscription(sub.Endpoint, sub.P256dh, sub.Auth);
-                            await client.SendNotificationAsync(pushSubscription, payload, vapid, stoppingToken);
+                            await client.SendNotificationAsync(pushSubscription, payload, vapid);
                             sub.LastUsedAt = DateTimeOffset.UtcNow;
                             delivered++;
                         }
