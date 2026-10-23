@@ -186,3 +186,5 @@
 @media(max-width:520px){.role-user-row{flex-wrap:wrap}.role-user-row>div{flex-basis:100%}.role-user-row button{flex:1}}
 
 .member-mobile{direction:ltr;text-align:right;color:#637681}.mobile-edit{border:1px solid #cbd8dd;background:#fff;color:#264653;border-radius:8px;padding:6px 9px;font-size:11px;white-space:nowrap}.mobile-edit:hover{background:#eef5f6}
+
+.role-national-id{font-variant-numeric:tabular-nums;letter-spacing:.04em}.primary-admin-label{padding:4px 8px;border-radius:8px;background:#fff5dc;color:#806300;font-size:10px;font-weight:800;white-space:nowrap}
