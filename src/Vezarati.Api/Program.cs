@@ -18,6 +18,7 @@ builder.Services.AddScoped<NationalIdLookup, LocalNationalIdLookup>();
 builder.Services.AddScoped<MessageDispatcher>();
 builder.Services.AddHostedService<ResolutionStatusRefreshService>();
 builder.Services.AddHostedService<BaleMessageQueueService>();
+builder.Services.AddHostedService<BrowserPushQueueService>();
 builder.Services.AddHttpClient("MessageApi", client => client.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddHttpClient("MeduSso", client => client.Timeout = TimeSpan.FromSeconds(60)).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme).AddCookie(options =>
@@ -255,6 +256,48 @@ app.MapGet("/api/auth/me", async (HttpContext context, AppDb db) =>
     }
     return Results.Ok(new { nationalId = id, displayName = user.DisplayName, role = user.Role, title = string.IsNullOrWhiteSpace(user.Title) ? user.OrgPositionDesc : user.Title, organizationUnit = user.OrganizationUnit, province = user.RegionId?.ToString(), mobile = user.Mobile });
 });
+app.MapGet("/api/push/public-key", (IConfiguration configuration) =>
+{
+    var publicKey = configuration["Push:PublicKey"] ?? configuration["PUSH_PUBLIC_KEY"];
+    return string.IsNullOrWhiteSpace(publicKey)
+        ? Results.Problem("کلید عمومی Push روی سرور تنظیم نشده است.", statusCode: StatusCodes.Status503ServiceUnavailable)
+        : Results.Ok(new { publicKey });
+});
+app.MapPost("/api/push/subscriptions", async (SaveBrowserPushSubscriptionRequest request, HttpContext context, AppDb db) =>
+{
+    var nationalId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
+    if (string.IsNullOrWhiteSpace(nationalId)) return Results.Unauthorized();
+    if (!Uri.TryCreate(request.Endpoint, UriKind.Absolute, out var endpoint) || endpoint.Scheme != Uri.UriSchemeHttps
+        || string.IsNullOrWhiteSpace(request.Keys.P256dh) || request.Keys.P256dh.Length > 512
+        || string.IsNullOrWhiteSpace(request.Keys.Auth) || request.Keys.Auth.Length > 512)
+        return Results.BadRequest(new { error = "اطلاعات اشتراک اعلان مرورگر معتبر نیست." });
+    var subscription = await db.BrowserPushSubscriptions.FirstOrDefaultAsync(item => item.Endpoint == request.Endpoint, context.RequestAborted);
+    if (subscription is not null && subscription.NationalId != nationalId)
+        return Results.Conflict(new { error = "این اشتراک مرورگر به حساب دیگری تعلق دارد." });
+    if (subscription is null)
+    {
+        subscription = new BrowserPushSubscription { NationalId = nationalId, Endpoint = request.Endpoint, CreatedAt = DateTimeOffset.UtcNow };
+        db.BrowserPushSubscriptions.Add(subscription);
+    }
+    subscription.P256dh = request.Keys.P256dh;
+    subscription.Auth = request.Keys.Auth;
+    subscription.LastUsedAt = DateTimeOffset.UtcNow;
+    await db.SaveChangesAsync(context.RequestAborted);
+    return Results.Ok(new { enabled = true });
+});
+app.MapDelete("/api/push/subscriptions", async (SaveBrowserPushSubscriptionRequest request, HttpContext context, AppDb db) =>
+{
+    var nationalId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
+    if (string.IsNullOrWhiteSpace(nationalId)) return Results.Unauthorized();
+    var subscription = await db.BrowserPushSubscriptions.FirstOrDefaultAsync(item => item.NationalId == nationalId && item.Endpoint == request.Endpoint, context.RequestAborted);
+    if (subscription is not null)
+    {
+        db.BrowserPushSubscriptions.Remove(subscription);
+        await db.SaveChangesAsync(context.RequestAborted);
+    }
+    return Results.NoContent();
+});
+
 app.MapPost("/api/auth/logout", async (HttpContext context) =>
 {
     await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
@@ -1482,6 +1525,16 @@ app.MapPost("/api/reports/warnings/{nationalId}", async (string nationalId, AppD
             NationalId = normalizedId,
             Mobile = mobile,
             Text = message,
+            Status = "pending",
+            CreatedAtUnixMs = now.ToUnixTimeMilliseconds(),
+            NextAttemptAtUnixMs = now.ToUnixTimeMilliseconds()
+        });
+        db.BrowserPushQueue.Add(new BrowserPushQueueItem
+        {
+            NationalId = normalizedId,
+            Title = "یادآوری پیگیری مصوبه",
+            Text = message,
+            Url = "/?resolution=" + delayed[0].Id,
             Status = "pending",
             CreatedAtUnixMs = now.ToUnixTimeMilliseconds(),
             NextAttemptAtUnixMs = now.ToUnixTimeMilliseconds()
