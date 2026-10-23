@@ -232,6 +232,19 @@ app.MapGet("/api/auth/me", async (HttpContext context, AppDb db) =>
     if (string.IsNullOrWhiteSpace(id)) return Results.Unauthorized();
     var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(item => item.NationalId == id);
     if (user is null) return Results.Unauthorized();
+    if (!string.Equals(context.User.FindFirstValue(ClaimTypes.Role), user.Role, StringComparison.Ordinal))
+    {
+        var claims = new[]
+        {
+            new Claim(ClaimTypes.NameIdentifier, id),
+            new Claim(ClaimTypes.Name, user.DisplayName),
+            new Claim(ClaimTypes.Role, user.Role),
+            new Claim("title", user.OrgPositionDesc),
+            new Claim("regionId", user.RegionId?.ToString() ?? "")
+        };
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme));
+        await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal, new AuthenticationProperties { IsPersistent = true, ExpiresUtc = DateTimeOffset.UtcNow.AddHours(8) });
+    }
     return Results.Ok(new { nationalId = id, displayName = user.DisplayName, role = user.Role, title = user.OrgPositionDesc, province = user.RegionId?.ToString() });
 });
 app.MapPost("/api/auth/logout", async (HttpContext context) =>
