@@ -315,7 +315,7 @@ app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpC
     if (request.Status == "cancelled" && string.IsNullOrWhiteSpace(request.CancellationReason)) return Results.BadRequest(new { error = "برای لغو مصوبه، توضیحات لغو الزامی است." });
     if (request.RequiresPeriodicReport && !ResolutionStatuses.Frequencies.Contains(request.ReportFrequency ?? "")) return Results.BadRequest(new { error = "دوره دریافت گزارش را انتخاب کنید." });
     if (request.StartDate is null) return Results.BadRequest(new { error = "زمان شروع مصوبه الزامی است." });
-    if (request.MeetingDate >= request.StartDate.Value) return Results.BadRequest(new { error = "تاریخ جلسه باید قبل از زمان شروع باشد." });
+    if (request.MeetingDate > request.StartDate.Value) return Results.BadRequest(new { error = "تاریخ جلسه نباید بعد از زمان شروع باشد." });
     if (request.DueDate.HasValue && request.DueDate.Value <= request.StartDate.Value) return Results.BadRequest(new { error = "زمان سررسید باید بعد از زمان شروع باشد." });
     if (request.GroupId.HasValue && !await db.Groups.AnyAsync(g => g.Id == request.GroupId)) return Results.BadRequest(new { error = "گروه انتخاب‌شده پیدا نشد." });
     if (!ResolutionStatuses.All.Contains(request.Status)) return Results.BadRequest(new { error = "وضعیت نامعتبر است." });
@@ -350,7 +350,7 @@ app.MapPut("/api/resolutions/{id:int}", async (int id, ResolutionCreate request,
     if (request.Status == "cancelled" && string.IsNullOrWhiteSpace(request.CancellationReason)) return Results.BadRequest(new { error = "برای لغو مصوبه، توضیحات لغو الزامی است." });
     if (request.RequiresPeriodicReport && !ResolutionStatuses.Frequencies.Contains(request.ReportFrequency ?? "")) return Results.BadRequest(new { error = "دوره دریافت گزارش را انتخاب کنید." });
     if (request.StartDate is null) return Results.BadRequest(new { error = "زمان شروع مصوبه الزامی است." });
-    if (request.MeetingDate >= request.StartDate.Value) return Results.BadRequest(new { error = "تاریخ جلسه باید قبل از زمان شروع باشد." });
+    if (request.MeetingDate > request.StartDate.Value) return Results.BadRequest(new { error = "تاریخ جلسه نباید بعد از زمان شروع باشد." });
     if (request.DueDate.HasValue && request.DueDate.Value <= request.StartDate.Value) return Results.BadRequest(new { error = "زمان سررسید باید بعد از زمان شروع باشد." });
     var record = await db.Resolutions.Include(r => r.Assignments).Include(r => r.GroupAssignments).FirstOrDefaultAsync(r => r.Id == id);
     if (record is null) return Results.NotFound();
