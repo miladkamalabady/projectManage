@@ -525,6 +525,7 @@ app.MapPatch("/api/resolutions/{id:int}/progress/bulk-status", async (int id, Re
 
 app.MapPost("/api/resolutions/{id:int}/events", async (int id, ResolutionEventCreate request, HttpContext context, AppDb db) =>
 {
+    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
     var text = request.Text?.Trim() ?? "";
     var nationalId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
     if (text.Length == 0) return Results.BadRequest(new { error = "شرح رویداد را وارد کنید." });
@@ -855,6 +856,15 @@ app.MapPatch("/api/resolutions/{id:int}/completion-review", async (int id, Compl
     if (progress is null || string.IsNullOrWhiteSpace(progress.ReportText)) return Results.NotFound();
     var resolution = await db.Resolutions.FindAsync(id);
     if (resolution is null) return Results.NotFound();
+    var submittedReport = await db.ResolutionReports
+        .Where(item => item.ResolutionId == id && item.NationalId == progress.NationalId)
+        .OrderByDescending(item => item.SubmittedAt)
+        .FirstOrDefaultAsync();
+    if (submittedReport is not null)
+    {
+        submittedReport.ApprovalStatus = request.Approved ? "approved" : "rejected";
+        submittedReport.AdminFeedback = progress.AdminFeedback;
+    }
     progress.ApprovalStatus = request.Approved ? "approved" : "rejected";
     progress.AdminFeedback = request.Feedback?.Trim() ?? "";
     progress.UpdatedAt = DateTimeOffset.UtcNow;
@@ -865,6 +875,7 @@ app.MapPatch("/api/resolutions/{id:int}/completion-review", async (int id, Compl
     db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = primaryAdminNationalId, UserName = "مدیر دفتر وزارتی", Text = actionText, CreatedAt = DateTimeOffset.UtcNow });
     db.Notifications.Add(new UserNotification { NationalId = progress.NationalId, ResolutionId = id, Type = request.Approved ? "report-approved" : "report-rejected", DateKey = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(), Text = "گزارش اقدام شما برای مصوبه " + resolution.Number + (request.Approved ? " تأیید شد." : " نیاز به اصلاح دارد."), CreatedAt = DateTimeOffset.UtcNow });
     await db.SaveChangesAsync();
+    await ResolutionStatusUpdater.RefreshResolutionStatuses(db);
     return Results.Ok(progress);
 });
 
