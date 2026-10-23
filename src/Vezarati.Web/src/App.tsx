@@ -485,6 +485,7 @@ function ResolutionCard({ item, groups, users, viewerId, isAdmin, onStatus, onBu
   const directAssigneeIds=new Set((item.assignments??[]).map(assignment=>assignment.nationalId));
   groups.flatMap(group=>group.members).filter(member=>directAssigneeIds.has(member.nationalId)).forEach(member=>memberMap.set(member.nationalId,member));
   users.filter(user=>directAssigneeIds.has(user.nationalId)).forEach(user=>memberMap.set(user.nationalId,{id:0,nationalId:user.nationalId,displayName:user.displayName,title:user.title||""}));
+  if(isAdmin && item.publishToAll) users.forEach(user=>memberMap.set(user.nationalId,{id:0,nationalId:user.nationalId,displayName:user.displayName,title:user.title||""}));
   const members = Array.from(memberMap.values());
   const personalProgress = item.progress?.find(progress => progress.nationalId === viewerId);
   const effectiveMemberStatus = (nationalId: string) => { const saved=item.progress?.find(progress=>progress.nationalId===nationalId)?.status; return saved==="completed"||saved==="rejected"||saved==="in_progress" ? saved : item.status; };
