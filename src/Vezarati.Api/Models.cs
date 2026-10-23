@@ -526,6 +526,19 @@ public static class SchemaCompatibility
             await db.Database.ExecuteSqlRawAsync(@"UPDATE Users SET Title = COALESCE(NULLIF(Title, ''), (SELECT d.Title FROM Directory d WHERE d.NationalId = Users.NationalId))
                 WHERE EXISTS (SELECT 1 FROM Directory d WHERE d.NationalId = Users.NationalId AND trim(COALESCE(d.Title, '')) <> '');");
         }
+        var legacyMembershipColumns = await ReadColumns(db, "GroupMembers");
+        if (legacyMembershipColumns.Count > 0 && legacyMembershipColumns.Contains("DisplayName"))
+        {
+            var memberTitle = legacyMembershipColumns.Contains("Title") ? "COALESCE(gm.Title, '')" : "''";
+            await db.Database.ExecuteSqlRawAsync($@"INSERT OR IGNORE INTO Users
+                (NationalId, DisplayName, Role, Title, OrganizationUnit, FirstName, LastName, Father, Gender, BirthDate, PersianBirthDate, Mobile, MobileOverriddenByAdmin, UserType, PersonnelCode, OrgPositionCode, OrgPositionDesc, OrgPositionTypeCode, OrgPositionTypeDesc, RegionId, LastLoginAt)
+                SELECT gm.NationalId, COALESCE(gm.DisplayName, ''), 'کاربر', {memberTitle}, '', '', '', '', NULL, '', '', '', 0, NULL, '', '', '', NULL, '', NULL, NULL
+                FROM GroupMembers gm WHERE trim(COALESCE(gm.NationalId, '')) <> '';");
+            await db.Database.ExecuteSqlRawAsync($@"UPDATE Users SET
+                DisplayName = COALESCE(NULLIF(DisplayName, ''), (SELECT gm.DisplayName FROM GroupMembers gm WHERE gm.NationalId = Users.NationalId LIMIT 1)),
+                Title = COALESCE(NULLIF(Title, ''), (SELECT {memberTitle} FROM GroupMembers gm WHERE gm.NationalId = Users.NationalId LIMIT 1))
+                WHERE EXISTS (SELECT 1 FROM GroupMembers gm WHERE gm.NationalId = Users.NationalId);");
+        }
         await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_Users_NationalId ON Users (NationalId);");
         var groupColumns = await ReadColumns(db, "Groups");
         if (groupColumns.Count > 0 && !groupColumns.Contains("Category")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Groups ADD COLUMN Category TEXT NOT NULL DEFAULT '';");
