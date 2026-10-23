@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using System.Text.Json.Serialization;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace Vezarati.Api.Models;
 
@@ -77,8 +78,14 @@ public sealed class GroupMember
     [JsonIgnore]
     public ResolutionGroup? Group { get; set; }
     public string NationalId { get; set; } = "";
-    public string DisplayName { get; set; } = "";
-    public string Title { get; set; } = "";
+    [JsonIgnore]
+    public AppUser? User { get; set; }
+    [NotMapped]
+    public string DisplayName { get => User?.DisplayName ?? ""; set { } }
+    [NotMapped]
+    public string Title { get => User?.Title ?? ""; set { } }
+    [NotMapped]
+    public string OrganizationUnit { get => User?.OrganizationUnit ?? ""; set { } }
 }
 
 public sealed class ResolutionAssignment
@@ -157,20 +164,14 @@ public sealed class ResolutionAttachment
     public DateTimeOffset UploadedAt { get; set; }
 }
 
-public sealed class DirectoryUser
-{
-    public int Id { get; set; }
-    public string NationalId { get; set; } = "";
-    public string DisplayName { get; set; } = "";
-    public string Title { get; set; } = "";
-}
-
 public sealed class AppUser
 {
     public int Id { get; set; }
     public string NationalId { get; set; } = "";
     public string DisplayName { get; set; } = "";
     public string Role { get; set; } = "کاربر";
+    public string Title { get; set; } = "";
+    public string OrganizationUnit { get; set; } = "";
     public string FirstName { get; set; } = "";
     public string LastName { get; set; } = "";
     public string Father { get; set; } = "";
@@ -197,6 +198,12 @@ public sealed class SetUserRoleRequest
 public sealed class UpdateMobileRequest
 {
     public string Mobile { get; set; } = "";
+}
+
+public sealed class UpdateUserProfileRequest
+{
+    public string Title { get; set; } = "";
+    public string OrganizationUnit { get; set; } = "";
 }
 
 public sealed class WarningRecipientsRequest
@@ -227,7 +234,6 @@ public sealed class AppDb(DbContextOptions<AppDb> options, ILogger<AppDb> logger
     public DbSet<ResolutionAttachment> Attachments => Set<ResolutionAttachment>();
     public DbSet<ResolutionEvent> Events => Set<ResolutionEvent>();
     public DbSet<UserNotification> Notifications => Set<UserNotification>();
-    public DbSet<DirectoryUser> Directory => Set<DirectoryUser>();
     public DbSet<AppUser> Users => Set<AppUser>();
     public DbSet<AppSetting> Settings => Set<AppSetting>();
     public DbSet<BaleQueuedMessage> BaleMessageQueue => Set<BaleQueuedMessage>();
@@ -286,7 +292,7 @@ public sealed class AppDb(DbContextOptions<AppDb> options, ILogger<AppDb> logger
         model.Entity<BaleQueuedMessage>().HasIndex(x => new { x.Status, x.NextAttemptAtUnixMs, x.CreatedAtUnixMs });
         model.Entity<ResolutionGroup>().HasIndex(x => x.Name).IsUnique();
         model.Entity<GroupMember>().HasIndex(x => new { x.GroupId, x.NationalId }).IsUnique();
-        model.Entity<DirectoryUser>().HasIndex(x => x.NationalId).IsUnique();
+        model.Entity<AppUser>().HasIndex(x => x.NationalId).IsUnique();
         model.Entity<Resolution>().HasIndex(x => x.SourceKey).IsUnique();
         model.Entity<Resolution>().HasOne(x => x.Group).WithMany().HasForeignKey(x => x.GroupId).OnDelete(DeleteBehavior.SetNull);
         model.Entity<ResolutionAssignment>().HasOne(x => x.Resolution).WithMany(x => x.Assignments).HasForeignKey(x => x.ResolutionId).OnDelete(DeleteBehavior.Cascade);
@@ -302,6 +308,9 @@ public sealed class AppDb(DbContextOptions<AppDb> options, ILogger<AppDb> logger
         model.Entity<ResolutionProgress>().HasIndex(x => new { x.ResolutionId, x.NationalId }).IsUnique();
         model.Entity<ResolutionProgress>().HasOne<Resolution>().WithMany(x => x.Progress).HasForeignKey(x => x.ResolutionId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<GroupMember>().HasOne(x => x.Group).WithMany(x => x.Members).HasForeignKey(x => x.GroupId).OnDelete(DeleteBehavior.Cascade);
+        model.Entity<AppUser>().HasAlternateKey(x => x.NationalId);
+        model.Entity<GroupMember>().HasOne(x => x.User).WithMany().HasForeignKey(x => x.NationalId).HasPrincipalKey(x => x.NationalId).OnDelete(DeleteBehavior.Cascade);
+        model.Entity<GroupMember>().Navigation(x => x.User).AutoInclude();
         model.Entity<ResolutionGroupAssignment>().HasKey(x => new { x.ResolutionId, x.GroupId });
         model.Entity<ResolutionGroupAssignment>().HasOne(x => x.Resolution).WithMany(x => x.GroupAssignments).HasForeignKey(x => x.ResolutionId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<ResolutionGroupAssignment>().HasOne(x => x.Group).WithMany(x => x.Resolutions).HasForeignKey(x => x.GroupId).OnDelete(DeleteBehavior.Cascade);
@@ -316,7 +325,7 @@ public sealed class LocalNationalIdLookup(AppDb db) : NationalIdLookup
     {
         var value = nationalId.Trim();
         if (value.Length is < 8 or > 11 || !value.All(char.IsDigit)) return null;
-        var user = await db.Directory.FirstOrDefaultAsync(x => x.NationalId == value);
+        var user = await db.Users.FirstOrDefaultAsync(x => x.NationalId == value);
         return user is null ? null : new DirectoryPerson(user.NationalId, user.DisplayName);
     }
 }
@@ -343,7 +352,7 @@ public static class SeedData
         if (File.Exists(dataPath))
         {
             // IDs shared across groups must be inserted only once, including unsaved tracked entities.
-            var directoryUsers = await db.Directory.ToDictionaryAsync(x => x.NationalId, StringComparer.Ordinal);
+            var directoryUsers = await db.Users.ToDictionaryAsync(x => x.NationalId, StringComparer.Ordinal);
             var seed = System.Text.Json.JsonSerializer.Deserialize<SeedDocument>(await File.ReadAllTextAsync(dataPath), new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             if (seed is not null)
             {
@@ -366,16 +375,19 @@ public static class SeedData
                     if (!groups.TryGetValue(groupName, out var group)) continue;
                     foreach (var member in members)
                     {
-                        if (!directoryUsers.TryGetValue(member.NationalId, out var directory))
+                        if (!directoryUsers.TryGetValue(member.NationalId, out var user))
                         {
-                            directory = new DirectoryUser { NationalId = member.NationalId, DisplayName = member.DisplayName, Title = member.Title };
-                            db.Directory.Add(directory);
-                            directoryUsers.Add(member.NationalId, directory);
+                            user = new AppUser { NationalId = member.NationalId, DisplayName = member.DisplayName, Title = member.Title };
+                            db.Users.Add(user);
+                            directoryUsers.Add(member.NationalId, user);
                         }
-                        else { directory.DisplayName = member.DisplayName; if (!string.IsNullOrWhiteSpace(member.Title)) directory.Title = member.Title; }
+                        else
+                        {
+                            if (string.IsNullOrWhiteSpace(user.DisplayName)) user.DisplayName = member.DisplayName;
+                            if (string.IsNullOrWhiteSpace(user.Title)) user.Title = member.Title;
+                        }
                         var groupMember = group.Members.FirstOrDefault(x => x.NationalId == member.NationalId);
-                        if (groupMember is null) group.Members.Add(new GroupMember { NationalId = member.NationalId, DisplayName = member.DisplayName, Title = member.Title });
-                        else { groupMember.DisplayName = member.DisplayName; groupMember.Title = member.Title; }
+                        if (groupMember is null) group.Members.Add(new GroupMember { NationalId = member.NationalId });
                     }
                 }
                 await db.SaveChangesAsync();
@@ -474,6 +486,8 @@ public static class SchemaCompatibility
         var userColumns = await ReadColumns(db, "Users");
         var userTextColumnSql = new Dictionary<string, string>
         {
+            ["Title"] = "ALTER TABLE Users ADD COLUMN Title TEXT NOT NULL DEFAULT '';",
+            ["OrganizationUnit"] = "ALTER TABLE Users ADD COLUMN OrganizationUnit TEXT NOT NULL DEFAULT '';",
             ["FirstName"] = "ALTER TABLE Users ADD COLUMN FirstName TEXT NOT NULL DEFAULT '';",
             ["LastName"] = "ALTER TABLE Users ADD COLUMN LastName TEXT NOT NULL DEFAULT '';",
             ["Father"] = "ALTER TABLE Users ADD COLUMN Father TEXT NOT NULL DEFAULT '';",
@@ -500,6 +514,17 @@ public static class SchemaCompatibility
         foreach (var (column, sql) in userNullableColumnSql)
             if (userColumns.Count > 0 && !userColumns.Contains(column))
                 await db.Database.ExecuteSqlRawAsync(sql);
+        var legacyDirectoryColumns = await ReadColumns(db, "Directory");
+        if (legacyDirectoryColumns.Count > 0)
+        {
+            await db.Database.ExecuteSqlRawAsync(@"INSERT OR IGNORE INTO Users
+                (NationalId, DisplayName, Role, Title, OrganizationUnit, FirstName, LastName, Father, Gender, BirthDate, PersianBirthDate, Mobile, MobileOverriddenByAdmin, UserType, PersonnelCode, OrgPositionCode, OrgPositionDesc, OrgPositionTypeCode, OrgPositionTypeDesc, RegionId, LastLoginAt)
+                SELECT d.NationalId, d.DisplayName, 'کاربر', COALESCE(d.Title, ''), '', '', '', '', NULL, '', '', '', 0, NULL, '', '', '', NULL, '', NULL, NULL
+                FROM Directory d WHERE trim(COALESCE(d.NationalId, '')) <> '';");
+            await db.Database.ExecuteSqlRawAsync(@"UPDATE Users SET Title = COALESCE(NULLIF(Title, ''), (SELECT d.Title FROM Directory d WHERE d.NationalId = Users.NationalId))
+                WHERE EXISTS (SELECT 1 FROM Directory d WHERE d.NationalId = Users.NationalId AND trim(COALESCE(d.Title, '')) <> '');");
+        }
+        await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_Users_NationalId ON Users (NationalId);");
         var groupColumns = await ReadColumns(db, "Groups");
         if (groupColumns.Count > 0 && !groupColumns.Contains("Category")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Groups ADD COLUMN Category TEXT NOT NULL DEFAULT '';");
         var directoryColumns = await ReadColumns(db, "Directory");
