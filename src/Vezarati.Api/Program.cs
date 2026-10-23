@@ -610,6 +610,11 @@ app.MapPost("/api/resolutions/{id:int}/completion-report", async (int id, HttpRe
          db.ResolutionGroups.Any(group => group.ResolutionId == id && group.GroupId == member.GroupId)));
     if (!direct && !inGroup && !resolution.PublishToAll) return Results.StatusCode(StatusCodes.Status403Forbidden);
 
+    var writtenPaths = new List<string>();
+    var reportId = 0;
+    await using var transaction = await db.Database.BeginTransactionAsync();
+    try
+    {
     var progress = resolution.Progress.FirstOrDefault(item => item.NationalId == nationalId);
     if (progress is null) { progress = new ResolutionProgress { ResolutionId = id, NationalId = nationalId }; resolution.Progress.Add(progress); }
     progress.ReportText = text;
@@ -621,6 +626,7 @@ app.MapPost("/api/resolutions/{id:int}/completion-report", async (int id, HttpRe
     var submittedAt = DateTimeOffset.UtcNow;
     var report = new ResolutionReport { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = text, ReportType = "completion", PeriodKey = "completion:" + submittedAt.ToUnixTimeMilliseconds(), ApprovalStatus = "pending", SubmittedAt = submittedAt };
     db.ResolutionReports.Add(report);
+    reportId = report.Id;
     db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = "گزارش اقدام برای بررسی ادمین ارسال شد.", CreatedAt = submittedAt });
     var notifyKey = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
     var reportSummary = text.Length > 500 ? text[..500] + "…" : text;
@@ -641,6 +647,7 @@ app.MapPost("/api/resolutions/{id:int}/completion-report", async (int id, HttpRe
         var storedName = $"{Guid.NewGuid():N}{extension}";
         var destination = Path.Combine(uploadDirectory, storedName);
         await using (var output = System.IO.File.Create(destination)) await file.CopyToAsync(output);
+        writtenPaths.Add(destination);
         if (!provider.TryGetContentType(file.FileName, out var contentType)) contentType = "application/octet-stream";
         var originalName = Path.GetFileName(file.FileName.Replace('\\', '/'));
         db.Attachments.Add(new ResolutionAttachment
@@ -658,8 +665,17 @@ app.MapPost("/api/resolutions/{id:int}/completion-report", async (int id, HttpRe
         });
     }
     await db.SaveChangesAsync();
+        await transaction.CommitAsync();
+    }
+    catch
+    {
+        await transaction.RollbackAsync();
+        foreach (var path in writtenPaths)
+            try { if (System.IO.File.Exists(path)) System.IO.File.Delete(path); } catch { }
+        throw;
+    }
     await ResolutionStatusUpdater.RefreshResolutionStatuses(db);
-    return Results.Ok(new { submitted = true, reportId = report.Id, attachmentCount = files.Count });
+    return Results.Ok(new { submitted = true, reportId, attachmentCount = files.Count });
 });
 
 
