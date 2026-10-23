@@ -110,3 +110,19 @@
 .event-report-pagination button{min-height:34px;padding:6px 14px}
 .event-report-pagination button:disabled{opacity:.45;cursor:not-allowed}
 @media(max-width:650px){.event-report-filters{align-items:stretch}.event-report-filters .search{width:100%;min-width:0}.event-report-pagination{align-items:stretch;flex-direction:column}.event-report-pagination>div{justify-content:space-between}}
+
+
+.notification-feed-item.feed-event{border-color:#a5b4fc;background:#eef2ff}
+.notification-feed-item.feed-event .notification-feed-icon{background:#dfe5ff;color:#4338ca}
+.notification-feed-item.feed-deadline{border-color:#f3cc79;background:#fff8e6}
+.notification-feed-item.feed-deadline .notification-feed-icon{background:#ffedbd;color:#a45a08}
+.notification-feed-item.feed-overdue{border-color:#f0aaa5;background:#fff0ef}
+.notification-feed-item.feed-overdue .notification-feed-icon{background:#ffd9d5;color:#b42318}
+.notification-feed-item.feed-notification{border-color:#91d2c7;background:#eaf8f5}
+.notification-feed-item.feed-notification .notification-feed-icon{background:#cdeee7;color:#087767}
+.notification-feed-item.feed-event.unread,.notification-feed-item.feed-deadline.unread,.notification-feed-item.feed-overdue.unread,.notification-feed-item.feed-notification.unread{box-shadow:inset -3px 0 0 currentColor}
+.notification-pagination{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:14px;padding-top:12px;border-top:1px solid #e6edef;color:#60747b;font-size:11px}
+.notification-pagination>div{display:flex;gap:8px}
+.notification-pagination button{min-height:34px;padding:6px 14px}
+.notification-pagination button:disabled{opacity:.45;cursor:not-allowed}
+@media(max-width:650px){.notification-pagination{align-items:stretch;flex-direction:column}.notification-pagination>div{justify-content:space-between}}
