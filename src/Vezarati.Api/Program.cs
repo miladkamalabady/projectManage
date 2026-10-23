@@ -881,6 +881,7 @@ app.MapGet("/api/groups", async (HttpContext context, AppDb db) =>
                     member.NationalId,
                     member.DisplayName,
                     member.Title,
+                    member.OrganizationUnit,
                     Mobile = mobiles.GetValueOrDefault(member.NationalId, "")
                 })
                 .ToList()
