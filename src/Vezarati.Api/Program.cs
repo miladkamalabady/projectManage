@@ -768,7 +768,7 @@ app.MapGet("/api/notifications", async (HttpContext context, AppDb db, ILogger<P
         var type = overdue ? "overdue" : "deadline";
         var dateKey = overdue ? "overdue" : item.DueDate.Value.ToString("yyyy-MM-dd");
         var dueDateText = string.IsNullOrWhiteSpace(item.DueDateJalali) ? JalaliDate.FromGregorian(item.DueDate.Value) : item.DueDateJalali;
-        var subject = (item.Text ?? "").Replace("\\r", " ").Replace("\\n", " ").Trim();
+        var subject = (item.Text ?? "").Replace("\r", " ").Replace("\n", " ").Trim();
         if (subject.Length > 220) subject = subject[..220] + "…";
         var personalStatus = item.Progress.FirstOrDefault(progress => progress.NationalId == nationalId)?.Status ?? item.Status;
         var personalStatusText = personalStatus switch
@@ -781,8 +781,8 @@ app.MapGet("/api/notifications", async (HttpContext context, AppDb db, ILogger<P
             _ => "در انتظار اقدام"
         };
         var notificationText = overdue
-            ? $"🚨 مهلت اقدام مصوبه شماره {item.Number} به پایان رسیده است.\\n📝 موضوع: {subject}\\n📅 تاریخ سررسید: {dueDateText}\\n📊 وضعیت پیگیری شما: {personalStatusText}\\nلطفاً در اولین فرصت اقدام کنید و نتیجه یا گزارش خود را در سامانه «پیگیری مصوبات» ثبت کنید."
-            : $"⏳ مهلت مصوبه شماره {item.Number} نزدیک است.\\n📝 موضوع: {subject}\\n📅 تاریخ سررسید: {dueDateText}\\n📊 وضعیت پیگیری شما: {personalStatusText}\\nلطفاً پیش از پایان مهلت، اقدام و گزارش خود را در سامانه «پیگیری مصوبات» ثبت کنید.";
+            ? $"🚨 مهلت اقدام مصوبه شماره {item.Number} به پایان رسیده است.\n📝 موضوع: {subject}\n📅 تاریخ سررسید: {dueDateText}\n📊 وضعیت پیگیری شما: {personalStatusText}\nلطفاً در اولین فرصت اقدام کنید و نتیجه یا گزارش خود را در سامانه «پیگیری مصوبات» ثبت کنید."
+            : $"⏳ مهلت مصوبه شماره {item.Number} نزدیک است.\n📝 موضوع: {subject}\n📅 تاریخ سررسید: {dueDateText}\n📊 وضعیت پیگیری شما: {personalStatusText}\nلطفاً پیش از پایان مهلت، اقدام و گزارش خود را در سامانه «پیگیری مصوبات» ثبت کنید.";
         var existingNotification = await db.Notifications.FirstOrDefaultAsync(notification => notification.NationalId == nationalId && notification.ResolutionId == item.Id && notification.Type == type && notification.DateKey == dateKey);
         if (existingNotification is null)
             db.Notifications.Add(new UserNotification { NationalId = nationalId, ResolutionId = item.Id, Type = type, DateKey = dateKey, Text = notificationText, CreatedAt = DateTimeOffset.UtcNow });
