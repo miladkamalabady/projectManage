@@ -928,6 +928,7 @@ app.MapGet("/api/users", async (HttpContext context, AppDb db) =>
             user.DisplayName,
             Title = title,
             Role = account?.Role ?? "کاربر",
+            CanChangeRole = user.NationalId != primaryAdminNationalId && user.NationalId != context.User.FindFirstValue(ClaimTypes.NameIdentifier),
             Province = title.Contains("مدیر کل", StringComparison.OrdinalIgnoreCase) ? ExtractProvince(title) : null
         };
     }));
