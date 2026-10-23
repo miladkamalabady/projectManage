@@ -246,6 +246,8 @@ app.MapGet("/api/dashboard", async (HttpContext context, AppDb db) =>
     var isAdmin = context.User.IsInRole("ادمین");
     var groups = await db.Groups.Include(g => g.Members).ToListAsync();
     var records = await db.Resolutions.AsNoTracking().Where(item => !item.IsArchived).Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Attachments.Where(attachment => isAdmin || attachment.ApprovedForAll)).Include(r => r.Events).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).OrderByDescending(r => r.MeetingDate).ToListAsync();
+    var eventNames = await LoadPersonDisplayNames(db);
+    foreach (var entry in records.SelectMany(resolution => resolution.Events)) entry.Text = NormalizeStatusEventText(entry, eventNames);
     if (!isAdmin) foreach (var resolution in records)
     {
         foreach (var progress in resolution.Progress.Where(progress => progress.NationalId != id)) { progress.ReportText = ""; progress.AdminFeedback = ""; progress.NationalId = ""; }
@@ -277,6 +279,8 @@ app.MapGet("/api/resolutions", async (HttpContext context, AppDb db) =>
     var id = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
     var isAdmin = context.User.IsInRole("ادمین");
     var records = await db.Resolutions.AsNoTracking().Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Attachments.Where(attachment => isAdmin || attachment.ApprovedForAll)).Include(r => r.Events).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).OrderByDescending(r => r.MeetingDate).ToListAsync();
+    var eventNames = await LoadPersonDisplayNames(db);
+    foreach (var entry in records.SelectMany(resolution => resolution.Events)) entry.Text = NormalizeStatusEventText(entry, eventNames);
     if (isAdmin) return Results.Ok(records);
     var groupIds = (await db.GroupMembers.Where(member => member.NationalId == id).Select(member => member.GroupId).ToListAsync()).ToHashSet();
     var mine = records.Where(r => !r.IsArchived && r.Status != "cancelled" && (r.PublishToAll || (r.GroupId.HasValue && groupIds.Contains(r.GroupId.Value)) || r.GroupAssignments.Any(a => groupIds.Contains(a.GroupId)) || r.Assignments.Any(a => a.NationalId == id))).ToList();
@@ -1015,6 +1019,34 @@ record CompletionReviewRequest(string NationalId, string AssigneeNationalId, boo
 record ArchiveUpdateRequest(string NationalId, bool IsArchived);
 record NotificationReadRequest(string NationalId);
 record MemberLookupRequest(string NationalId);
+static async Task<Dictionary<string, string>> LoadPersonDisplayNames(AppDb db)
+{
+    var names = new Dictionary<string, string>(StringComparer.Ordinal);
+    foreach (var member in await db.GroupMembers.AsNoTracking().ToListAsync())
+        if (!string.IsNullOrWhiteSpace(member.DisplayName)) names[member.NationalId] = member.DisplayName;
+    foreach (var user in await db.Users.AsNoTracking().Select(user => new { user.NationalId, user.DisplayName }).ToListAsync())
+        if (!string.IsNullOrWhiteSpace(user.DisplayName)) names[user.NationalId] = user.DisplayName;
+    foreach (var person in await db.Directory.AsNoTracking().Select(person => new { person.NationalId, person.DisplayName }).ToListAsync())
+        if (!string.IsNullOrWhiteSpace(person.DisplayName)) names[person.NationalId] = person.DisplayName;
+    return names;
+}
+
+static string NormalizeStatusEventText(ResolutionEvent entry, IReadOnlyDictionary<string, string> displayNames)
+{
+    const string prefix = "وضعیت پیگیری ";
+    if (!entry.Text.StartsWith(prefix, StringComparison.Ordinal)) return entry.Text;
+    var marker = entry.Text.IndexOf(" به «", prefix.Length, StringComparison.Ordinal);
+    if (marker < 0) return entry.Text;
+    var target = entry.Text[prefix.Length..marker].Trim();
+    var targetId = target.All(char.IsDigit) ? target : target == "کاربر" ? entry.NationalId : "";
+    var name = targetId.Length > 0 ? displayNames.GetValueOrDefault(targetId, "عضو مصوبه") : target;
+    var detail = entry.Text[marker..]
+        .Replace("«rejected»", "«رد شده»", StringComparison.Ordinal)
+        .Replace("«in_progress»", "«در حال اجرا»", StringComparison.Ordinal)
+        .Replace("«completed»", "«اجرا شده»", StringComparison.Ordinal);
+    return prefix + name + detail;
+}
+
 static class ResolutionStatusUpdater
 {
     private static readonly SemaphoreSlim Gate = new(1, 1);
