@@ -392,12 +392,6 @@ export default function App() {
       return false;
     } finally { setBusy(false); }
   }
-  async function reviewUserReport(resolutionId: number, nationalId: string, approved: boolean) {
-    const report = reportSubmissions.filter(item => item.resolutionId === resolutionId && item.nationalId === nationalId)
-      .sort((left, right) => right.submittedAt.localeCompare(left.submittedAt))[0];
-    if (!report) { setMessage("گزارش ارسالی این کاربر پیدا نشد."); return; }
-    await reviewReportSubmission(report, approved);
-  }
   async function reviewReportSubmission(report: ResolutionReport, approved: boolean) {
     const feedback = window.prompt(approved ? "توضیح تأیید گزارش (اختیاری)" : "علت رد گزارش را بنویسید");
     if (feedback === null) return;
