@@ -335,7 +335,8 @@ public static class SeedData
 {
     private sealed record SeedMember(string NationalId, string DisplayName, string Title);
     private sealed record SeedResolution(string SourceKey, string MeetingDateJalali, string Number, string Text, string Notes, string Status, List<string> Groups);
-    private sealed record SeedDocument(Dictionary<string, List<SeedMember>> Groups, List<SeedResolution> Resolutions);
+    private sealed record SeedDirectoryTitle(string NationalId, string Title);
+    private sealed record SeedDocument(Dictionary<string, List<SeedMember>> Groups, List<SeedResolution> Resolutions, List<SeedDirectoryTitle>? DirectoryTitles = null);
 
     private static bool IsCoreOrRegionalGroup(string name)
     {
@@ -389,6 +390,8 @@ public static class SeedData
                 }
                 await db.SaveChangesAsync();
 
+                const string directoryTitleVersionKey = "CouncilDirectoryTitles1405V1";
+                var applyOfficialTitles = !await db.Settings.AnyAsync(setting => setting.Key == directoryTitleVersionKey);
                 foreach (var (groupName, members) in seed.Groups)
                 {
                     if (!groups.TryGetValue(groupName, out var group)) continue;
@@ -400,14 +403,20 @@ public static class SeedData
                             db.Users.Add(user);
                             directoryUsers.Add(member.NationalId, user);
                         }
-                        else
-                        {
-                            if (string.IsNullOrWhiteSpace(user.DisplayName)) user.DisplayName = member.DisplayName;
-                            if (string.IsNullOrWhiteSpace(user.Title)) user.Title = member.Title;
-                        }
+                        else if (string.IsNullOrWhiteSpace(user.DisplayName)) user.DisplayName = member.DisplayName;
+
                         var groupMember = group.Members.FirstOrDefault(x => x.NationalId == member.NationalId);
                         if (groupMember is null) group.Members.Add(new GroupMember { NationalId = member.NationalId });
                     }
+                }
+                if (applyOfficialTitles)
+                {
+                    foreach (var official in seed.DirectoryTitles ?? [])
+                    {
+                        if (directoryUsers.TryGetValue(official.NationalId, out var user) && !string.IsNullOrWhiteSpace(official.Title))
+                            user.Title = official.Title.Trim();
+                    }
+                    db.Settings.Add(new AppSetting { Key = directoryTitleVersionKey, Value = "1" });
                 }
                 await db.SaveChangesAsync();
                 foreach (var item in seed.Resolutions)
