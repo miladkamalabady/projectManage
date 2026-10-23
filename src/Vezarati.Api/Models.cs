@@ -550,6 +550,12 @@ public static class SchemaCompatibility
                     WHERE EXISTS (SELECT 1 FROM GroupMembers gm WHERE gm.NationalId = Users.NationalId);");
             }
         }
+        if (legacyMembershipColumns.Contains("DisplayName"))
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE GroupMembers DROP COLUMN DisplayName;");
+        if (legacyMembershipColumns.Contains("Title"))
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE GroupMembers DROP COLUMN Title;");
+        if (legacyDirectoryColumns.Count > 0)
+            await db.Database.ExecuteSqlRawAsync("DROP TABLE Directory;");
         await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_Users_NationalId ON Users (NationalId);");
         var groupColumns = await ReadColumns(db, "Groups");
         if (groupColumns.Count > 0 && !groupColumns.Contains("Category")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Groups ADD COLUMN Category TEXT NOT NULL DEFAULT '';");
