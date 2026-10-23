@@ -418,6 +418,7 @@ app.MapDelete("/api/resolutions/{id:int}", async (int id, AppDb db) =>
 app.MapPatch("/api/resolutions/{id:int}/status", async (int id, ResolutionStatusUpdate request, HttpContext context, AppDb db) =>
 {
     var isAdmin = context.User.IsInRole("ادمین");
+    if (!isAdmin) return Results.Forbid();
     var nationalId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
     var record = await db.Resolutions.Include(r => r.Progress).FirstOrDefaultAsync(r => r.Id == id);
     if (record is null) return Results.NotFound();
@@ -615,7 +616,7 @@ app.MapPost("/api/resolutions/{id:int}/completion-report", async (int id, HttpRe
     progress.ApprovalStatus = "pending";
     progress.AdminFeedback = "";
     progress.UpdatedAt = DateTimeOffset.UtcNow;
-    if (progress.Status != "completed") progress.Status = "in_progress";
+    progress.Status = "in_progress";
     var personName = await db.Users.Where(person => person.NationalId == nationalId).Select(person => person.DisplayName).FirstOrDefaultAsync() ?? requestedUserName ?? context.User.Identity?.Name ?? nationalId;
     var submittedAt = DateTimeOffset.UtcNow;
     var report = new ResolutionReport { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = text, ReportType = "completion", PeriodKey = "completion:" + submittedAt.ToUnixTimeMilliseconds(), ApprovalStatus = "pending", SubmittedAt = submittedAt };
