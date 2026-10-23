@@ -83,7 +83,7 @@ public sealed class GroupMember
     [NotMapped]
     public string DisplayName { get => User?.DisplayName ?? ""; set { } }
     [NotMapped]
-    public string Title { get => User?.Title ?? ""; set { } }
+    public string Title { get => string.IsNullOrWhiteSpace(User?.Title) ? User?.OrgPositionDesc ?? "" : User!.Title; set { } }
     [NotMapped]
     public string OrganizationUnit { get => User?.OrganizationUnit ?? ""; set { } }
 }
