@@ -390,8 +390,6 @@ public static class SeedData
                 }
                 await db.SaveChangesAsync();
 
-                const string directoryTitleVersionKey = "CouncilDirectoryTitles1405V1";
-                var applyOfficialTitles = !await db.Settings.AnyAsync(setting => setting.Key == directoryTitleVersionKey);
                 foreach (var (groupName, members) in seed.Groups)
                 {
                     if (!groups.TryGetValue(groupName, out var group)) continue;
@@ -409,14 +407,17 @@ public static class SeedData
                         if (groupMember is null) group.Members.Add(new GroupMember { NationalId = member.NationalId });
                     }
                 }
-                if (applyOfficialTitles)
+                // Reconcile official 1405 directory titles on every start until an admin edits that person's title.
+                // The per-user marker also keeps the next SSO login from replacing the official title with a generic SSO post.
+                foreach (var official in seed.DirectoryTitles ?? [])
                 {
-                    foreach (var official in seed.DirectoryTitles ?? [])
-                    {
-                        if (directoryUsers.TryGetValue(official.NationalId, out var user) && !string.IsNullOrWhiteSpace(official.Title))
-                            user.Title = official.Title.Trim();
-                    }
-                    db.Settings.Add(new AppSetting { Key = directoryTitleVersionKey, Value = "1" });
+                    if (!directoryUsers.TryGetValue(official.NationalId, out var user) || string.IsNullOrWhiteSpace(official.Title))
+                        continue;
+                    var overrideKey = "UserTitleOverride:" + official.NationalId;
+                    if (await db.Settings.AnyAsync(setting => setting.Key == overrideKey))
+                        continue;
+                    user.Title = official.Title.Trim();
+                    db.Settings.Add(new AppSetting { Key = overrideKey, Value = "seed:CouncilDirectory1405" });
                 }
                 await db.SaveChangesAsync();
                 foreach (var item in seed.Resolutions)
