@@ -767,8 +767,27 @@ app.MapGet("/api/notifications", async (HttpContext context, AppDb db, ILogger<P
         var overdue = item.DueDate!.Value < today;
         var type = overdue ? "overdue" : "deadline";
         var dateKey = overdue ? "overdue" : item.DueDate.Value.ToString("yyyy-MM-dd");
-        if (!await db.Notifications.AnyAsync(notification => notification.NationalId == nationalId && notification.ResolutionId == item.Id && notification.Type == type && notification.DateKey == dateKey))
-            db.Notifications.Add(new UserNotification { NationalId = nationalId, ResolutionId = item.Id, Type = type, DateKey = dateKey, Text = overdue ? "مهلت مصوبه " + item.Number + " گذشته است." : "مهلت مصوبه " + item.Number + " نزدیک است.", CreatedAt = DateTimeOffset.UtcNow });
+        var dueDateText = string.IsNullOrWhiteSpace(item.DueDateJalali) ? JalaliDate.FromGregorian(item.DueDate.Value) : item.DueDateJalali;
+        var subject = (item.Text ?? "").Replace("\\r", " ").Replace("\\n", " ").Trim();
+        if (subject.Length > 220) subject = subject[..220] + "…";
+        var personalStatus = item.Progress.FirstOrDefault(progress => progress.NationalId == nationalId)?.Status ?? item.Status;
+        var personalStatusText = personalStatus switch
+        {
+            "completed" => "اجرا شده",
+            "in_progress" => "در حال اجرا",
+            "delayed" => "دارای تأخیر",
+            "rejected" => "رد شده",
+            "cancelled" => "لغو شده",
+            _ => "در انتظار اقدام"
+        };
+        var notificationText = overdue
+            ? $"🚨 مهلت اقدام مصوبه شماره {item.Number} به پایان رسیده است.\\n📝 موضوع: {subject}\\n📅 تاریخ سررسید: {dueDateText}\\n📊 وضعیت پیگیری شما: {personalStatusText}\\nلطفاً در اولین فرصت اقدام کنید و نتیجه یا گزارش خود را در سامانه «پیگیری مصوبات» ثبت کنید."
+            : $"⏳ مهلت مصوبه شماره {item.Number} نزدیک است.\\n📝 موضوع: {subject}\\n📅 تاریخ سررسید: {dueDateText}\\n📊 وضعیت پیگیری شما: {personalStatusText}\\nلطفاً پیش از پایان مهلت، اقدام و گزارش خود را در سامانه «پیگیری مصوبات» ثبت کنید.";
+        var existingNotification = await db.Notifications.FirstOrDefaultAsync(notification => notification.NationalId == nationalId && notification.ResolutionId == item.Id && notification.Type == type && notification.DateKey == dateKey);
+        if (existingNotification is null)
+            db.Notifications.Add(new UserNotification { NationalId = nationalId, ResolutionId = item.Id, Type = type, DateKey = dateKey, Text = notificationText, CreatedAt = DateTimeOffset.UtcNow });
+        else if (existingNotification.Text != notificationText)
+            existingNotification.Text = notificationText;
     }
     try { await db.SaveChangesAsync(); }
     catch (DbUpdateException exception)
