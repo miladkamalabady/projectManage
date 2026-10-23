@@ -178,7 +178,7 @@ app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context
         user.Gender = ReadInt("gender");
         user.BirthDate = ReadString("birthDate");
         user.PersianBirthDate = ReadString("persianBirthDate");
-        user.Mobile = ReadString("mobile");
+        if (!user.MobileOverriddenByAdmin) user.Mobile = ReadString("mobile");
         user.UserType = ReadInt("userType");
         user.PersonnelCode = ReadString("personnelCode");
         user.OrgPositionCode = ReadString("orgPositionCode");
@@ -333,12 +333,13 @@ app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpC
     var messageSender = http.RequestServices.GetRequiredService<MessageDispatcher>();
     var dueText = record.DueDateJalali.Length > 0 ? " مهلت پیگیری: " + record.DueDateJalali + "." : "";
     var externalMessage = "مصوبه شماره " + record.Number + " ثبت شد. لطفاً متن مصوبه را بررسی و پیگیری کنید." + dueText;
+    var recipientMobiles = await db.Users.AsNoTracking().Where(user => recipientIds.Contains(user.NationalId)).Select(user => user.Mobile).Where(mobile => mobile != "").Distinct().ToListAsync(http.RequestAborted);
     using (var sendLimit = new SemaphoreSlim(8))
     {
-        var deliveries = recipientIds.Select(async recipient =>
+        var deliveries = recipientMobiles.Select(async mobile =>
         {
             await sendLimit.WaitAsync(http.RequestAborted);
-            try { await messageSender.SendAsync(recipient, externalMessage, http.RequestAborted); }
+            try { await messageSender.SendAsync(mobile, externalMessage, http.RequestAborted); }
             catch (OperationCanceledException) when (http.RequestAborted.IsCancellationRequested) { throw; }
             catch { /* external delivery must not roll back a saved resolution */ }
             finally { sendLimit.Release(); }
@@ -799,7 +800,32 @@ app.MapPatch("/api/attachments/{id:int}/approval", async (int id, AttachmentAppr
     return Results.Ok(new { attachment.Id, attachment.ApprovedForAll });
 });
 
-app.MapGet("/api/groups", async (HttpContext context, AppDb db) => { var groups = await db.Groups.Include(g => g.Members).OrderBy(g => g.Name).ToListAsync(); return Results.Ok(context.User.IsInRole("ادمین") ? (object)groups : groups.Where(g => g.Members.Any(m => m.NationalId == context.User.FindFirstValue(ClaimTypes.NameIdentifier))).Select(g => new { g.Id, g.Name, Members = g.Members.Where(m => m.NationalId == context.User.FindFirstValue(ClaimTypes.NameIdentifier)).ToList() })); });
+app.MapGet("/api/groups", async (HttpContext context, AppDb db) =>
+{
+    var groups = await db.Groups.Include(group => group.Members).OrderBy(group => group.Name).ToListAsync();
+    var currentId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
+    var isAdmin = context.User.IsInRole("ادمین");
+    var mobiles = await db.Users.AsNoTracking().ToDictionaryAsync(user => user.NationalId, user => user.Mobile);
+    return Results.Ok(groups
+        .Where(group => isAdmin || group.Members.Any(member => member.NationalId == currentId))
+        .Select(group => new
+        {
+            group.Id,
+            group.Name,
+            group.Category,
+            Members = group.Members
+                .Where(member => isAdmin || member.NationalId == currentId)
+                .Select(member => new
+                {
+                    member.Id,
+                    member.NationalId,
+                    member.DisplayName,
+                    member.Title,
+                    Mobile = mobiles.GetValueOrDefault(member.NationalId, "")
+                })
+                .ToList()
+        }));
+});
 app.MapPut("/api/groups/{id:int}/category", async (int id, GroupCategoryRequest request, HttpContext context, AppDb db) =>
 {
     if (!context.User.IsInRole("ادمین")) return Results.Forbid();
@@ -928,10 +954,32 @@ app.MapGet("/api/users", async (HttpContext context, AppDb db) =>
             user.DisplayName,
             Title = title,
             Role = account?.Role ?? "کاربر",
+            Mobile = account?.Mobile ?? "",
             CanChangeRole = user.NationalId != primaryAdminNationalId && user.NationalId != context.User.FindFirstValue(ClaimTypes.NameIdentifier),
             Province = title.Contains("مدیر کل", StringComparison.OrdinalIgnoreCase) ? ExtractProvince(title) : null
         };
     }));
+});
+app.MapPatch("/api/users/{nationalId}/mobile", async (string nationalId, UpdateMobileRequest request, HttpContext context, AppDb db) =>
+{
+    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    var normalizedId = NormalizeDigits(nationalId.Trim());
+    var person = await db.Directory.FirstOrDefaultAsync(user => user.NationalId == normalizedId);
+    if (person is null) return Results.NotFound(new { error = "کاربر در فهرست اشخاص پیدا نشد." });
+    var mobile = NormalizeDigits(request.Mobile ?? "").Trim();
+    var digits = new string(mobile.Where(char.IsDigit).ToArray());
+    if (digits.Length > 0 && (digits.Length < 10 || digits.Length > 15))
+        return Results.BadRequest(new { error = "شماره موبایل باید بین ۱۰ تا ۱۵ رقم باشد." });
+    var account = await db.Users.FirstOrDefaultAsync(user => user.NationalId == normalizedId);
+    if (account is null)
+    {
+        account = new AppUser { NationalId = normalizedId, DisplayName = person.DisplayName };
+        db.Users.Add(account);
+    }
+    account.Mobile = digits;
+    account.MobileOverriddenByAdmin = true;
+    await db.SaveChangesAsync();
+    return Results.Ok(new { person.NationalId, person.DisplayName, Mobile = account.Mobile });
 });
 app.MapPatch("/api/users/{nationalId}/role", async (string nationalId, SetUserRoleRequest request, HttpContext context, AppDb db) =>
 {
@@ -1019,7 +1067,9 @@ app.MapPost("/api/reports/warnings/{nationalId}", async (string nationalId, AppD
     if (delayed.Count == 0) return Results.Conflict(new { error = "برای این شخص مصوبه دارای تأخیر پیدا نشد." });
     var numbers = string.Join("، ", delayed.Select(item => item.Number).Distinct());
     var message = "یادآوری دفتر وزارتی: پیگیری مصوبه‌های شماره " + numbers + " از مهلت مقرر گذشته است. لطفاً وضعیت اجرا را در سامانه ثبت و اقدام لازم را انجام دهید.";
-    var sent = await sender.SendAsync(nationalId, message, context.RequestAborted);
+    var recipientMobile = await db.Users.AsNoTracking().Where(user => user.NationalId == nationalId).Select(user => user.Mobile).FirstOrDefaultAsync(context.RequestAborted);
+    if (string.IsNullOrWhiteSpace(recipientMobile)) return Results.Conflict(new { error = "شماره موبایل این کاربر ثبت نشده است." });
+    var sent = await sender.SendAsync(recipientMobile, message, context.RequestAborted);
     if (!sent) return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
     return Results.Ok(new { sent = true, count = delayed.Count });
 });
