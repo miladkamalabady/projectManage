@@ -392,9 +392,11 @@ export default function App() {
       return false;
     } finally { setBusy(false); }
   }
-  async function reviewReportSubmission(report: ResolutionReport, approved: boolean, feedback: string) {
-    if (!approved && !feedback.trim()) { setMessage("برای رد گزارش، علت را وارد کنید."); return; }
-    await request(`/api/reports/submissions/${report.id}/review`, "PATCH", { approved, feedback });
+  async function reviewReportSubmission(report: ResolutionReport, approved: boolean, feedback?: string) {
+    const enteredFeedback = feedback ?? window.prompt(approved ? "توضیح تأیید گزارش (اختیاری)" : "علت رد گزارش را بنویسید");
+    if (enteredFeedback === null) return;
+    if (!approved && !enteredFeedback.trim()) { setMessage("برای رد گزارش، علت را وارد کنید."); return; }
+    await request(`/api/reports/submissions/${report.id}/review`, "PATCH", { approved, feedback: enteredFeedback });
   }
   async function reviewCompletionReport(resolutionId: number, assigneeNationalId: string, approved: boolean) {
     const feedback = window.prompt(approved ? "توضیح تأیید (اختیاری)" : "علت برگشت برای اصلاح") ?? "";
