@@ -961,6 +961,7 @@ app.MapPatch("/api/notifications/{id:int}/read", async (int id, HttpContext cont
 
 app.MapPost("/api/resolutions/{id:int}/attachments", async (int id, HttpRequest request, HttpContext context, AppDb db, IWebHostEnvironment environment) =>
 {
+    if (!context.User.IsInRole("ادمین")) return Results.BadRequest(new { error = "فایل را همراه گزارش اقدام ارسال کنید." });
     var form = await request.ReadFormAsync();
     var file = form.Files.GetFile("file");
     var nationalId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
