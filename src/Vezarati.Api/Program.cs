@@ -1111,8 +1111,8 @@ app.MapPost("/api/resolutions/{id:int}/warnings", async (int id, WarningRecipien
         await sendLimit.WaitAsync(context.RequestAborted);
         try
         {
-            var sent = await sender.SendAsync(mobile, message, context.RequestAborted);
-            return new { nationalId, displayName = name, sent, reason = sent ? "" : "ارسال پیام از سرویس بله ناموفق بود." };
+            var delivery = await sender.SendWithResultAsync(mobile, message, context.RequestAborted);
+            return new { nationalId, displayName = name, sent = delivery.Sent, reason = delivery.Reason };
         }
         catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested) { throw; }
         catch
@@ -1143,8 +1143,8 @@ app.MapPost("/api/reports/warnings/{nationalId}", async (string nationalId, AppD
     var message = "یادآوری دفتر وزارتی: پیگیری مصوبه‌های شماره " + numbers + " از مهلت مقرر گذشته است. لطفاً وضعیت اجرا را در سامانه ثبت و اقدام لازم را انجام دهید.";
     var recipientMobile = await db.Users.AsNoTracking().Where(user => user.NationalId == nationalId).Select(user => user.Mobile).FirstOrDefaultAsync(context.RequestAborted);
     if (string.IsNullOrWhiteSpace(recipientMobile)) return Results.Conflict(new { error = "شماره موبایل این کاربر ثبت نشده است." });
-    var sent = await sender.SendAsync(recipientMobile, message, context.RequestAborted);
-    if (!sent) return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+    var delivery = await sender.SendWithResultAsync(recipientMobile, message, context.RequestAborted);
+    if (!delivery.Sent) return Results.Json(new { error = delivery.Reason }, statusCode: StatusCodes.Status503ServiceUnavailable);
     return Results.Ok(new { sent = true, count = delayed.Count });
 });
 static List<(string Key, DateOnly DueDate)> BuildDueReportPeriods(DateOnly startDate, string frequency, DateOnly today)
