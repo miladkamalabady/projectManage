@@ -58,6 +58,7 @@ app.Use(async (context, next) =>
             || path.Equals("/api/reports/submissions", StringComparison.OrdinalIgnoreCase)
             || (path.Equals("/api/reports/warnings", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPost(context.Request.Method))
             || (path.StartsWith("/api/reports/warnings/", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPost(context.Request.Method))
+            || (path.StartsWith("/api/resolutions/", StringComparison.OrdinalIgnoreCase) && path.EndsWith("/warnings", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPost(context.Request.Method))
             || (path.StartsWith("/api/resolutions", StringComparison.OrdinalIgnoreCase) &&
                 ((path.Equals("/api/resolutions", StringComparison.OrdinalIgnoreCase) && (HttpMethods.IsPost(context.Request.Method) || HttpMethods.IsDelete(context.Request.Method)))
                  || (path.StartsWith("/api/resolutions/", StringComparison.OrdinalIgnoreCase) &&
@@ -1051,7 +1052,7 @@ app.MapGet("/api/reports", async (HttpContext context, AppDb db) =>
     if (!isAdmin) rows = rows.Where(row => row.NationalId == id).ToList();
     return Results.Ok(new { total = records.Count, completed = records.Count(r => r.Status == "completed"), delayed = records.Count(r => r.Status == "delayed"), pending = records.Count(r => r.Status is "before" or "in_progress"), people = rows });
 });
-app.MapPost("/api/reports/warnings", async (WarningRecipientsRequest request, AppDb db, MessageDispatcher sender, HttpContext context) =>
+app.MapPost("/api/resolutions/{id:int}/warnings", async (int id, WarningRecipientsRequest request, AppDb db, MessageDispatcher sender, HttpContext context) =>
 {
     if (!context.User.IsInRole("ادمین")) return Results.Forbid();
     var nationalIds = (request.NationalIds ?? new List<string>())
@@ -1063,12 +1064,14 @@ app.MapPost("/api/reports/warnings", async (WarningRecipientsRequest request, Ap
     if (nationalIds.Count == 0) return Results.BadRequest(new { error = "حداقل یک کاربر را انتخاب کنید." });
     if (nationalIds.Count > 100) return Results.BadRequest(new { error = "در هر نوبت حداکثر ۱۰۰ کاربر قابل انتخاب است." });
 
-    var records = await db.Resolutions.Where(item => !item.IsArchived && item.Status != "cancelled")
+    var records = await db.Resolutions.Where(item => item.Id == id && !item.IsArchived && item.Status != "cancelled")
         .Include(item => item.Assignments)
         .Include(item => item.Progress)
         .Include(item => item.Group).ThenInclude(group => group!.Members)
         .Include(item => item.GroupAssignments).ThenInclude(assignment => assignment.Group).ThenInclude(group => group!.Members)
         .ToListAsync(context.RequestAborted);
+    if (records.Count == 0) return Results.NotFound(new { error = "مصوبه پیدا نشد یا لغو شده است." });
+    var resolution = records[0];
     var directory = await db.Directory.AsNoTracking()
         .Where(person => nationalIds.Contains(person.NationalId))
         .ToDictionaryAsync(person => person.NationalId, person => person.DisplayName, context.RequestAborted);
@@ -1097,9 +1100,8 @@ app.MapPost("/api/reports/warnings", async (WarningRecipientsRequest request, Ap
         if (string.IsNullOrWhiteSpace(mobile))
             return new { nationalId, displayName = name, sent = false, reason = "شمارهٔ موبایل ثبت نشده است." };
 
-        var numbers = string.Join("، ", tasks.Select(item => item.Record.Number).Distinct());
-        var message = "هشدار دفتر وزارتی: برای وظایف دارای تأخیر یا در حال اجرا در مصوبه‌های شماره "
-            + numbers + " لطفاً اقدام لازم را انجام داده و وضعیت را در سامانه به‌روز کنید.";
+        var statusText = string.Join(" و ", tasks.Select(item => item.Status).Distinct().Select(status => status == "delayed" ? "با تأخیر" : "در حال اجرا"));
+        var message = "هشدار دفتر وزارتی: وضعیت وظیفهٔ شما در مصوبه شماره " + resolution.Number + " «" + statusText + "» است. لطفاً اقدام لازم را انجام داده و وضعیت را در سامانه به‌روز کنید.";
         await sendLimit.WaitAsync(context.RequestAborted);
         try
         {
@@ -1114,7 +1116,7 @@ app.MapPost("/api/reports/warnings", async (WarningRecipientsRequest request, Ap
         finally { sendLimit.Release(); }
     }));
     var sentCount = results.Count(item => item.sent);
-    return Results.Ok(new { selected = nationalIds.Count, sent = sentCount, failed = results.Length - sentCount, results });
+    return Results.Ok(new { resolutionId = id, resolutionNumber = resolution.Number, selected = nationalIds.Count, sent = sentCount, failed = results.Length - sentCount, results });
 });
 app.MapPost("/api/reports/warnings/{nationalId}", async (string nationalId, AppDb db, MessageDispatcher sender, HttpContext context) =>
 {
