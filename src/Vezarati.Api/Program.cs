@@ -193,7 +193,12 @@ app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context
         user.RegionId = ReadInt("regionId");
         user.LastLoginAt = DateTimeOffset.UtcNow;
         user.DisplayName = displayName;
-        user.Title = string.IsNullOrWhiteSpace(position) ? ReadString("orgPositionTypeDesc") : position;
+        var userTitleOverrideKey = "UserTitleOverride:" + nationalId;
+        var titleWasEditedByAdmin = await db.Settings.AnyAsync(setting => setting.Key == userTitleOverrideKey, context.RequestAborted);
+        if (!titleWasEditedByAdmin)
+            user.Title = string.IsNullOrWhiteSpace(position) ? ReadString("orgPositionTypeDesc") : position;
+        else if (string.IsNullOrWhiteSpace(user.Title))
+            user.Title = string.IsNullOrWhiteSpace(position) ? ReadString("orgPositionTypeDesc") : position;
         if (string.IsNullOrWhiteSpace(user.OrganizationUnit)) user.OrganizationUnit = user.RegionId?.ToString() ?? "";
 
         await db.SaveChangesAsync(context.RequestAborted);
@@ -1044,6 +1049,9 @@ app.MapPatch("/api/users/{nationalId}/profile", async (string nationalId, Update
     if (user is null) return Results.NotFound(new { error = "کاربر پیدا نشد." });
     user.Title = request.Title.Trim();
     user.OrganizationUnit = request.OrganizationUnit.Trim();
+    var titleOverrideKey = "UserTitleOverride:" + id;
+    if (!await db.Settings.AnyAsync(setting => setting.Key == titleOverrideKey))
+        db.Settings.Add(new AppSetting { Key = titleOverrideKey, Value = "1" });
     await db.SaveChangesAsync();
     return Results.Ok(new { user.NationalId, user.DisplayName, user.Title, user.OrganizationUnit });
 });
