@@ -722,6 +722,21 @@ public static class BaleMessageText
     }
 
 
+    public static string ForReportReview(Resolution? item, bool approved, string? feedback)
+    {
+        var number = item?.Number ?? "";
+        var title = Clip(item?.Text, 360);
+        var message = approved
+            ? "✅ گزارش اقدام شما تأیید شد و وضعیت پیگیری‌تان به «اجرا شده» تغییر کرد.\n"
+            : "↩️ گزارش اقدام شما نیازمند اصلاح است و وضعیت پیگیری‌تان به «در حال اجرا» برگشت.\n";
+        message += "🔢 شماره مصوبه: " + (string.IsNullOrWhiteSpace(number) ? "—" : number) + "\n"
+            + "📌 عنوان مصوبه: «" + (string.IsNullOrWhiteSpace(title) ? "بدون عنوان" : title) + "»\n"
+            + (string.IsNullOrWhiteSpace(feedback) ? "" : "📝 توضیح ادمین: " + Clip(feedback, 500) + "\n")
+            + "لطفاً جزئیات را در سامانه «پیگیری مصوبات» بررسی کنید.";
+        if (item is not null) message = WithResolutionId(message, item.Id);
+        return WithResolutionTag(message, number);
+    }
+
     public static string ForWarning(Resolution item, string recipientName, string status, string? recipientTitle = null)
     {
         var text = Clip(item.Text, 420);
