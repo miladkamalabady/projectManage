@@ -977,6 +977,15 @@ app.MapPatch("/api/notifications/{id:int}/read", async (int id, HttpContext cont
     return Results.Ok(new { notification.Id, notification.IsRead });
 });
 
+app.MapPatch("/api/notifications/read-all", async (HttpContext context, AppDb db) =>
+{
+    var nationalId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+    var unread = await db.Notifications.Where(item => item.NationalId == nationalId && !item.IsRead).ToListAsync();
+    foreach (var notification in unread) notification.IsRead = true;
+    await db.SaveChangesAsync();
+    return Results.Ok(new { updated = unread.Count });
+});
+
 app.MapPost("/api/resolutions/{id:int}/attachments", async (int id, HttpRequest request, HttpContext context, AppDb db, IWebHostEnvironment environment) =>
 {
     if (!context.User.IsInRole("ادمین")) return Results.BadRequest(new { error = "فایل را همراه گزارش اقدام ارسال کنید." });
