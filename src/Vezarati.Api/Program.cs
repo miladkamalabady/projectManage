@@ -928,11 +928,13 @@ app.MapDelete("/api/groups/{id:int}", async (int id, AppDb db) =>
     await db.SaveChangesAsync();
     return Results.NoContent();
 });
-app.MapPost("/api/groups", async (GroupCreate request, AppDb db) =>
+app.MapPost("/api/groups", async (GroupCreate request, HttpContext context, AppDb db) =>
 {
+    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
     var name = request.Name.Trim(); if (name.Length == 0) return Results.BadRequest(new { error = "نام گروه الزامی است." });
+    if (request.Category is not ("group" or "unit")) return Results.BadRequest(new { error = "دسته‌بندی معتبر نیست." });
     if (await db.Groups.AnyAsync(g => g.Name == name)) return Results.Conflict(new { error = "این گروه قبلاً تعریف شده است." });
-    var group = new ResolutionGroup { Name = name }; db.Groups.Add(group); await db.SaveChangesAsync();
+    var group = new ResolutionGroup { Name = name, Category = request.Category }; db.Groups.Add(group); await db.SaveChangesAsync();
     return Results.Created($"/api/groups/{group.Id}", group);
 });
 app.MapGet("/api/users/search", async (string? q, AppDb db) =>
@@ -1340,7 +1342,7 @@ app.Run();
 record ResolutionCreate(DateOnly MeetingDate, string? MeetingDateJalali, string Number, string Text, string? Notes, string Status, int? GroupId, List<int>? GroupIds, List<string> People, bool PublishToAll, DateOnly? DueDate, string? DueDateJalali, DateOnly? StartDate, string? StartDateJalali, bool RequiresPeriodicReport, string? ReportFrequency, string? CancellationReason);
 record ResolutionStatusUpdate(string Status, string? Notes, string? NationalId);
 record ResolutionBulkStatusUpdate(string Status, string? Notes);
-record GroupCreate(string Name);
+record GroupCreate(string Name, string Category = "unit");
 record GroupCategoryRequest(string Category);
 record ResolutionEventCreate(string Text, string NationalId, string? UserName);
 record AttachmentApprovalRequest(string NationalId, bool ApprovedForAll);
