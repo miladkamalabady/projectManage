@@ -233,9 +233,13 @@ public sealed class AppDb(DbContextOptions<AppDb> options, MessageDispatcher mes
             if (!enabled) return saved;
 
             var recipientIds = pendingNotifications.Select(notification => notification.NationalId).Distinct().ToList();
-            var mobiles = await Users.AsNoTracking()
+            var userMobiles = await Users.AsNoTracking()
                 .Where(user => recipientIds.Contains(user.NationalId) && user.Mobile != "")
-                .ToDictionaryAsync(user => user.NationalId, user => user.Mobile, CancellationToken.None);
+                .Select(user => new { user.NationalId, user.Mobile })
+                .ToListAsync(CancellationToken.None);
+            var mobiles = userMobiles
+                .GroupBy(user => user.NationalId)
+                .ToDictionary(group => group.Key, group => group.First().Mobile);
 
             foreach (var notification in pendingNotifications)
                 if (mobiles.TryGetValue(notification.NationalId, out var mobile))
