@@ -5,3 +5,4 @@
 **/publish/
 **/data/*.db*
 **/*.tsbuildinfo
+**/www/
