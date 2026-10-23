@@ -520,6 +520,8 @@ public static class SchemaCompatibility
     }
 }
 
+public sealed record BaleDeliveryResult(bool Sent, string Reason);
+
 public sealed class MessageDispatcher(IHttpClientFactory clients, IConfiguration configuration, ILogger<MessageDispatcher> logger)
 {
     private readonly SemaphoreSlim _tokenLock = new(1, 1);
@@ -527,12 +529,19 @@ public sealed class MessageDispatcher(IHttpClientFactory clients, IConfiguration
     private DateTimeOffset _tokenExpiresAt;
 
     public async Task<bool> SendAsync(string mobile, string text, CancellationToken cancellationToken = default)
+        => (await SendWithResultAsync(mobile, text, cancellationToken)).Sent;
+
+    public async Task<BaleDeliveryResult> SendWithResultAsync(string mobile, string text, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(mobile)) return false;
+        if (string.IsNullOrWhiteSpace(mobile))
+            return new BaleDeliveryResult(false, "شمارهٔ موبایل گیرنده ثبت نشده است.");
+
         try
         {
-            var token = await GetTokenAsync(cancellationToken);
-            if (string.IsNullOrWhiteSpace(token)) return false;
+            var tokenResult = await GetTokenAsync(cancellationToken);
+            if (string.IsNullOrWhiteSpace(tokenResult.Token))
+                return new BaleDeliveryResult(false, tokenResult.Error ?? "دریافت توکن از سرویس بله ناموفق بود.");
+
             var url = configuration["BALE_SEND_URL"] ?? configuration["Bale:SendUrl"] ?? "http://192.168.0.96:5800/api/BaleMessenger/sendMessage";
             using var request = new HttpRequestMessage(HttpMethod.Post, url)
             {
@@ -541,31 +550,49 @@ public sealed class MessageDispatcher(IHttpClientFactory clients, IConfiguration
                     System.Text.Encoding.UTF8,
                     "application/json")
             };
-            request.Headers.TryAddWithoutValidation("token", token);
+            request.Headers.TryAddWithoutValidation("token", tokenResult.Token);
             using var response = await clients.CreateClient("MessageApi").SendAsync(request, cancellationToken);
             if (!response.IsSuccessStatusCode)
-                logger.LogWarning("Bale messaging API returned HTTP {StatusCode}.", (int)response.StatusCode);
-            return response.IsSuccessStatusCode;
+            {
+                var reason = $"سرویس ارسال بله با کد HTTP {(int)response.StatusCode} پاسخ داد.";
+                logger.LogWarning("Bale messaging API returned HTTP {StatusCode} ({ReasonPhrase}).", (int)response.StatusCode, response.ReasonPhrase);
+                return new BaleDeliveryResult(false, reason);
+            }
+            return new BaleDeliveryResult(true, "");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-        catch (Exception exception) { logger.LogWarning(exception, "Bale messaging request failed."); return false; }
+        catch (OperationCanceledException exception)
+        {
+            logger.LogWarning(exception, "Bale messaging request timed out.");
+            return new BaleDeliveryResult(false, "مهلت پاسخ‌گویی سرویس بله تمام شد.");
+        }
+        catch (HttpRequestException exception)
+        {
+            logger.LogWarning(exception, "Could not connect to Bale messaging service.");
+            return new BaleDeliveryResult(false, "ارتباط با سرویس بله برقرار نشد؛ جزئیات در لاگ سرور ثبت شده است.");
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "Bale messaging request failed.");
+            return new BaleDeliveryResult(false, "ارسال پیام از سرویس بله با خطای داخلی مواجه شد؛ جزئیات در لاگ سرور ثبت شده است.");
+        }
     }
 
-    private async Task<string?> GetTokenAsync(CancellationToken cancellationToken)
+    private async Task<(string? Token, string? Error)> GetTokenAsync(CancellationToken cancellationToken)
     {
         if (!string.IsNullOrWhiteSpace(_cachedToken) && _tokenExpiresAt > DateTimeOffset.UtcNow)
-            return _cachedToken;
+            return (_cachedToken, null);
         await _tokenLock.WaitAsync(cancellationToken);
         try
         {
             if (!string.IsNullOrWhiteSpace(_cachedToken) && _tokenExpiresAt > DateTimeOffset.UtcNow)
-                return _cachedToken;
+                return (_cachedToken, null);
             var username = configuration["BALE_USERNAME"] ?? configuration["Bale:Username"];
             var password = configuration["BALE_PASSWORD"] ?? configuration["Bale:Password"];
             if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
             {
                 logger.LogWarning("Bale credentials are not configured.");
-                return null;
+                return (null, "نام کاربری یا گذرواژهٔ بله در تنظیمات سرور وارد نشده است.");
             }
             var tokenUrl = configuration["BALE_TOKEN_URL"] ?? configuration["Bale:TokenUrl"] ?? "http://192.168.0.96:5800/user/login/GetToken";
             using var request = new HttpRequestMessage(HttpMethod.Post, tokenUrl)
@@ -579,17 +606,17 @@ public sealed class MessageDispatcher(IHttpClientFactory clients, IConfiguration
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
-                logger.LogWarning("Bale token API returned HTTP {StatusCode}.", (int)response.StatusCode);
-                return null;
+                logger.LogWarning("Bale token API returned HTTP {StatusCode} ({ReasonPhrase}).", (int)response.StatusCode, response.ReasonPhrase);
+                return (null, $"دریافت توکن از سرویس بله با کد HTTP {(int)response.StatusCode} ناموفق بود.");
             }
             _cachedToken = ExtractToken(body);
             if (string.IsNullOrWhiteSpace(_cachedToken))
             {
-                logger.LogWarning("Bale token API response did not contain a token.");
-                return null;
+                logger.LogWarning("Bale token API response did not contain a recognized token.");
+                return (null, "پاسخ سرویس دریافت توکن بله معتبر نیست یا توکن در آن پیدا نشد.");
             }
             _tokenExpiresAt = DateTimeOffset.UtcNow.AddMinutes(20);
-            return _cachedToken;
+            return (_cachedToken, null);
         }
         finally { _tokenLock.Release(); }
     }
