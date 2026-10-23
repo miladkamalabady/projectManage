@@ -725,10 +725,6 @@ app.MapGet("/api/reports/submissions", async (AppDb db) =>
             file.UploadedAt
         })
         .ToListAsync();
-    var progressByReporter = await db.Progress.AsNoTracking()
-        .Where(progress => resolutionIds.Contains(progress.ResolutionId) && nationalIds.Contains(progress.NationalId))
-        .ToDictionaryAsync(progress => (progress.ResolutionId, progress.NationalId));
-
     return Results.Ok(reports.Select(report => new
     {
         report.Id,
@@ -742,11 +738,45 @@ app.MapGet("/api/reports/submissions", async (AppDb db) =>
         report.ReportType,
         report.PeriodKey,
         report.SubmittedAt,
+        report.ApprovalStatus,
+        report.AdminFeedback,
         DueDate = report.ReportType == "periodic" ? report.PeriodKey.Split(':').LastOrDefault() : null,
-        ApprovalStatus = progressByReporter.GetValueOrDefault((report.ResolutionId, report.NationalId))?.ApprovalStatus ?? "none",
-        AdminFeedback = progressByReporter.GetValueOrDefault((report.ResolutionId, report.NationalId))?.AdminFeedback ?? "",
         Attachments = attachments.Where(file => file.ResolutionId == report.ResolutionId && file.UploadedBy == report.NationalId).ToList()
     }));
+});
+
+app.MapPatch("/api/reports/submissions/{reportId:int}/review", async (int reportId, ReportReviewRequest request, HttpContext context, AppDb db) =>
+{
+    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    var report = await db.ResolutionReports.Include(item => item.Resolution).FirstOrDefaultAsync(item => item.Id == reportId);
+    if (report is null) return Results.NotFound();
+    report.ApprovalStatus = request.Approved ? "approved" : "rejected";
+    report.AdminFeedback = request.Feedback?.Trim() ?? "";
+    var resolutionNumber = report.Resolution?.Number ?? "";
+    var actionText = request.Approved ? "گزارش ارسالی تأیید شد." : "گزارش ارسالی رد شد.";
+    if (!string.IsNullOrWhiteSpace(report.AdminFeedback)) actionText += " توضیح ادمین: " + report.AdminFeedback;
+    db.Events.Add(new ResolutionEvent
+    {
+        ResolutionId = report.ResolutionId,
+        NationalId = context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? primaryAdminNationalId,
+        UserName = context.User.Identity?.Name ?? "مدیر سامانه",
+        Text = actionText,
+        CreatedAt = DateTimeOffset.UtcNow
+    });
+    db.Notifications.Add(new UserNotification
+    {
+        NationalId = report.NationalId,
+        ResolutionId = report.ResolutionId,
+        Type = request.Approved ? "report-approved" : "report-rejected",
+        DateKey = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(),
+        Text = request.Approved
+            ? "✅ گزارش شما برای مصوبه شماره " + resolutionNumber + " تأیید شد."
+            : "↩️ گزارش شما برای مصوبه شماره " + resolutionNumber + " رد شد و نیاز به اصلاح دارد."
+                + (string.IsNullOrWhiteSpace(report.AdminFeedback) ? "" : "\n📝 توضیح: " + report.AdminFeedback),
+        CreatedAt = DateTimeOffset.UtcNow
+    });
+    await db.SaveChangesAsync();
+    return Results.Ok(new { report.Id, report.ApprovalStatus, report.AdminFeedback });
 });
 
 app.MapPatch("/api/resolutions/{id:int}/completion-review", async (int id, CompletionReviewRequest request, HttpContext context, AppDb db) =>
@@ -1423,6 +1453,7 @@ record AttachmentApprovalRequest(string NationalId, bool ApprovedForAll);
 record CompletionReportRequest(string NationalId, string UserName, string Text);
 record ResolutionSubmissionRequest(string Text);
 record CompletionReviewRequest(string NationalId, string AssigneeNationalId, bool Approved, string? Feedback);
+record ReportReviewRequest(bool Approved, string? Feedback);
 record ArchiveUpdateRequest(string NationalId, bool IsArchived);
 record NotificationReadRequest(string NationalId);
 record MemberLookupRequest(string NationalId);
