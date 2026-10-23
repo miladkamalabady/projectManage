@@ -765,14 +765,14 @@ app.MapGet("/api/reports/submissions", async (AppDb db) =>
         .ToList();
     var directory = await db.Users.AsNoTracking().ToDictionaryAsync(person => person.NationalId, person => (person.DisplayName, person.Title));
     var positions = await db.Users.AsNoTracking().ToDictionaryAsync(user => user.NationalId, user => user.OrgPositionDesc);
-    var resolutionIds = reports.Select(report => report.ResolutionId).Distinct().ToList();
-    var nationalIds = reports.Select(report => report.NationalId).Distinct().ToList();
+    var reportIds = reports.Select(report => report.Id).ToList();
     var attachments = await db.Attachments.AsNoTracking()
-        .Where(file => resolutionIds.Contains(file.ResolutionId) && nationalIds.Contains(file.UploadedBy))
+        .Where(file => file.ResolutionReportId.HasValue && reportIds.Contains(file.ResolutionReportId.Value))
         .Select(file => new
         {
             file.Id,
             file.ResolutionId,
+            file.ResolutionReportId,
             file.UploadedBy,
             file.OriginalName,
             file.ContentType,
@@ -798,7 +798,7 @@ app.MapGet("/api/reports/submissions", async (AppDb db) =>
         report.ApprovalStatus,
         report.AdminFeedback,
         DueDate = report.ReportType == "periodic" ? report.PeriodKey.Split(':').LastOrDefault() : null,
-        Attachments = attachments.Where(file => file.ResolutionId == report.ResolutionId && file.UploadedBy == report.NationalId).ToList()
+        Attachments = attachments.Where(file => file.ResolutionReportId == report.Id).ToList()
     }));
 });
 
@@ -809,6 +809,18 @@ app.MapPatch("/api/reports/submissions/{reportId:int}/review", async (int report
     if (report is null) return Results.NotFound();
     report.ApprovalStatus = request.Approved ? "approved" : "rejected";
     report.AdminFeedback = request.Feedback?.Trim() ?? "";
+    var progress = await db.Progress.FirstOrDefaultAsync(item => item.ResolutionId == report.ResolutionId && item.NationalId == report.NationalId);
+    if (progress is null)
+    {
+        progress = new ResolutionProgress { ResolutionId = report.ResolutionId, NationalId = report.NationalId };
+        db.Progress.Add(progress);
+    }
+    progress.ReportText = report.Text;
+    progress.ApprovalStatus = report.ApprovalStatus;
+    progress.AdminFeedback = report.AdminFeedback;
+    progress.Status = request.Approved ? "completed" : "in_progress";
+    progress.UpdatedAt = DateTimeOffset.UtcNow;
+    if (report.Resolution is not null) report.Resolution.UpdatedAt = DateTimeOffset.UtcNow;
     var resolutionNumber = report.Resolution?.Number ?? "";
     var actionText = request.Approved ? "گزارش ارسالی تأیید شد." : "گزارش ارسالی رد شد.";
     if (!string.IsNullOrWhiteSpace(report.AdminFeedback)) actionText += " توضیح ادمین: " + report.AdminFeedback;
@@ -833,7 +845,8 @@ app.MapPatch("/api/reports/submissions/{reportId:int}/review", async (int report
         CreatedAt = DateTimeOffset.UtcNow
     });
     await db.SaveChangesAsync();
-    return Results.Ok(new { report.Id, report.ApprovalStatus, report.AdminFeedback });
+    await ResolutionStatusUpdater.RefreshResolutionStatuses(db);
+    return Results.Ok(new { report.Id, report.ApprovalStatus, report.AdminFeedback, progress.Status });
 });
 
 app.MapPatch("/api/resolutions/{id:int}/completion-review", async (int id, CompletionReviewRequest request, HttpContext context, AppDb db) =>
