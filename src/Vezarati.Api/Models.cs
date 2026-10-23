@@ -564,8 +564,16 @@ public sealed class MessageDispatcher(IHttpClientFactory clients, IConfiguration
                     return property.Value.ValueKind == System.Text.Json.JsonValueKind.String ? property.Value.GetString() : null;
             foreach (var property in element.EnumerateObject())
             {
-                var token = FindToken(property.Value);
-                if (!string.IsNullOrWhiteSpace(token)) return token;
+                if ((property.Name.Equals("data", StringComparison.OrdinalIgnoreCase)
+                     || property.Name.Equals("result", StringComparison.OrdinalIgnoreCase)
+                     || property.Name.Equals("value", StringComparison.OrdinalIgnoreCase))
+                    && property.Value.ValueKind == System.Text.Json.JsonValueKind.String)
+                    return property.Value.GetString();
+                if (property.Value.ValueKind is System.Text.Json.JsonValueKind.Object or System.Text.Json.JsonValueKind.Array)
+                {
+                    var token = FindToken(property.Value);
+                    if (!string.IsNullOrWhiteSpace(token)) return token;
+                }
             }
         }
         else if (element.ValueKind == System.Text.Json.JsonValueKind.Array)
