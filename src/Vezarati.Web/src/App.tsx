@@ -494,7 +494,7 @@ export default function App() {
       const registration = await navigator.serviceWorker.register("/service-worker.js", { scope: "/" });
       let subscription = await registration.pushManager.getSubscription();
       if (subscription && pushEnabled) {
-        const response = await fetch("/api/push/subscriptions", { method: "DELETE", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(subscription) });
+        const response = await fetch("/api/push/subscriptions?endpoint=" + encodeURIComponent(subscription.endpoint), { method: "DELETE", credentials: "include" });
         if (!response.ok) throw new Error("لغو اشتراک اعلان مرورگر انجام نشد.");
         await subscription.unsubscribe();
         setPushEnabled(false);
