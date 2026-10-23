@@ -455,6 +455,8 @@ public static class SchemaCompatibility
 {
     public static async Task UpgradeAsync(AppDb db)
     {
+        // SQL Server receives the complete current schema from EnsureCreatedAsync; the compatibility DDL below is SQLite-specific.
+        if (db.Database.IsSqlServer()) return;
         var columns = await ReadColumns(db, "Resolutions");
         if (columns.Count > 0 && !columns.Contains("MeetingDateJalali")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN MeetingDateJalali TEXT NOT NULL DEFAULT '';");
         if (columns.Count > 0 && !columns.Contains("SourceKey")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN SourceKey TEXT NULL;");
