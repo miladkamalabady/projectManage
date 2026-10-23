@@ -517,7 +517,7 @@ export default function App() {
     const link = document.createElement("a"); link.href = url; link.download = "resolution-reports.csv"; link.click(); URL.revokeObjectURL(url);
   }
   async function deleteResolution(item: Resolution) {
-    const confirmed = window.confirm(`مصوبه «${item.number}» حذف شود؟`);
+    const confirmed = window.confirm(`مصوبه «${item.number}» با شناسه یکتا ${item.id} حذف شود؟`);
     if (confirmed) await request(`/api/resolutions/${item.id}`, "DELETE");
   }
   async function createGroup() { if (await request("/api/groups", "POST", { name: groupName })) setGroupName(""); }
@@ -542,7 +542,7 @@ export default function App() {
       const result = response.status === 204 ? null : await response.json();
       if (!response.ok) {
         const references = Array.isArray(result?.resolutions) ? result.resolutions as { id: number; number: string; text: string; meetingDate: string; meetingDateJalali?: string; isArchived: boolean; matchingGroupNames: string[]; groupNames: string[]; legacyReference: boolean; legacyGroupName: string }[] : [];
-        const detail = references.length ? ` مصوبه‌های مرتبط: ${references.map(item => { const matched = item.matchingGroupNames?.join("، ") || (item.legacyReference ? item.legacyGroupName + " (ارجاع قدیمی)" : "نامشخص"); const otherGroups = item.groupNames?.filter(name => !item.matchingGroupNames?.includes(name)) ?? []; const text = (item.text || "").replace(/\s+/g, " ").slice(0, 90); return `#${item.number} [شناسه ${item.id}]${item.isArchived ? " (بایگانی‌شده)" : ""} · تاریخ ${item.meetingDateJalali || item.meetingDate} · ارجاعِ مانع حذف: ${matched}${otherGroups.length ? " · سایر گروه‌ها: " + otherGroups.join("، ") : ""} · متن: ${text}`; }).join("؛ ")}.` : "";
+        const detail = references.length ? ` مصوبه‌های مرتبط: ${references.map(item => { const matched = item.matchingGroupNames?.join("، ") || (item.legacyReference ? item.legacyGroupName + " (ارجاع قدیمی)" : "نامشخص"); const otherGroups = item.groupNames?.filter(name => !item.matchingGroupNames?.includes(name)) ?? []; const text = (item.text || "").replace(/\s+/g, " ").slice(0, 90); return `#${item.number} [شناسه یکتا: ${item.id}]${item.isArchived ? " (بایگانی‌شده)" : ""} · تاریخ ${item.meetingDateJalali || item.meetingDate} · ارجاعِ مانع حذف: ${matched}${otherGroups.length ? " · سایر گروه‌ها: " + otherGroups.join("، ") : ""} · متن: ${text}`; }).join("؛ ")}.` : "";
         setGroupDeleteError((result?.error || "حذف گروه انجام نشد.") + detail);
         return;
       }
