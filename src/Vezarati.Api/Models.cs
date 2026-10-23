@@ -606,8 +606,11 @@ public sealed class MessageDispatcher(IHttpClientFactory clients, IConfiguration
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
-                logger.LogWarning("Bale token API returned HTTP {StatusCode} ({ReasonPhrase}).", (int)response.StatusCode, response.ReasonPhrase);
-                return (null, $"دریافت توکن از سرویس بله با کد HTTP {(int)response.StatusCode} ناموفق بود.");
+                var upstreamMessage = SafeUpstreamMessage(body, username, password);
+                logger.LogWarning("Bale token API returned HTTP {StatusCode} ({ReasonPhrase}). Provider detail: {ProviderDetail}",
+                    (int)response.StatusCode, response.ReasonPhrase, upstreamMessage);
+                var detail = string.IsNullOrWhiteSpace(upstreamMessage) ? "" : " توضیح سرویس: " + upstreamMessage;
+                return (null, $"دریافت توکن از سرویس بله با کد HTTP {(int)response.StatusCode} ناموفق بود.{detail}");
             }
             _cachedToken = ExtractToken(body);
             if (string.IsNullOrWhiteSpace(_cachedToken))
@@ -619,6 +622,64 @@ public sealed class MessageDispatcher(IHttpClientFactory clients, IConfiguration
             return (_cachedToken, null);
         }
         finally { _tokenLock.Release(); }
+    }
+
+    private static string SafeUpstreamMessage(string responseBody, string? username, string? password)
+    {
+        var message = "";
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(responseBody);
+            message = FindMessage(document.RootElement) ?? "";
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            var plain = responseBody.Trim();
+            if (!plain.StartsWith("<", StringComparison.Ordinal))
+                message = plain;
+        }
+
+        if (!string.IsNullOrWhiteSpace(username)) message = message.Replace(username, "[مخفی]", StringComparison.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(password)) message = message.Replace(password, "[مخفی]", StringComparison.Ordinal);
+        var cleanedMessage = new string(message.Where(character => !char.IsControl(character) || char.IsWhiteSpace(character)).ToArray());
+        message = string.Join(" ", cleanedMessage.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return message.Length > 240 ? message[..240] : message;
+    }
+
+    private static string? FindMessage(System.Text.Json.JsonElement element)
+    {
+        if (element.ValueKind == System.Text.Json.JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+            {
+                if (property.Name.Equals("message", StringComparison.OrdinalIgnoreCase)
+                    || property.Name.Equals("error", StringComparison.OrdinalIgnoreCase)
+                    || property.Name.Equals("detail", StringComparison.OrdinalIgnoreCase)
+                    || property.Name.Equals("title", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (property.Value.ValueKind == System.Text.Json.JsonValueKind.String)
+                        return property.Value.GetString();
+                }
+            }
+            foreach (var property in element.EnumerateObject())
+            {
+                var nested = FindMessage(property.Value);
+                if (!string.IsNullOrWhiteSpace(nested)) return nested;
+            }
+        }
+        else if (element.ValueKind == System.Text.Json.JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+            {
+                var nested = FindMessage(item);
+                if (!string.IsNullOrWhiteSpace(nested)) return nested;
+            }
+        }
+        else if (element.ValueKind == System.Text.Json.JsonValueKind.String)
+        {
+            return element.GetString();
+        }
+        return null;
     }
 
     private static string? ExtractToken(string responseBody)
