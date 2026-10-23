@@ -312,6 +312,7 @@ app.MapGet("/api/resolutions", async (HttpContext context, AppDb db) =>
 app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpContext http) =>
 {
     if (string.IsNullOrWhiteSpace(request.Number) || string.IsNullOrWhiteSpace(request.Text)) return Results.BadRequest(new { error = "شماره و متن مصوبه الزامی است." });
+    if (request.People.Count > 0) return Results.BadRequest(new { error = "ارجاع مستقیم به شخص پشتیبانی نمی‌شود؛ گروه یا معاونت/پست مسئول را انتخاب کنید." });
     if (request.Status == "cancelled" && string.IsNullOrWhiteSpace(request.CancellationReason)) return Results.BadRequest(new { error = "برای لغو مصوبه، توضیحات لغو الزامی است." });
     if (request.RequiresPeriodicReport && !ResolutionStatuses.Frequencies.Contains(request.ReportFrequency ?? "")) return Results.BadRequest(new { error = "دوره دریافت گزارش را انتخاب کنید." });
     if (request.StartDate is null) return Results.BadRequest(new { error = "زمان شروع مصوبه الزامی است." });
