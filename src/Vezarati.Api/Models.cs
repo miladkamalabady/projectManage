@@ -162,6 +162,7 @@ public sealed class AppUser
     public string BirthDate { get; set; } = "";
     public string PersianBirthDate { get; set; } = "";
     public string Mobile { get; set; } = "";
+    public bool MobileOverriddenByAdmin { get; set; }
     public int? UserType { get; set; }
     public string PersonnelCode { get; set; } = "";
     public string OrgPositionCode { get; set; } = "";
@@ -175,6 +176,11 @@ public sealed class AppUser
 public sealed class SetUserRoleRequest
 {
     public bool IsAdmin { get; set; }
+}
+
+public sealed class UpdateMobileRequest
+{
+    public string Mobile { get; set; } = "";
 }
 
 public sealed class AppDb(DbContextOptions<AppDb> options) : DbContext(options)
@@ -388,6 +394,7 @@ public static class SchemaCompatibility
             ["BirthDate"] = "ALTER TABLE Users ADD COLUMN BirthDate TEXT NOT NULL DEFAULT '';",
             ["PersianBirthDate"] = "ALTER TABLE Users ADD COLUMN PersianBirthDate TEXT NOT NULL DEFAULT '';",
             ["Mobile"] = "ALTER TABLE Users ADD COLUMN Mobile TEXT NOT NULL DEFAULT '';",
+            ["MobileOverriddenByAdmin"] = "ALTER TABLE Users ADD COLUMN MobileOverriddenByAdmin INTEGER NOT NULL DEFAULT 0;",
             ["PersonnelCode"] = "ALTER TABLE Users ADD COLUMN PersonnelCode TEXT NOT NULL DEFAULT '';",
             ["OrgPositionCode"] = "ALTER TABLE Users ADD COLUMN OrgPositionCode TEXT NOT NULL DEFAULT '';",
             ["OrgPositionDesc"] = "ALTER TABLE Users ADD COLUMN OrgPositionDesc TEXT NOT NULL DEFAULT '';",
@@ -458,23 +465,117 @@ public static class SchemaCompatibility
 
 public sealed class MessageDispatcher(IHttpClientFactory clients, IConfiguration configuration, ILogger<MessageDispatcher> logger)
 {
-    public async Task<bool> SendAsync(string nationalId, string text, CancellationToken cancellationToken = default)
+    private readonly SemaphoreSlim _tokenLock = new(1, 1);
+    private string? _cachedToken;
+    private DateTimeOffset _tokenExpiresAt;
+
+    public async Task<bool> SendAsync(string mobile, string text, CancellationToken cancellationToken = default)
     {
-        var url = configuration["Messaging:ApiUrl"]?.Trim();
-        if (string.IsNullOrWhiteSpace(url)) return false;
-        using var request = new HttpRequestMessage(HttpMethod.Post, url)
-        {
-            Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(new { nationalId, text }), System.Text.Encoding.UTF8, "application/json")
-        };
-        var authorization = configuration["Messaging:Authorization"];
-        if (!string.IsNullOrWhiteSpace(authorization)) request.Headers.TryAddWithoutValidation("Authorization", authorization);
+        if (string.IsNullOrWhiteSpace(mobile)) return false;
         try
         {
+            var token = await GetTokenAsync(cancellationToken);
+            if (string.IsNullOrWhiteSpace(token)) return false;
+            var url = configuration["BALE_SEND_URL"] ?? configuration["Bale:SendUrl"] ?? "http://192.168.0.96:5800/api/BaleMessenger/sendMessage";
+            using var request = new HttpRequestMessage(HttpMethod.Post, url)
+            {
+                Content = new StringContent(
+                    System.Text.Json.JsonSerializer.Serialize(new[] { new { phone = mobile, Message = text, SendType = 1 } }),
+                    System.Text.Encoding.UTF8,
+                    "application/json")
+            };
+            request.Headers.TryAddWithoutValidation("token", token);
             using var response = await clients.CreateClient("MessageApi").SendAsync(request, cancellationToken);
-            if (!response.IsSuccessStatusCode) logger.LogWarning("Messaging API returned HTTP {StatusCode}.", (int)response.StatusCode);
+            if (!response.IsSuccessStatusCode)
+                logger.LogWarning("Bale messaging API returned HTTP {StatusCode}.", (int)response.StatusCode);
             return response.IsSuccessStatusCode;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-        catch (Exception exception) { logger.LogWarning(exception, "Messaging API request failed."); return false; }
+        catch (Exception exception) { logger.LogWarning(exception, "Bale messaging request failed."); return false; }
+    }
+
+    private async Task<string?> GetTokenAsync(CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(_cachedToken) && _tokenExpiresAt > DateTimeOffset.UtcNow)
+            return _cachedToken;
+        await _tokenLock.WaitAsync(cancellationToken);
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(_cachedToken) && _tokenExpiresAt > DateTimeOffset.UtcNow)
+                return _cachedToken;
+            var username = configuration["BALE_USERNAME"] ?? configuration["Bale:Username"];
+            var password = configuration["BALE_PASSWORD"] ?? configuration["Bale:Password"];
+            if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
+            {
+                logger.LogWarning("Bale credentials are not configured.");
+                return null;
+            }
+            var tokenUrl = configuration["BALE_TOKEN_URL"] ?? configuration["Bale:TokenUrl"] ?? "http://192.168.0.96:5800/user/login/GetToken";
+            using var request = new HttpRequestMessage(HttpMethod.Post, tokenUrl)
+            {
+                Content = new StringContent(
+                    System.Text.Json.JsonSerializer.Serialize(new { username, password }),
+                    System.Text.Encoding.UTF8,
+                    "application/json")
+            };
+            using var response = await clients.CreateClient("MessageApi").SendAsync(request, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                logger.LogWarning("Bale token API returned HTTP {StatusCode}.", (int)response.StatusCode);
+                return null;
+            }
+            _cachedToken = ExtractToken(body);
+            if (string.IsNullOrWhiteSpace(_cachedToken))
+            {
+                logger.LogWarning("Bale token API response did not contain a token.");
+                return null;
+            }
+            _tokenExpiresAt = DateTimeOffset.UtcNow.AddMinutes(20);
+            return _cachedToken;
+        }
+        finally { _tokenLock.Release(); }
+    }
+
+    private static string? ExtractToken(string responseBody)
+    {
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(responseBody);
+            return FindToken(document.RootElement);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return responseBody.Trim().Trim('"');
+        }
+    }
+
+    private static string? FindToken(System.Text.Json.JsonElement element)
+    {
+        if (element.ValueKind == System.Text.Json.JsonValueKind.String)
+            return element.GetString();
+        if (element.ValueKind == System.Text.Json.JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+                if (property.Name.Equals("token", StringComparison.OrdinalIgnoreCase)
+                    || property.Name.Equals("accessToken", StringComparison.OrdinalIgnoreCase)
+                    || property.Name.Equals("access_token", StringComparison.OrdinalIgnoreCase)
+                    || property.Name.Equals("jwt", StringComparison.OrdinalIgnoreCase))
+                    return property.Value.ValueKind == System.Text.Json.JsonValueKind.String ? property.Value.GetString() : null;
+            foreach (var property in element.EnumerateObject())
+            {
+                var token = FindToken(property.Value);
+                if (!string.IsNullOrWhiteSpace(token)) return token;
+            }
+        }
+        else if (element.ValueKind == System.Text.Json.JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+            {
+                var token = FindToken(item);
+                if (!string.IsNullOrWhiteSpace(token)) return token;
+            }
+        }
+        return null;
     }
 }
