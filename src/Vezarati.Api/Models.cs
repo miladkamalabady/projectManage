@@ -1163,8 +1163,8 @@ public sealed class BrowserPushQueueService(IServiceScopeFactory scopeFactory, I
     {
         var publicKey = configuration["Push:PublicKey"] ?? configuration["PUSH_PUBLIC_KEY"];
         var privateKey = configuration["Push:PrivateKey"] ?? configuration["PUSH_PRIVATE_KEY"];
-        var subject = configuration["Push:Subject"] ?? configuration["PUSH_SUBJECT"] ?? "mailto:admin@example.com";
-        if (string.IsNullOrWhiteSpace(publicKey) || string.IsNullOrWhiteSpace(privateKey))
+        var subject = configuration["Push:Subject"] ?? configuration["PUSH_SUBJECT"];
+        if (string.IsNullOrWhiteSpace(publicKey) || string.IsNullOrWhiteSpace(privateKey) || string.IsNullOrWhiteSpace(subject))
         {
             logger.LogWarning("Browser push is disabled because VAPID keys are not configured.");
             return;
@@ -1180,7 +1180,7 @@ public sealed class BrowserPushQueueService(IServiceScopeFactory scopeFactory, I
                 var db = scope.ServiceProvider.GetRequiredService<AppDb>();
                 var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                 var batch = await db.BrowserPushQueue
-                    .Where(item => item.Status == "pending" && item.NextAttemptAtUnixMs <= now)
+                    .Where(item => (item.Status == "pending" || item.Status == "processing") && item.NextAttemptAtUnixMs <= now)
                     .OrderBy(item => item.NextAttemptAtUnixMs)
                     .ThenBy(item => item.CreatedAtUnixMs)
                     .Take(20)
@@ -1191,7 +1191,7 @@ public sealed class BrowserPushQueueService(IServiceScopeFactory scopeFactory, I
                     continue;
                 }
 
-                foreach (var item in batch) item.Status = "processing";
+                foreach (var item in batch) { item.Status = "processing"; item.NextAttemptAtUnixMs = now + 5 * 60 * 1000; }
                 await db.SaveChangesAsync(stoppingToken);
 
                 foreach (var item in batch)
