@@ -139,3 +139,18 @@
 
 .event-report-filters .rmdp-container,.event-report-filters .rmdp-input{width:100%}
 .event-report-filters .rmdp-input{min-height:36px;padding:6px 9px;border:1px solid #dce5e7;border-radius:8px;background:#fff;color:#30474d}
+
+
+.group-report-actions{display:flex;flex-wrap:wrap;gap:7px}
+.group-report-actions button{min-height:34px;padding:6px 11px;font-size:10px}
+.report-group-filter{display:grid;gap:9px;margin:14px 0 17px;padding:12px;border:1px solid #e0e9eb;border-radius:11px;background:#f8fbfb}
+.report-group-filter>.search{max-width:420px}
+.report-group-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:6px;max-height:220px;overflow:auto}
+.report-group-options label{display:flex;align-items:center;gap:8px;min-width:0;padding:8px 10px;border:1px solid #e3eaec;border-radius:8px;background:#fff;cursor:pointer}
+.report-group-options label:has(input:checked){border-color:#8cc7bd;background:#eff9f6}
+.report-group-options input{accent-color:#278778}
+.report-group-options span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#30474d;font-size:11px;font-weight:700}
+.report-group-options small{margin-right:auto;white-space:nowrap;color:#71848a;font-size:9px}
+.report-selection-hint{color:#63757b;font-size:10px}
+.group-report-label small{line-height:1.7}
+@media(max-width:650px){.report-panel-heading{align-items:flex-start;flex-direction:column}.group-report-actions{width:100%}.group-report-actions button{flex:1}}
