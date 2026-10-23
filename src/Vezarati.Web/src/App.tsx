@@ -107,6 +107,7 @@ const formatEventDateTime = (value: string) => {
   return `${jalaliDate} · ${time}`;
 };
 const toLatinDigits = (value: string) => value.replace(/[۰-۹٠-٩]/g, digit => String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit) >= 0 ? "۰۱۲۳۴۵۶۷۸۹".indexOf(digit) : "٠١٢٣٤٥٦٧٨٩".indexOf(digit)));
+const normalizeSearchText = (value: unknown) => String(value ?? "").normalize("NFKC").replace(/[يى]/g, "ی").replace(/ك/g, "ک").trim().toLocaleLowerCase("fa");
 const jalaliParts = (value: string) => toLatinDigits(String(value||"")).replace(/[/-]/g,".").split(".").map(Number);
 const normalizeJalaliDate = (value: string) => { const [year,month,day]=jalaliParts(value); if(Number.isInteger(year)&&year>=1300&&year<=1600&&Number.isInteger(month)&&month>=1&&month<=12&&Number.isInteger(day)&&day>=1&&day<=jalaliMonthDays(`${year}.${String(month).padStart(2,"0")}.01`)) return `${year}.${String(month).padStart(2,"0")}.${String(day).padStart(2,"0")}`; return jalaliToday(); };
 const resolutionMeetingDay = (item: Resolution) => normalizeJalaliDate(item.meetingDateJalali || gregorianToJalali(item.meetingDate));
@@ -630,11 +631,11 @@ export default function App() {
     }
   }
 
-  const filtered = useMemo(() => { const term = query.trim().toLocaleLowerCase("fa"); return resolutions.filter(item => !item.isArchived && (!term || `${item.number} ${item.text} ${item.notes} ${item.status}`.toLocaleLowerCase("fa").includes(term))); }, [resolutions, query]);
+  const filtered = useMemo(() => { const term = normalizeSearchText(query); return resolutions.filter(item => !item.isArchived && (!term || normalizeSearchText(`${item.number} ${item.text} ${item.notes} ${item.status}`).includes(term))); }, [resolutions, query]);
   const pageSize = 10;
   const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
   const pageRows = useMemo(() => filtered.slice((resolutionPage - 1) * pageSize, resolutionPage * pageSize), [filtered, resolutionPage]);
-  const assignmentTerm = peopleQuery.trim().toLocaleLowerCase("fa");
+  const assignmentTerm = normalizeSearchText(peopleQuery);
   const allAssignmentOptions = useMemo<AssignmentOption[]>(() => {
     const options: AssignmentOption[] = [];
     for (const group of asGroups(groups)) {
@@ -660,7 +661,7 @@ export default function App() {
     options.push(...postOptions.values());
     return options;
   }, [groups, users]);
-  const assignmentOptions = useMemo(() => assignmentTerm.length < 2 ? [] : allAssignmentOptions.filter(option => `${option.label} ${option.detail}`.toLocaleLowerCase("fa").includes(assignmentTerm)), [allAssignmentOptions, assignmentTerm]);
+  const assignmentOptions = useMemo(() => assignmentTerm.length < 2 ? [] : allAssignmentOptions.filter(option => normalizeSearchText(`${option.label} ${option.detail}`).includes(assignmentTerm)), [allAssignmentOptions, assignmentTerm]);
   const isAssignmentOptionSelected = (option: AssignmentOption) => option.kind === "group" ? form.groupIds.includes(String(option.groupId)) : option.kind === "unit" ? form.unitIds.includes(String(option.groupId)) : form.people.includes(option.nationalId || "");
   function toggleAssignmentOption(option: AssignmentOption, checked: boolean) {
     setForm(current => option.kind === "group"
@@ -674,20 +675,20 @@ export default function App() {
   useEffect(() => { setResolutionPage(1); }, [query]);
   useEffect(() => { if (resolutionPage > pageCount) setResolutionPage(pageCount); }, [resolutionPage, pageCount]);
   const reportPeople = useMemo(() => {
-    const term = reportQuery.trim().toLocaleLowerCase("fa");
+    const term = normalizeSearchText(reportQuery);
     return (reports?.people ?? []).filter(person => {
-      const matchesTerm = !term || `${person.displayName} ${person.nationalId}`.toLocaleLowerCase("fa").includes(term);
+      const matchesTerm = !term || normalizeSearchText(`${person.displayName} ${person.nationalId}`).includes(term);
       const matchesStatus = reportPersonStatusFilter === "all" || person[reportPersonStatusFilter as "completed" | "pending" | "delayed"] > 0;
       return matchesTerm && matchesStatus;
     }).sort((a,b) => b.total - a.total || a.displayName.localeCompare(b.displayName, "fa"));
   }, [reports, reportQuery, reportPersonStatusFilter]);
-  const filteredReportSubmissions = useMemo(() => { const term = reportSubmissionQuery.trim().toLocaleLowerCase("fa"); return reportSubmissions.filter(report => !term || `${report.userName} ${report.resolutionNumber} ${report.resolutionText} ${report.text} ${report.periodKey}`.toLocaleLowerCase("fa").includes(term)); }, [reportSubmissions, reportSubmissionQuery]);
+  const filteredReportSubmissions = useMemo(() => { const term = normalizeSearchText(reportSubmissionQuery); return reportSubmissions.filter(report => !term || normalizeSearchText(`${report.userName} ${report.resolutionNumber} ${report.resolutionText} ${report.text} ${report.periodKey}`).includes(term)); }, [reportSubmissions, reportSubmissionQuery]);
   const eventReportItems = useMemo(() => {
-    const term = eventReportQuery.trim().toLocaleLowerCase("fa");
+    const term = normalizeSearchText(eventReportQuery);
     return resolutions.flatMap(item => (item.events ?? []).map(entry => ({ ...entry, resolutionId: item.id, resolutionNumber: item.number, resolutionText: item.text })))
       .filter(entry => {
         const day = entry.createdAt.slice(0, 10);
-        const matchesTerm = !term || `${entry.userName} ${entry.resolutionNumber} ${entry.resolutionText} ${entry.text}`.toLocaleLowerCase("fa").includes(term);
+        const matchesTerm = !term || normalizeSearchText(`${entry.userName} ${entry.resolutionNumber} ${entry.resolutionText} ${entry.text}`).includes(term);
         return matchesTerm && (!eventReportFrom || day >= eventReportFrom) && (!eventReportTo || day <= eventReportTo);
       })
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id - a.id);
@@ -704,7 +705,7 @@ export default function App() {
   const reportMax = Math.max(1, ...pagedReportPeople.map(person => person.total));
   const mine = dashboard?.resolutions ?? [];
   const wallStatusOf = (item: Resolution) => isAdmin ? item.status : item.progress?.find(progress=>progress.nationalId===viewerId)?.status ?? item.status;
-  const calendarItems = useMemo(() => { const term=toLatinDigits(calendarSearch.trim()).replace(/[يى]/g,"ی").replace(/ك/g,"ک").toLocaleLowerCase("fa"); return mine.filter(item => { const status=wallStatusOf(item); const searchable=toLatinDigits(`${item.number} ${item.text} ${item.notes}`).replace(/[يى]/g,"ی").replace(/ك/g,"ک").toLocaleLowerCase("fa"); return (calendarFilterStatus==="all" || status===calendarFilterStatus) && (!term || searchable.includes(term)); }); }, [mine, calendarFilterStatus, calendarSearch, isAdmin, viewerId]);
+  const calendarItems = useMemo(() => { const term=normalizeSearchText(toLatinDigits(calendarSearch)); return mine.filter(item => { const status=wallStatusOf(item); const searchable=normalizeSearchText(toLatinDigits(`${item.number} ${item.text} ${item.notes}`)); return (calendarFilterStatus==="all" || status===calendarFilterStatus) && (!term || searchable.includes(term)); }); }, [mine, calendarFilterStatus, calendarSearch, isAdmin, viewerId]);
   const personalCounts = mine.reduce((counts, item) => { const status = isAdmin ? item.status : item.progress?.find(progress => progress.nationalId === viewerId)?.status ?? item.status; if(status === "completed") counts.completed++; else if(status === "delayed") counts.delayed++; else counts.pending++; return counts; }, { completed: 0, delayed: 0, pending: 0 });
   const completed = isAdmin ? reports?.completed ?? 0 : personalCounts.completed;
   const delayed = isAdmin ? reports?.delayed ?? 0 : personalCounts.delayed;
@@ -725,7 +726,7 @@ export default function App() {
   const reportableGroups = groups.filter(group => !isIndividualRecipientGroup(group.name));
   const reportGroupKind = (group: Group) => isRegionalGroup(group.name) ? "region" : isResolutionGroup(group.name, group.category) ? "group" : "unit";
   const visibleReportGroups = reportableGroups.filter(group =>
-    (!reportGroupQuery.trim() || group.name.toLocaleLowerCase("fa").includes(reportGroupQuery.trim().toLocaleLowerCase("fa")))
+    (!normalizeSearchText(reportGroupQuery) || normalizeSearchText(group.name).includes(normalizeSearchText(reportGroupQuery)))
     && (reportViewTab === "units" ? reportGroupKind(group) === "unit" : reportViewTab === "groups" ? reportGroupKind(group) !== "unit" : false)
   );
   const groupReport = reportableGroups.filter(group => selectedReportGroupIds.length === 0 || selectedReportGroupIds.includes(String(group.id))).map(group => {
@@ -761,7 +762,7 @@ export default function App() {
   useEffect(() => { setNotificationPage(1); }, [notificationTab]);
   useEffect(() => { if (notificationPage > notificationPageCount) setNotificationPage(notificationPageCount); }, [notificationPage, notificationPageCount]);
 
-  const archivedResolutions = resolutions.filter(item => item.isArchived && (!archiveQuery.trim() || `${item.number} ${item.text} ${item.notes}`.toLocaleLowerCase("fa").includes(archiveQuery.trim().toLocaleLowerCase("fa"))));
+  const archivedResolutions = resolutions.filter(item => item.isArchived && (!normalizeSearchText(archiveQuery) || normalizeSearchText(`${item.number} ${item.text} ${item.notes}`).includes(normalizeSearchText(archiveQuery))));
   const awaitingReview = activeResolutions.flatMap(item => (item.progress ?? []).filter(progress => progress.approvalStatus === "pending" && progress.reportText).map(progress => ({ item, progress })));
 
 
