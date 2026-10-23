@@ -183,6 +183,11 @@ public sealed class UpdateMobileRequest
     public string Mobile { get; set; } = "";
 }
 
+public sealed class WarningRecipientsRequest
+{
+    public List<string> NationalIds { get; set; } = new();
+}
+
 public sealed class AppDb(DbContextOptions<AppDb> options) : DbContext(options)
 {
     public DbSet<Resolution> Resolutions => Set<Resolution>();
