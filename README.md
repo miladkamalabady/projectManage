@@ -28,6 +28,10 @@ npm run dev
 
 اگر `vite is not recognized` دیدید، مطمئن شوید داخل `src/Vezarati.Web` هستید و ابتدا `npm install` را اجرا کرده‌اید.
 
+## استقرار روی IIS ویندوز
+
+اسکریپت ساخت خروجی یکپارچه و راهنمای تنظیم IIS روی پورت ۴۰۰۰ در [راهنمای استقرار IIS](docs/IIS-DEPLOYMENT.md) و `deploy/Publish-IIS.ps1` قرار دارد.
+
 ## Build و اجرای یکپارچه
 
 ```powershell
