@@ -827,6 +827,8 @@ app.MapPatch("/api/reports/submissions/{reportId:int}/review", async (int report
     if (!request.Approved && string.IsNullOrWhiteSpace(request.Feedback)) return Results.BadRequest(new { error = "برای رد گزارش، علت را وارد کنید." });
     var report = await db.ResolutionReports.Include(item => item.Resolution).FirstOrDefaultAsync(item => item.Id == reportId);
     if (report is null) return Results.NotFound();
+    if ((report.ApprovalStatus == "approved" && request.Approved) || (report.ApprovalStatus == "rejected" && !request.Approved))
+        return Results.Conflict(new { error = report.ApprovalStatus == "approved" ? "گزارش تأیید شده است؛ فقط می‌توانید آن را رد کنید." : "گزارش رد شده است؛ فقط می‌توانید آن را تأیید کنید." });
     report.ApprovalStatus = request.Approved ? "approved" : "rejected";
     report.AdminFeedback = request.Feedback?.Trim() ?? "";
     var progress = await db.Progress.FirstOrDefaultAsync(item => item.ResolutionId == report.ResolutionId && item.NationalId == report.NationalId);
@@ -858,10 +860,7 @@ app.MapPatch("/api/reports/submissions/{reportId:int}/review", async (int report
         ResolutionId = report.ResolutionId,
         Type = request.Approved ? "report-approved" : "report-rejected",
         DateKey = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(),
-        Text = request.Approved
-            ? "✅ گزارش شما برای مصوبه شماره " + resolutionNumber + " تأیید شد."
-            : "↩️ گزارش شما برای مصوبه شماره " + resolutionNumber + " رد شد و نیاز به اصلاح دارد."
-                + (string.IsNullOrWhiteSpace(report.AdminFeedback) ? "" : "\n📝 توضیح: " + report.AdminFeedback),
+        Text = BaleMessageText.ForReportReview(report.Resolution, request.Approved, report.AdminFeedback),
         CreatedAt = DateTimeOffset.UtcNow
     });
     await db.SaveChangesAsync();
@@ -873,6 +872,8 @@ app.MapPatch("/api/resolutions/{id:int}/completion-review", async (int id, Compl
 {
     var progress = await db.Progress.FirstOrDefaultAsync(item => item.ResolutionId == id && item.NationalId == request.AssigneeNationalId);
     if (progress is null || string.IsNullOrWhiteSpace(progress.ReportText)) return Results.NotFound();
+    if ((progress.ApprovalStatus == "approved" && request.Approved) || (progress.ApprovalStatus == "rejected" && !request.Approved))
+        return Results.Conflict(new { error = progress.ApprovalStatus == "approved" ? "گزارش تأیید شده است؛ فقط می‌توانید آن را رد کنید." : "گزارش رد شده است؛ فقط می‌توانید آن را تأیید کنید." });
     var resolution = await db.Resolutions.FindAsync(id);
     if (resolution is null) return Results.NotFound();
     var submittedReport = await db.ResolutionReports
@@ -892,7 +893,7 @@ app.MapPatch("/api/resolutions/{id:int}/completion-review", async (int id, Compl
     var actionText = request.Approved ? "گزارش اقدام تأیید شد." : "گزارش اقدام برای اصلاح برگشت داده شد.";
     if (!string.IsNullOrWhiteSpace(progress.AdminFeedback)) actionText += " توضیح ادمین: " + progress.AdminFeedback;
     db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = primaryAdminNationalId, UserName = "مدیر دفتر وزارتی", Text = actionText, CreatedAt = DateTimeOffset.UtcNow });
-    db.Notifications.Add(new UserNotification { NationalId = progress.NationalId, ResolutionId = id, Type = request.Approved ? "report-approved" : "report-rejected", DateKey = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(), Text = "گزارش اقدام شما برای مصوبه " + resolution.Number + (request.Approved ? " تأیید شد." : " نیاز به اصلاح دارد."), CreatedAt = DateTimeOffset.UtcNow });
+    db.Notifications.Add(new UserNotification { NationalId = progress.NationalId, ResolutionId = id, Type = request.Approved ? "report-approved" : "report-rejected", DateKey = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(), Text = BaleMessageText.ForReportReview(resolution, request.Approved, progress.AdminFeedback), CreatedAt = DateTimeOffset.UtcNow });
     await db.SaveChangesAsync();
     await ResolutionStatusUpdater.RefreshResolutionStatuses(db);
     return Results.Ok(progress);
