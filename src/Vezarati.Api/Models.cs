@@ -770,7 +770,7 @@ public static class BaleMessageText
         var extra = total > resolutions.Count ? "\nو " + (total - resolutions.Count) + " مصوبهٔ دیگر." : "";
         return "⏰ یادآوری مهلت از دفتر وزارتی\n"
             + Greeting(recipientName, recipientTitle) + "\n"
-            + "برای پیگیری‌های زیر، مهلت اقدام گذشته است:\n"
+            + "برای پیگیری‌های زیر، وضعیت «در حال اجرا» ثبت شده یا مهلت اقدام گذشته است:\n"
             + string.Join("\n", details) + extra
             + "\nلطفاً در سامانه «پیگیری مصوبات» وضعیت را بررسی و اقدام یا گزارش خود را ثبت کنید.";
     }
