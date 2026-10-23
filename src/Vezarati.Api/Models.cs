@@ -271,7 +271,7 @@ public sealed class AppDb(DbContextOptions<AppDb> options, ILogger<AppDb> logger
                             {
                                 NationalId = notification.NationalId,
                                 Mobile = mobile,
-                                Text = BaleMessageText.WithDetectedResolutionTags(notification.Text),
+                                Text = BaleMessageText.WithDetectedResolutionTags(BaleMessageText.WithResolutionId(notification.Text, notification.ResolutionId)),
                                 Status = "pending",
                                 CreatedAtUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                                 NextAttemptAtUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
@@ -683,6 +683,12 @@ public static class BaleMessageText
         return text.Contains(tag, StringComparison.Ordinal) ? text : text.TrimEnd() + "\n" + tag;
     }
 
+    public static string WithResolutionId(string text, int? resolutionId)
+    {
+        if (!resolutionId.HasValue || text.Contains("شناسه یکتا", StringComparison.Ordinal)) return text;
+        return text.TrimEnd() + "\n🆔 شناسه یکتا: " + resolutionId.Value;
+    }
+
     public static string WithDetectedResolutionTags(string text)
     {
         var matches = System.Text.RegularExpressions.Regex.Matches(text, @"مصوبه\s+(?:شماره\s*)?([\p{Nd}]+(?:[/._-][\p{Nd}]+)*)");
@@ -705,7 +711,7 @@ public static class BaleMessageText
             + "⏰ مهلت اقدام: " + Date(item.DueDate, item.DueDateJalali)
             + (string.IsNullOrWhiteSpace(notes) ? "" : "\nℹ️ توضیحات: " + notes)
             + "\nلطفاً در سامانه «پیگیری مصوبات» جزئیات را بررسی و وضعیت یا گزارش اقدام خود را ثبت کنید.";
-        return WithResolutionTag(message, item.Number);
+        return WithResolutionTag(message + "\n🆔 شناسه یکتا: " + item.Id, item.Number);
     }
 
 
@@ -723,7 +729,7 @@ public static class BaleMessageText
             + "⏳ مهلت اقدام: " + Date(item.DueDate, item.DueDateJalali)
             + (string.IsNullOrWhiteSpace(notes) ? "" : "\nℹ️ توضیحات: " + notes)
             + "\nلطفاً جزئیات را در سامانه «پیگیری مصوبات» بررسی کنید و گزارش اقدام یا وضعیت جدید را ثبت کنید.";
-        return WithResolutionTag(message, item.Number);
+        return WithResolutionTag(message + "\n🆔 شناسه یکتا: " + item.Id, item.Number);
     }
 
 
@@ -734,7 +740,7 @@ public static class BaleMessageText
         {
             var status = item.Progress.FirstOrDefault(progress => progress.NationalId == nationalId)?.Status ?? item.Status;
             var label = status == "delayed" ? "دارای تأخیر" : "در حال اجرا";
-            var detail = "• مصوبه " + item.Number + " | " + label + " | سررسید: " + Date(item.DueDate, item.DueDateJalali)
+            var detail = "• مصوبه " + item.Number + " · شناسه یکتا: " + item.Id + " | " + label + " | سررسید: " + Date(item.DueDate, item.DueDateJalali)
                 + " | " + Clip(item.Text, 150);
             return WithResolutionTag(detail, item.Number);
         });
