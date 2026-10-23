@@ -269,7 +269,7 @@ public sealed class AppDb(DbContextOptions<AppDb> options, ILogger<AppDb> logger
                             {
                                 NationalId = notification.NationalId,
                                 Mobile = mobile,
-                                Text = notification.Text,
+                                Text = BaleMessageText.WithDetectedResolutionTags(notification.Text),
                                 Status = "pending",
                                 CreatedAtUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                                 NextAttemptAtUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
@@ -665,11 +665,28 @@ public static class BaleMessageText
 
         return title + " (" + name + ") سلام،";
     }
+    public static string WithResolutionTag(string text, string? number)
+    {
+        var tagNumber = System.Text.RegularExpressions.Regex.Replace((number ?? "").Trim(), @"[^\p{L}\p{N}_-]+", "_").Trim('_');
+        if (tagNumber.Length == 0) return text;
+        var tag = "#مصوبه_" + tagNumber;
+        return text.Contains(tag, StringComparison.Ordinal) ? text : text.TrimEnd() + "\n" + tag;
+    }
+
+    public static string WithDetectedResolutionTags(string text)
+    {
+        var matches = System.Text.RegularExpressions.Regex.Matches(text, @"مصوبه\s+(?:شماره\s*)?([\p{Nd}]+(?:[/._-][\p{Nd}]+)*)");
+        var numbers = matches.Select(match => match.Groups[1].Value).Distinct(StringComparer.Ordinal).ToList();
+        foreach (var number in numbers)
+            text = WithResolutionTag(text, number);
+        return text;
+    }
+
     public static string ForAssignment(Resolution item, string recipientName, string? recipientTitle = null)
     {
         var text = Clip(item.Text, 500);
         var notes = Clip(item.Notes, 260);
-        return "📬 وظیفهٔ جدید از دفتر وزارتی\n"
+        var message = "📬 وظیفهٔ جدید از دفتر وزارتی\n"
             + Greeting(recipientName, recipientTitle) + " یک مصوبه برای پیگیری به شما ارجاع شده است.\n"
             + "🔢 شماره مصوبه: " + item.Number + "\n"
             + "📝 موضوع: " + text + "\n"
@@ -678,13 +695,15 @@ public static class BaleMessageText
             + "⏰ مهلت اقدام: " + Date(item.DueDate, item.DueDateJalali)
             + (string.IsNullOrWhiteSpace(notes) ? "" : "\nℹ️ توضیحات: " + notes)
             + "\nلطفاً در سامانه «پیگیری مصوبات» جزئیات را بررسی و وضعیت یا گزارش اقدام خود را ثبت کنید.";
+        return WithResolutionTag(message, item.Number);
     }
+
 
     public static string ForWarning(Resolution item, string recipientName, string status, string? recipientTitle = null)
     {
         var text = Clip(item.Text, 420);
         var notes = Clip(item.Notes, 180);
-        return "🚨 یادآوری پیگیری از دفتر وزارتی\n"
+        var message = "🚨 یادآوری پیگیری از دفتر وزارتی\n"
             + Greeting(recipientName, recipientTitle) + "\n"
             + "برای وظیفهٔ شما در این مصوبه، وضعیت «" + status + "» ثبت شده است.\n"
             + "🔢 شماره مصوبه: " + item.Number + "\n"
@@ -694,7 +713,10 @@ public static class BaleMessageText
             + "⏳ مهلت اقدام: " + Date(item.DueDate, item.DueDateJalali)
             + (string.IsNullOrWhiteSpace(notes) ? "" : "\nℹ️ توضیحات: " + notes)
             + "\nلطفاً جزئیات را در سامانه «پیگیری مصوبات» بررسی کنید و گزارش اقدام یا وضعیت جدید را ثبت کنید.";
+        return WithResolutionTag(message, item.Number);
     }
+
+
     public static string ForOverdueWarnings(string recipientName, IEnumerable<Resolution> items, string nationalId, string? recipientTitle = null)
     {
         var resolutions = items.Take(8).ToList();
@@ -702,8 +724,9 @@ public static class BaleMessageText
         {
             var status = item.Progress.FirstOrDefault(progress => progress.NationalId == nationalId)?.Status ?? item.Status;
             var label = status == "delayed" ? "دارای تأخیر" : "در حال اجرا";
-            return "• مصوبه " + item.Number + " | " + label + " | سررسید: " + Date(item.DueDate, item.DueDateJalali)
+            var detail = "• مصوبه " + item.Number + " | " + label + " | سررسید: " + Date(item.DueDate, item.DueDateJalali)
                 + " | " + Clip(item.Text, 150);
+            return WithResolutionTag(detail, item.Number);
         });
         var total = items.Count();
         var extra = total > resolutions.Count ? "\nو " + (total - resolutions.Count) + " مصوبهٔ دیگر." : "";
