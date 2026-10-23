@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using System.Text.Json.Serialization;
 using System.ComponentModel.DataAnnotations.Schema;
+using WebPush;
 
 namespace Vezarati.Api.Models;
 
@@ -136,6 +137,31 @@ public sealed class UserNotification
     public DateTimeOffset CreatedAt { get; set; }
 }
 
+public sealed class BrowserPushSubscription
+{
+    public long Id { get; set; }
+    public string NationalId { get; set; } = "";
+    public string Endpoint { get; set; } = "";
+    public string P256dh { get; set; } = "";
+    public string Auth { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset? LastUsedAt { get; set; }
+}
+
+public sealed class BrowserPushQueueItem
+{
+    public long Id { get; set; }
+    public string NationalId { get; set; } = "";
+    public string Title { get; set; } = "پیگیری مصوبات";
+    public string Text { get; set; } = "";
+    public string Url { get; set; } = "/";
+    public string Status { get; set; } = "pending";
+    public int Attempts { get; set; }
+    public long CreatedAtUnixMs { get; set; }
+    public long NextAttemptAtUnixMs { get; set; }
+    public string LastError { get; set; } = "";
+}
+
 public sealed class BaleQueuedMessage
 {
     public long Id { get; set; }
@@ -240,6 +266,8 @@ public sealed class AppDb(DbContextOptions<AppDb> options, ILogger<AppDb> logger
     public DbSet<AppUser> Users => Set<AppUser>();
     public DbSet<AppSetting> Settings => Set<AppSetting>();
     public DbSet<BaleQueuedMessage> BaleMessageQueue => Set<BaleQueuedMessage>();
+    public DbSet<BrowserPushSubscription> BrowserPushSubscriptions => Set<BrowserPushSubscription>();
+    public DbSet<BrowserPushQueueItem> BrowserPushQueue => Set<BrowserPushQueueItem>();
 
     public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
@@ -268,15 +296,29 @@ public sealed class AppDb(DbContextOptions<AppDb> options, ILogger<AppDb> logger
                         mobileById[entry.Entity.NationalId] = entry.Entity.Mobile;
                     foreach (var notification in pendingNotifications)
                         if (mobileById.TryGetValue(notification.NationalId, out var mobile) && !string.IsNullOrWhiteSpace(mobile))
+                        {
+                            var text = BaleMessageText.WithDetectedResolutionTags(BaleMessageText.WithResolutionId(notification.Text, notification.ResolutionId));
+                            var now = DateTimeOffset.UtcNow;
                             BaleMessageQueue.Add(new BaleQueuedMessage
                             {
                                 NationalId = notification.NationalId,
                                 Mobile = mobile,
-                                Text = BaleMessageText.WithDetectedResolutionTags(BaleMessageText.WithResolutionId(notification.Text, notification.ResolutionId)),
+                                Text = text,
                                 Status = "pending",
-                                CreatedAtUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                                NextAttemptAtUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                                CreatedAtUnixMs = now.ToUnixTimeMilliseconds(),
+                                NextAttemptAtUnixMs = now.ToUnixTimeMilliseconds()
                             });
+                            BrowserPushQueue.Add(new BrowserPushQueueItem
+                            {
+                                NationalId = notification.NationalId,
+                                Title = "پیگیری مصوبات",
+                                Text = text,
+                                Url = notification.ResolutionId.HasValue ? "/?resolution=" + notification.ResolutionId.Value : "/",
+                                Status = "pending",
+                                CreatedAtUnixMs = now.ToUnixTimeMilliseconds(),
+                                NextAttemptAtUnixMs = now.ToUnixTimeMilliseconds()
+                            });
+                        }
                 }
             }
             catch (Exception exception)
@@ -292,6 +334,10 @@ public sealed class AppDb(DbContextOptions<AppDb> options, ILogger<AppDb> logger
     {
         model.Entity<AppSetting>().ToTable("Settings").HasKey(x => x.Key);
         model.Entity<BaleQueuedMessage>().ToTable("BaleMessageQueue");
+        model.Entity<BrowserPushSubscription>().ToTable("BrowserPushSubscriptions");
+        model.Entity<BrowserPushSubscription>().HasIndex(x => x.NationalId);
+        model.Entity<BrowserPushQueueItem>().ToTable("BrowserPushQueue");
+        model.Entity<BrowserPushQueueItem>().HasIndex(x => new { x.Status, x.NextAttemptAtUnixMs });
         model.Entity<BaleQueuedMessage>().HasIndex(x => new { x.Status, x.NextAttemptAtUnixMs, x.CreatedAtUnixMs });
         model.Entity<ResolutionGroup>().HasIndex(x => x.Name).IsUnique();
         model.Entity<GroupMember>().HasIndex(x => new { x.GroupId, x.NationalId }).IsUnique();
@@ -507,8 +553,16 @@ public static class SchemaCompatibility
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.ResolutionReports', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.ResolutionReports', N'AdminFeedback') IS NULL ALTER TABLE dbo.ResolutionReports ADD AdminFeedback nvarchar(max) NOT NULL CONSTRAINT DF_ResolutionReports_AdminFeedback DEFAULT N'';");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.ResolutionAttachments', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.ResolutionAttachments', N'ResolutionReportId') IS NULL ALTER TABLE dbo.ResolutionAttachments ADD ResolutionReportId int NULL;");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.ResolutionAttachments', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.ResolutionAttachments', N'ResolutionReportId') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_ResolutionAttachments_ResolutionReportId' AND object_id = OBJECT_ID(N'dbo.ResolutionAttachments')) CREATE INDEX IX_ResolutionAttachments_ResolutionReportId ON dbo.ResolutionAttachments (ResolutionReportId);");
+            await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.BrowserPushSubscriptions', N'U') IS NULL CREATE TABLE dbo.BrowserPushSubscriptions (Id bigint IDENTITY(1,1) NOT NULL PRIMARY KEY, NationalId nvarchar(11) NOT NULL, Endpoint nvarchar(max) NOT NULL, P256dh nvarchar(512) NOT NULL, Auth nvarchar(512) NOT NULL, CreatedAt datetimeoffset NOT NULL, LastUsedAt datetimeoffset NULL);");
+            await db.Database.ExecuteSqlRawAsync("IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_BrowserPushSubscriptions_NationalId' AND object_id = OBJECT_ID(N'dbo.BrowserPushSubscriptions')) CREATE INDEX IX_BrowserPushSubscriptions_NationalId ON dbo.BrowserPushSubscriptions (NationalId);");
+            await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.BrowserPushQueue', N'U') IS NULL CREATE TABLE dbo.BrowserPushQueue (Id bigint IDENTITY(1,1) NOT NULL PRIMARY KEY, NationalId nvarchar(11) NOT NULL, Title nvarchar(max) NOT NULL, Text nvarchar(max) NOT NULL, Url nvarchar(max) NOT NULL, Status nvarchar(32) NOT NULL, Attempts int NOT NULL, CreatedAtUnixMs bigint NOT NULL, NextAttemptAtUnixMs bigint NOT NULL, LastError nvarchar(max) NOT NULL);");
+            await db.Database.ExecuteSqlRawAsync("IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_BrowserPushQueue_Status_NextAttemptAtUnixMs' AND object_id = OBJECT_ID(N'dbo.BrowserPushQueue')) CREATE INDEX IX_BrowserPushQueue_Status_NextAttemptAtUnixMs ON dbo.BrowserPushQueue (Status, NextAttemptAtUnixMs);");
             return;
         }
+        await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS BrowserPushSubscriptions (Id INTEGER NOT NULL CONSTRAINT PK_BrowserPushSubscriptions PRIMARY KEY AUTOINCREMENT, NationalId TEXT NOT NULL, Endpoint TEXT NOT NULL, P256dh TEXT NOT NULL, Auth TEXT NOT NULL, CreatedAt TEXT NOT NULL, LastUsedAt TEXT NULL);");
+        await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS IX_BrowserPushSubscriptions_NationalId ON BrowserPushSubscriptions (NationalId);");
+        await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS BrowserPushQueue (Id INTEGER NOT NULL CONSTRAINT PK_BrowserPushQueue PRIMARY KEY AUTOINCREMENT, NationalId TEXT NOT NULL, Title TEXT NOT NULL, Text TEXT NOT NULL, Url TEXT NOT NULL, Status TEXT NOT NULL, Attempts INTEGER NOT NULL, CreatedAtUnixMs INTEGER NOT NULL, NextAttemptAtUnixMs INTEGER NOT NULL, LastError TEXT NOT NULL);");
+        await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS IX_BrowserPushQueue_Status_NextAttemptAtUnixMs ON BrowserPushQueue (Status, NextAttemptAtUnixMs);");
         var columns = await ReadColumns(db, "Resolutions");
         if (columns.Count > 0 && !columns.Contains("MeetingDateJalali")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN MeetingDateJalali TEXT NOT NULL DEFAULT '';");
         if (columns.Count > 0 && !columns.Contains("SourceKey")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN SourceKey TEXT NULL;");
@@ -1084,6 +1138,116 @@ public sealed class BaleMessageQueueService(IServiceScopeFactory scopeFactory, I
                 logger.LogError(exception, "Bale message queue processing failed.");
                 try { await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken); }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+            }
+        }
+    }
+}
+
+
+public sealed class BrowserPushQueueService(IServiceScopeFactory scopeFactory, IConfiguration configuration, ILogger<BrowserPushQueueService> logger) : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        var publicKey = configuration["Push:PublicKey"] ?? configuration["PUSH_PUBLIC_KEY"];
+        var privateKey = configuration["Push:PrivateKey"] ?? configuration["PUSH_PRIVATE_KEY"];
+        var subject = configuration["Push:Subject"] ?? configuration["PUSH_SUBJECT"] ?? "mailto:admin@example.com";
+        if (string.IsNullOrWhiteSpace(publicKey) || string.IsNullOrWhiteSpace(privateKey))
+        {
+            logger.LogWarning("Browser push is disabled because VAPID keys are not configured.");
+            return;
+        }
+
+        var client = new WebPushClient();
+        var vapid = new VapidDetails(subject, publicKey, privateKey);
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                using var scope = scopeFactory.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<AppDb>();
+                var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                var batch = await db.BrowserPushQueue
+                    .Where(item => item.Status == "pending" && item.NextAttemptAtUnixMs <= now)
+                    .OrderBy(item => item.NextAttemptAtUnixMs)
+                    .ThenBy(item => item.CreatedAtUnixMs)
+                    .Take(20)
+                    .ToListAsync(stoppingToken);
+                if (batch.Count == 0)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken);
+                    continue;
+                }
+
+                foreach (var item in batch) item.Status = "processing";
+                await db.SaveChangesAsync(stoppingToken);
+
+                foreach (var item in batch)
+                {
+                    var subscriptions = await db.BrowserPushSubscriptions.Where(sub => sub.NationalId == item.NationalId).ToListAsync(stoppingToken);
+                    if (subscriptions.Count == 0)
+                    {
+                        item.Status = "skipped";
+                        item.LastError = "کاربر اشتراک اعلان مرورگر ندارد.";
+                        continue;
+                    }
+
+                    var payload = System.Text.Json.JsonSerializer.Serialize(new
+                    {
+                        title = item.Title,
+                        body = item.Text,
+                        url = item.Url,
+                        tag = "resolution-" + item.Id
+                    });
+                    var delivered = 0;
+                    var errors = new List<string>();
+                    foreach (var sub in subscriptions)
+                    {
+                        try
+                        {
+                            var pushSubscription = new PushSubscription(sub.Endpoint, sub.P256dh, sub.Auth);
+                            await client.SendNotificationAsync(pushSubscription, payload, vapid, stoppingToken);
+                            sub.LastUsedAt = DateTimeOffset.UtcNow;
+                            delivered++;
+                        }
+                        catch (WebPushException exception) when ((int?)exception.StatusCode is 404 or 410)
+                        {
+                            db.BrowserPushSubscriptions.Remove(sub);
+                        }
+                        catch (Exception exception)
+                        {
+                            errors.Add(exception.Message);
+                        }
+                    }
+
+                    if (delivered > 0)
+                    {
+                        item.Status = "sent";
+                        item.LastError = "";
+                    }
+                    else if (errors.Count == 0)
+                    {
+                        item.Status = "skipped";
+                        item.LastError = "اشتراک مرورگر منقضی شده بود و حذف شد.";
+                    }
+                    else
+                    {
+                        item.Attempts++;
+                        item.LastError = string.Join(" | ", errors).Length > 1000 ? string.Join(" | ", errors)[..1000] : string.Join(" | ", errors);
+                        if (item.Attempts >= 8) item.Status = "failed";
+                        else
+                        {
+                            item.Status = "pending";
+                            item.NextAttemptAtUnixMs = DateTimeOffset.UtcNow.AddSeconds(Math.Min(1800, 20 * (1 << Math.Min(item.Attempts, 6)))).ToUnixTimeMilliseconds();
+                        }
+                    }
+                }
+                await db.SaveChangesAsync(stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+            catch (Exception exception)
+            {
+                logger.LogError(exception, "Browser push queue processing failed.");
+                await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
             }
         }
     }
