@@ -566,12 +566,38 @@ app.MapPost("/api/resolutions/{id:int}/events", async (int id, ResolutionEventCr
 });
 
 
-app.MapPost("/api/resolutions/{id:int}/completion-report", async (int id, CompletionReportRequest request, HttpContext context, AppDb db) =>
+app.MapPost("/api/resolutions/{id:int}/completion-report", async (int id, HttpRequest httpRequest, HttpContext context, AppDb db, IWebHostEnvironment environment) =>
 {
     var nationalId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
-    var text = request.Text.Trim();
+    string text;
+    string requestedUserName = "";
+    List<IFormFile> files;
+    if (httpRequest.HasFormContentType)
+    {
+        var form = await httpRequest.ReadFormAsync();
+        text = form["text"].ToString().Trim();
+        requestedUserName = form["userName"].ToString();
+        files = form.Files.ToList();
+    }
+    else
+    {
+        var request = await httpRequest.ReadFromJsonAsync<CompletionReportRequest>();
+        text = request?.Text?.Trim() ?? "";
+        requestedUserName = request?.UserName ?? "";
+        files = [];
+    }
 
     if (text.Length == 0) return Results.BadRequest(new { error = "شرح اقدام را وارد کنید." });
+    if (text.Length > 5000) return Results.BadRequest(new { error = "شرح اقدام حداکثر ۵۰۰۰ نویسه باشد." });
+    if (files.Count > 10) return Results.BadRequest(new { error = "حداکثر ۱۰ فایل را همراه گزارش ارسال کنید." });
+    foreach (var file in files)
+    {
+        if (file.Length == 0) return Results.BadRequest(new { error = "یکی از فایل‌های انتخاب‌شده خالی است." });
+        if (file.Length > maxAttachmentSize) return Results.BadRequest(new { error = "حداکثر حجم هر فایل ۵۰ مگابایت است." });
+        var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+        if (!AttachmentFileTypes.Allowed.Contains(extension)) return Results.BadRequest(new { error = "نوع یکی از فایل‌ها مجاز نیست." });
+    }
+
     var resolution = await db.Resolutions.Include(item => item.Progress).FirstOrDefaultAsync(item => item.Id == id);
     if (resolution is null || resolution.IsArchived) return Results.NotFound();
     if (resolution.Status == "cancelled") return Results.Conflict(new { error = "این مصوبه لغو شده است." });
@@ -581,6 +607,7 @@ app.MapPost("/api/resolutions/{id:int}/completion-report", async (int id, Comple
         ((resolution.GroupId.HasValue && member.GroupId == resolution.GroupId.Value) ||
          db.ResolutionGroups.Any(group => group.ResolutionId == id && group.GroupId == member.GroupId)));
     if (!direct && !inGroup && !resolution.PublishToAll) return Results.StatusCode(StatusCodes.Status403Forbidden);
+
     var progress = resolution.Progress.FirstOrDefault(item => item.NationalId == nationalId);
     if (progress is null) { progress = new ResolutionProgress { ResolutionId = id, NationalId = nationalId }; resolution.Progress.Add(progress); }
     progress.ReportText = text;
@@ -588,21 +615,51 @@ app.MapPost("/api/resolutions/{id:int}/completion-report", async (int id, Comple
     progress.AdminFeedback = "";
     progress.UpdatedAt = DateTimeOffset.UtcNow;
     if (progress.Status != "completed") progress.Status = "in_progress";
-    var personName = await db.Users.Where(person => person.NationalId == nationalId).Select(person => person.DisplayName).FirstOrDefaultAsync() ?? request.UserName;
+    var personName = await db.Users.Where(person => person.NationalId == nationalId).Select(person => person.DisplayName).FirstOrDefaultAsync() ?? requestedUserName ?? context.User.Identity?.Name ?? nationalId;
     var submittedAt = DateTimeOffset.UtcNow;
-    db.ResolutionReports.Add(new ResolutionReport { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = text, ReportType = "completion", PeriodKey = "completion:" + submittedAt.ToUnixTimeMilliseconds(), SubmittedAt = submittedAt });
-    db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = "گزارش اقدام برای بررسی ادمین ارسال شد.", CreatedAt = DateTimeOffset.UtcNow });
+    var report = new ResolutionReport { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = text, ReportType = "completion", PeriodKey = "completion:" + submittedAt.ToUnixTimeMilliseconds(), ApprovalStatus = "pending", SubmittedAt = submittedAt };
+    db.ResolutionReports.Add(report);
+    db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = "گزارش اقدام برای بررسی ادمین ارسال شد.", CreatedAt = submittedAt });
     var notifyKey = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
     var reportSummary = text.Length > 500 ? text[..500] + "…" : text;
     var reportNotificationText = "📥 گزارش اقدام جدید برای مصوبه شماره " + resolution.Number + " ثبت شد.\n"
         + "👤 گزارش‌دهنده: " + personName + "\n"
         + "📝 شرح اقدام: " + reportSummary + "\n"
+        + (files.Count > 0 ? "📎 پیوست: " + files.Count + " فایل\n" : "")
         + "🔎 برای مشاهدهٔ گزارش کامل، جزئیات مصوبه را در سامانه بررسی کنید.";
     db.Notifications.Add(new UserNotification { NationalId = primaryAdminNationalId, ResolutionId = id, Type = "report", DateKey = id + ":" + notifyKey, Text = reportNotificationText, CreatedAt = DateTimeOffset.UtcNow });
     await db.SaveChangesAsync();
+
+    var uploadDirectory = Path.Combine(environment.ContentRootPath, "data", "uploads");
+    Directory.CreateDirectory(uploadDirectory);
+    var provider = new FileExtensionContentTypeProvider();
+    foreach (var file in files)
+    {
+        var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+        var storedName = $"{Guid.NewGuid():N}{extension}";
+        var destination = Path.Combine(uploadDirectory, storedName);
+        await using (var output = System.IO.File.Create(destination)) await file.CopyToAsync(output);
+        if (!provider.TryGetContentType(file.FileName, out var contentType)) contentType = "application/octet-stream";
+        var originalName = Path.GetFileName(file.FileName.Replace('\\', '/'));
+        db.Attachments.Add(new ResolutionAttachment
+        {
+            ResolutionId = id,
+            ResolutionReportId = report.Id,
+            OriginalName = originalName,
+            StoredName = storedName,
+            ContentType = contentType,
+            Size = file.Length,
+            UploadedBy = nationalId,
+            UploaderName = personName,
+            ApprovedForAll = false,
+            UploadedAt = submittedAt
+        });
+    }
+    await db.SaveChangesAsync();
     await ResolutionStatusUpdater.RefreshResolutionStatuses(db);
-    return Results.Ok(progress);
+    return Results.Ok(new { submitted = true, reportId = report.Id, attachmentCount = files.Count });
 });
+
 
 app.MapPost("/api/resolutions/{id:int}/reports", async (int id, ResolutionSubmissionRequest request, HttpContext context, AppDb db) =>
 {
