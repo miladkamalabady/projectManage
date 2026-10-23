@@ -518,7 +518,12 @@ export default function App() {
       setPushEnabled(true);
       setMessage("اعلان مرورگر برای این دستگاه فعال شد.");
     } catch (cause) {
-      setMessage(cause instanceof Error ? cause.message : "فعال‌سازی اعلان مرورگر انجام نشد.");
+      const detail = cause instanceof Error ? cause.message : "";
+      if (detail.toLowerCase().includes("push service error") || detail.toLowerCase().includes("push service not available")) {
+        setMessage("مرورگر نتوانست به سرویس Push خود متصل شود. با Chrome یا Edge در حالت عادی (نه ناشناس) امتحان کنید و دسترسی مرورگر به اینترنت و سرویس اعلان آن را بررسی کنید.");
+      } else {
+        setMessage(detail || "فعال‌سازی اعلان مرورگر انجام نشد.");
+      }
     } finally {
       setPushBusy(false);
     }
