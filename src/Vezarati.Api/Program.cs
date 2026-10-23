@@ -287,11 +287,13 @@ app.MapPost("/api/push/subscriptions", async (SaveBrowserPushSubscriptionRequest
     await db.SaveChangesAsync(context.RequestAborted);
     return Results.Ok(new { enabled = true });
 });
-app.MapDelete("/api/push/subscriptions", async (SaveBrowserPushSubscriptionRequest request, HttpContext context, AppDb db) =>
+app.MapDelete("/api/push/subscriptions", async (HttpContext context, AppDb db) =>
 {
     var nationalId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
     if (string.IsNullOrWhiteSpace(nationalId)) return Results.Unauthorized();
-    var subscription = await db.BrowserPushSubscriptions.FirstOrDefaultAsync(item => item.NationalId == nationalId && item.Endpoint == request.Endpoint, context.RequestAborted);
+    var endpoint = context.Request.Query["endpoint"].ToString();
+    if (string.IsNullOrWhiteSpace(endpoint)) return Results.BadRequest(new { error = "نشانی اشتراک مرورگر ارسال نشده است." });
+    var subscription = await db.BrowserPushSubscriptions.FirstOrDefaultAsync(item => item.NationalId == nationalId && item.Endpoint == endpoint, context.RequestAborted);
     if (subscription is not null)
     {
         db.BrowserPushSubscriptions.Remove(subscription);
