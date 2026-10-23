@@ -595,12 +595,12 @@ public sealed class MessageDispatcher(IHttpClientFactory clients, IConfiguration
                 return (null, "نام کاربری یا گذرواژهٔ بله در تنظیمات سرور وارد نشده است.");
             }
             var tokenUrl = configuration["BALE_TOKEN_URL"] ?? configuration["Bale:TokenUrl"] ?? "http://192.168.0.96:5800/user/login/GetToken";
+            using var form = new MultipartFormDataContent();
+            form.Add(new StringContent(username, System.Text.Encoding.UTF8), "username");
+            form.Add(new StringContent(password, System.Text.Encoding.UTF8), "password");
             using var request = new HttpRequestMessage(HttpMethod.Post, tokenUrl)
             {
-                Content = new StringContent(
-                    System.Text.Json.JsonSerializer.Serialize(new { username, password }),
-                    System.Text.Encoding.UTF8,
-                    "application/json")
+                Content = form
             };
             using var response = await clients.CreateClient("MessageApi").SendAsync(request, cancellationToken);
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
