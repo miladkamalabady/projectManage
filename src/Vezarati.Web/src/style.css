@@ -154,3 +154,11 @@
 .report-selection-hint{color:#63757b;font-size:10px}
 .group-report-label small{line-height:1.7}
 @media(max-width:650px){.report-panel-heading{align-items:flex-start;flex-direction:column}.group-report-actions{width:100%}.group-report-actions button{flex:1}}
+
+
+.report-group-filter-tools{display:grid;grid-template-columns:minmax(220px,1fr) minmax(210px,auto);gap:9px;align-items:center}
+.report-group-filter-tools select,.individual-report-filters select{min-height:36px;padding:7px 10px;border:1px solid #dce5e7;border-radius:8px;background:#fff;color:#30474d;font-size:11px}
+.individual-report-filters{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.individual-report-filters .search{min-width:230px}
+.individual-report-filters select{min-width:165px}
+@media(max-width:650px){.report-group-filter-tools{grid-template-columns:1fr}.individual-report-filters{width:100%}.individual-report-filters .search{flex:1;min-width:160px}.individual-report-filters select{flex:1}}
