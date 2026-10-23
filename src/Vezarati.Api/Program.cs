@@ -16,6 +16,7 @@ builder.Services.AddDbContext<AppDb>(options => options.UseSqlite(builder.Config
 builder.Services.AddScoped<NationalIdLookup, LocalNationalIdLookup>();
 builder.Services.AddScoped<MessageDispatcher>();
 builder.Services.AddHostedService<ResolutionStatusRefreshService>();
+builder.Services.AddHostedService<BaleMessageQueueService>();
 builder.Services.AddHttpClient("MessageApi", client => client.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddHttpClient("MeduSso", client => client.Timeout = TimeSpan.FromSeconds(60)).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme).AddCookie(options =>
@@ -57,6 +58,7 @@ app.Use(async (context, next) =>
             || (path.Equals("/api/settings/bale-notifications", StringComparison.OrdinalIgnoreCase) && (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsPut(context.Request.Method)))
             || path.Equals("/api/reports", StringComparison.OrdinalIgnoreCase)
             || path.Equals("/api/reports/submissions", StringComparison.OrdinalIgnoreCase)
+            || path.Equals("/api/reports/bale-messages", StringComparison.OrdinalIgnoreCase)
             || (path.Equals("/api/reports/warnings", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPost(context.Request.Method))
             || (path.StartsWith("/api/reports/warnings/", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPost(context.Request.Method))
             || (path.StartsWith("/api/resolutions/", StringComparison.OrdinalIgnoreCase) && path.EndsWith("/warnings", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPost(context.Request.Method))
@@ -330,7 +332,7 @@ app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpC
     recipientIds.UnionWith(await db.GroupMembers.Where(member => groupIdsToNotify.Contains(member.GroupId)).Select(member => member.NationalId).ToListAsync());
     if (record.PublishToAll) recipientIds.UnionWith(await db.Directory.Select(person => person.NationalId).ToListAsync());
     foreach (var recipient in recipientIds)
-        db.Notifications.Add(new UserNotification { NationalId = recipient, ResolutionId = record.Id, Type = "assigned", DateKey = record.Id.ToString(), Text = "مصوبه " + record.Number + " برای پیگیری به شما ارجاع شد.", CreatedAt = DateTimeOffset.UtcNow });
+        db.Notifications.Add(new UserNotification { NationalId = recipient, ResolutionId = record.Id, Type = "assigned", DateKey = record.Id.ToString(), Text = BaleMessageText.ForAssignment(record), CreatedAt = DateTimeOffset.UtcNow });
     db.Events.Add(new ResolutionEvent { ResolutionId = record.Id, NationalId = primaryAdminNationalId, UserName = record.CreatedBy, Text = "مصوبه ثبت و برای پیگیری ارجاع شد.", CreatedAt = DateTimeOffset.UtcNow });
     await db.SaveChangesAsync();
     return Results.Created("/api/resolutions/" + record.Id, record);
@@ -383,7 +385,7 @@ app.MapPut("/api/resolutions/{id:int}", async (int id, ResolutionCreate request,
     newRecipients.UnionWith(await db.GroupMembers.Where(member => groupIds.Contains(member.GroupId)).Select(member => member.NationalId).ToListAsync());
     if (request.PublishToAll && !wasPublic) newRecipients.UnionWith(await db.Directory.Select(person => person.NationalId).ToListAsync());
     foreach (var recipient in newRecipients.Except(priorRecipients))
-        db.Notifications.Add(new UserNotification { NationalId = recipient, ResolutionId = id, Type = "assigned", DateKey = id + ":" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), Text = "مصوبه " + record.Number + " برای پیگیری به شما ارجاع شد.", CreatedAt = DateTimeOffset.UtcNow });
+        db.Notifications.Add(new UserNotification { NationalId = recipient, ResolutionId = id, Type = "assigned", DateKey = id + ":" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), Text = BaleMessageText.ForAssignment(record), CreatedAt = DateTimeOffset.UtcNow });
     db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = primaryAdminNationalId, UserName = "مدیر دفتر وزارتی", Text = "اطلاعات مصوبه، مهلت و ارجاع‌های آن ویرایش شد.", CreatedAt = DateTimeOffset.UtcNow });
     await db.SaveChangesAsync();
     await ResolutionStatusUpdater.RefreshResolutionStatuses(db);
@@ -618,6 +620,69 @@ app.MapPost("/api/resolutions/{id:int}/reports", async (int id, ResolutionSubmis
     return Results.Ok(new { submitted = true, periodKey = period.Key, dueDate = period.DueDate });
 });
 
+app.MapGet("/api/reports/bale-messages", async (HttpContext context, AppDb db, string? q, string? status, string? from, string? to, int page = 1, int pageSize = 20) =>
+{
+    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    page = Math.Max(1, page);
+    pageSize = Math.Clamp(pageSize, 1, 5000);
+    var query = from message in db.BaleMessageQueue.AsNoTracking()
+                join directory in db.Directory.AsNoTracking() on message.NationalId equals directory.NationalId into people
+                from person in people.DefaultIfEmpty()
+                select new { Message = message, DisplayName = person == null ? "کاربر حذف‌شده" : person.DisplayName };
+
+    if (!string.IsNullOrWhiteSpace(status) && status != "all")
+        query = query.Where(item => item.Message.Status == status);
+    if (!string.IsNullOrWhiteSpace(q))
+    {
+        var search = q.Trim();
+        query = query.Where(item => item.DisplayName.Contains(search)
+            || item.Message.Mobile.Contains(search)
+            || item.Message.Text.Contains(search)
+            || item.Message.LastError.Contains(search));
+    }
+    if (DateOnly.TryParse(from, out var fromDate))
+    {
+        var fromUnixMs = new DateTimeOffset(fromDate.ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(3.5)).ToUnixTimeMilliseconds();
+        query = query.Where(item => item.Message.CreatedAtUnixMs >= fromUnixMs);
+    }
+    if (DateOnly.TryParse(to, out var toDate))
+    {
+        var toExclusiveUnixMs = new DateTimeOffset(toDate.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(3.5)).ToUnixTimeMilliseconds();
+        query = query.Where(item => item.Message.CreatedAtUnixMs < toExclusiveUnixMs);
+    }
+
+    var total = await query.CountAsync(context.RequestAborted);
+    var pageCount = Math.Max(1, (int)Math.Ceiling(total / (double)pageSize));
+    page = Math.Min(page, pageCount);
+    var rows = await query.OrderByDescending(item => item.Message.CreatedAtUnixMs)
+        .Skip((page - 1) * pageSize).Take(pageSize)
+        .Select(item => new
+        {
+            item.Message.Id,
+            item.DisplayName,
+            item.Message.Mobile,
+            item.Message.Text,
+            item.Message.Status,
+            item.Message.Attempts,
+            item.Message.CreatedAtUnixMs,
+            item.Message.SentAtUnixMs,
+            item.Message.LastError
+        })
+        .ToListAsync(context.RequestAborted);
+    var items = rows.Select(item => new
+    {
+        item.Id,
+        item.DisplayName,
+        item.Mobile,
+        item.Text,
+        item.Status,
+        item.Attempts,
+        CreatedAt = DateTimeOffset.FromUnixTimeMilliseconds(item.CreatedAtUnixMs).ToString("O"),
+        SentAt = item.SentAtUnixMs.HasValue ? DateTimeOffset.FromUnixTimeMilliseconds(item.SentAtUnixMs.Value).ToString("O") : null,
+        item.LastError
+    });
+    return Results.Ok(new { total, page, pageSize, items });
+});
 app.MapGet("/api/reports/submissions", async (AppDb db) =>
 {
     // SQLite cannot reliably translate ordering for DateTimeOffset; sort after materializing.
@@ -1058,7 +1123,7 @@ app.MapGet("/api/reports", async (HttpContext context, AppDb db) =>
     if (!isAdmin) rows = rows.Where(row => row.NationalId == id).ToList();
     return Results.Ok(new { total = records.Count, completed = records.Count(r => r.Status == "completed"), delayed = records.Count(r => r.Status == "delayed"), pending = records.Count(r => r.Status is "before" or "in_progress"), people = rows });
 });
-app.MapPost("/api/resolutions/{id:int}/warnings", async (int id, WarningRecipientsRequest request, AppDb db, MessageDispatcher sender, HttpContext context) =>
+app.MapPost("/api/resolutions/{id:int}/warnings", async (int id, WarningRecipientsRequest request, AppDb db, HttpContext context) =>
 {
     if (!context.User.IsInRole("ادمین")) return Results.Forbid();
     var nationalIds = (request.NationalIds ?? new List<string>())
@@ -1070,82 +1135,121 @@ app.MapPost("/api/resolutions/{id:int}/warnings", async (int id, WarningRecipien
     if (nationalIds.Count == 0) return Results.BadRequest(new { error = "حداقل یک کاربر را انتخاب کنید." });
     if (nationalIds.Count > 100) return Results.BadRequest(new { error = "در هر نوبت حداکثر ۱۰۰ کاربر قابل انتخاب است." });
 
-    var records = await db.Resolutions.Where(item => item.Id == id && !item.IsArchived && item.Status != "cancelled")
+    var resolution = await db.Resolutions
+        .Where(item => item.Id == id && !item.IsArchived && item.Status != "cancelled")
         .Include(item => item.Assignments)
         .Include(item => item.Progress)
         .Include(item => item.Group).ThenInclude(group => group!.Members)
         .Include(item => item.GroupAssignments).ThenInclude(assignment => assignment.Group).ThenInclude(group => group!.Members)
-        .ToListAsync(context.RequestAborted);
-    if (records.Count == 0) return Results.NotFound(new { error = "مصوبه پیدا نشد یا لغو شده است." });
-    var resolution = records[0];
+        .FirstOrDefaultAsync(context.RequestAborted);
+    if (resolution is null) return Results.NotFound(new { error = "مصوبه پیدا نشد یا لغو شده است." });
+
     var directory = await db.Directory.AsNoTracking()
         .Where(person => nationalIds.Contains(person.NationalId))
         .ToDictionaryAsync(person => person.NationalId, person => person.DisplayName, context.RequestAborted);
     var accounts = await db.Users.AsNoTracking()
         .Where(user => nationalIds.Contains(user.NationalId))
         .ToDictionaryAsync(user => user.NationalId, context.RequestAborted);
+    var results = new List<object>();
+    var queued = 0;
+    var inAppCount = 0;
 
-    using var sendLimit = new SemaphoreSlim(8);
-    var results = await Task.WhenAll(nationalIds.Select(async nationalId =>
+    foreach (var nationalId in nationalIds)
     {
-        var tasks = records.Where(record =>
-                record.Assignments.Any(assignment => assignment.NationalId == nationalId)
-                || record.Group?.Members.Any(member => member.NationalId == nationalId) == true
-                || record.GroupAssignments.Any(assignment => assignment.Group?.Members.Any(member => member.NationalId == nationalId) == true))
-            .Select(record => new
-            {
-                Record = record,
-                Status = record.Progress.FirstOrDefault(progress => progress.NationalId == nationalId)?.Status ?? record.Status
-            })
-            .Where(item => item.Status is "delayed" or "in_progress")
-            .ToList();
-        var name = directory.GetValueOrDefault(nationalId, accounts.GetValueOrDefault(nationalId)?.DisplayName ?? nationalId);
-        if (tasks.Count == 0)
-            return new { nationalId, displayName = name, sent = false, reason = "وظیفهٔ با تأخیر یا در حال اجرا ندارد." };
+        var memberStatus = resolution.Progress.FirstOrDefault(progress => progress.NationalId == nationalId)?.Status ?? resolution.Status;
+        var isAssigned = resolution.Assignments.Any(assignment => assignment.NationalId == nationalId)
+            || resolution.Group?.Members.Any(member => member.NationalId == nationalId) == true
+            || resolution.GroupAssignments.Any(assignment => assignment.Group?.Members.Any(member => member.NationalId == nationalId) == true);
+        var name = directory.GetValueOrDefault(nationalId, accounts.GetValueOrDefault(nationalId)?.DisplayName ?? "کاربر");
+        if (!isAssigned || memberStatus is not ("delayed" or "in_progress"))
+        {
+            results.Add(new { nationalId, displayName = name, queued = false, inApp = false, reason = "وظیفهٔ با تأخیر یا در حال اجرا ندارد." });
+            continue;
+        }
+
+        var statusText = memberStatus == "delayed" ? "دارای تأخیر" : "در حال اجرا";
+        var message = BaleMessageText.ForWarning(resolution, name, statusText);
+        var now = DateTimeOffset.UtcNow;
+        db.Notifications.Add(new UserNotification
+        {
+            NationalId = nationalId,
+            ResolutionId = resolution.Id,
+            Type = "bale-warning",
+            DateKey = "bale-warning:" + Guid.NewGuid().ToString("N"),
+            Text = message,
+            CreatedAt = now
+        });
+        inAppCount++;
+
         var mobile = accounts.GetValueOrDefault(nationalId)?.Mobile;
         if (string.IsNullOrWhiteSpace(mobile))
-            return new { nationalId, displayName = name, sent = false, reason = "شمارهٔ موبایل ثبت نشده است." };
+        {
+            results.Add(new { nationalId, displayName = name, queued = false, inApp = true, reason = "هشدار داخل سامانه ثبت شد؛ شمارهٔ موبایل ثبت نشده است." });
+            continue;
+        }
 
-        var statusText = string.Join(" و ", tasks.Select(item => item.Status).Distinct().Select(status => status == "delayed" ? "با تأخیر" : "در حال اجرا"));
-        var message = "هشدار دفتر وزارتی: وضعیت وظیفهٔ شما در مصوبه شماره " + resolution.Number + " «" + statusText + "» است. لطفاً اقدام لازم را انجام داده و وضعیت را در سامانه به‌روز کنید.";
-        await sendLimit.WaitAsync(context.RequestAborted);
-        try
+        db.BaleMessageQueue.Add(new BaleQueuedMessage
         {
-            var delivery = await sender.SendWithResultAsync(mobile, message, context.RequestAborted);
-            return new { nationalId, displayName = name, sent = delivery.Sent, reason = delivery.Reason };
-        }
-        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested) { throw; }
-        catch
-        {
-            return new { nationalId, displayName = name, sent = false, reason = "ارسال پیام از سرویس بله ناموفق بود." };
-        }
-        finally { sendLimit.Release(); }
-    }));
-    var sentCount = results.Count(item => item.sent);
-    return Results.Ok(new { resolutionId = id, resolutionNumber = resolution.Number, selected = nationalIds.Count, sent = sentCount, failed = results.Length - sentCount, results });
+            NationalId = nationalId,
+            Mobile = mobile,
+            Text = message,
+            Status = "pending",
+            CreatedAtUnixMs = now.ToUnixTimeMilliseconds(),
+            NextAttemptAtUnixMs = now.ToUnixTimeMilliseconds()
+        });
+        queued++;
+        results.Add(new { nationalId, displayName = name, queued = true, inApp = true, reason = "" });
+    }
+
+    await db.SaveChangesAsync(context.RequestAborted);
+    return Results.Ok(new { resolutionId = id, resolutionNumber = resolution.Number, selected = nationalIds.Count, queued, inAppNotifications = inAppCount, failed = nationalIds.Count - queued, results });
 });
-app.MapPost("/api/reports/warnings/{nationalId}", async (string nationalId, AppDb db, MessageDispatcher sender, HttpContext context) =>
+app.MapPost("/api/reports/warnings/{nationalId}", async (string nationalId, AppDb db, HttpContext context) =>
 {
-    var today = DateOnly.FromDateTime(DateTime.Today);
-    var records = await db.Resolutions.Where(item => !item.IsArchived)
+    var normalizedId = NormalizeDigits(nationalId.Trim());
+    var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3.5));
+    var records = await db.Resolutions.Where(item => !item.IsArchived && item.Status != "cancelled")
         .Include(item => item.Assignments).Include(item => item.Progress).Include(item => item.Group).ThenInclude(group => group!.Members)
-        .Include(item => item.GroupAssignments).ThenInclude(assignment => assignment.Group).ThenInclude(group => group!.Members).ToListAsync();
+        .Include(item => item.GroupAssignments).ThenInclude(assignment => assignment.Group).ThenInclude(group => group!.Members).ToListAsync(context.RequestAborted);
     var delayed = records.Where(item =>
-        (item.Progress.FirstOrDefault(progress => progress.NationalId == nationalId)?.Status ?? item.Status) == "delayed"
-        || (((item.Progress.FirstOrDefault(progress => progress.NationalId == nationalId)?.Status ?? item.Status) != "completed")
+        (item.Progress.FirstOrDefault(progress => progress.NationalId == normalizedId)?.Status ?? item.Status) == "delayed"
+        || (((item.Progress.FirstOrDefault(progress => progress.NationalId == normalizedId)?.Status ?? item.Status) != "completed")
             && item.DueDate.HasValue && item.DueDate.Value < today))
-        .Where(item => item.Assignments.Any(assignment => assignment.NationalId == nationalId)
-            || item.Group?.Members.Any(member => member.NationalId == nationalId) == true
-            || item.GroupAssignments.Any(assignment => assignment.Group?.Members.Any(member => member.NationalId == nationalId) == true))
+        .Where(item => item.Assignments.Any(assignment => assignment.NationalId == normalizedId)
+            || item.Group?.Members.Any(member => member.NationalId == normalizedId) == true
+            || item.GroupAssignments.Any(assignment => assignment.Group?.Members.Any(member => member.NationalId == normalizedId) == true))
         .ToList();
     if (delayed.Count == 0) return Results.Conflict(new { error = "برای این شخص مصوبه دارای تأخیر پیدا نشد." });
-    var numbers = string.Join("، ", delayed.Select(item => item.Number).Distinct());
-    var message = "یادآوری دفتر وزارتی: پیگیری مصوبه‌های شماره " + numbers + " از مهلت مقرر گذشته است. لطفاً وضعیت اجرا را در سامانه ثبت و اقدام لازم را انجام دهید.";
-    var recipientMobile = await db.Users.AsNoTracking().Where(user => user.NationalId == nationalId).Select(user => user.Mobile).FirstOrDefaultAsync(context.RequestAborted);
-    if (string.IsNullOrWhiteSpace(recipientMobile)) return Results.Conflict(new { error = "شماره موبایل این کاربر ثبت نشده است." });
-    var delivery = await sender.SendWithResultAsync(recipientMobile, message, context.RequestAborted);
-    if (!delivery.Sent) return Results.Json(new { error = delivery.Reason }, statusCode: StatusCodes.Status503ServiceUnavailable);
-    return Results.Ok(new { sent = true, count = delayed.Count });
+
+    var account = await db.Users.AsNoTracking().FirstOrDefaultAsync(user => user.NationalId == normalizedId, context.RequestAborted);
+    var displayName = await db.Directory.AsNoTracking().Where(person => person.NationalId == normalizedId).Select(person => person.DisplayName).FirstOrDefaultAsync(context.RequestAborted)
+        ?? account?.DisplayName ?? "کاربر";
+    var message = BaleMessageText.ForOverdueWarnings(displayName, delayed, normalizedId);
+    var now = DateTimeOffset.UtcNow;
+    db.Notifications.Add(new UserNotification
+    {
+        NationalId = normalizedId,
+        Type = "bale-warning",
+        DateKey = "bale-warning:" + Guid.NewGuid().ToString("N"),
+        Text = message,
+        CreatedAt = now
+    });
+    var mobile = account?.Mobile ?? "";
+    var queued = !string.IsNullOrWhiteSpace(mobile);
+    if (queued)
+    {
+        db.BaleMessageQueue.Add(new BaleQueuedMessage
+        {
+            NationalId = normalizedId,
+            Mobile = mobile,
+            Text = message,
+            Status = "pending",
+            CreatedAtUnixMs = now.ToUnixTimeMilliseconds(),
+            NextAttemptAtUnixMs = now.ToUnixTimeMilliseconds()
+        });
+    }
+    await db.SaveChangesAsync(context.RequestAborted);
+    return Results.Ok(new { inApp = true, queued, count = delayed.Count, reason = queued ? "" : "اعلان داخل سامانه ثبت شد؛ شمارهٔ موبایل این کاربر ثبت نشده است." });
 });
 static List<(string Key, DateOnly DueDate)> BuildDueReportPeriods(DateOnly startDate, string frequency, DateOnly today)
 {
