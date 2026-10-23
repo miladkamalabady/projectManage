@@ -843,7 +843,6 @@ app.MapPatch("/api/reports/submissions/{reportId:int}/review", async (int report
     progress.Status = request.Approved ? "completed" : "in_progress";
     progress.UpdatedAt = DateTimeOffset.UtcNow;
     if (report.Resolution is not null) report.Resolution.UpdatedAt = DateTimeOffset.UtcNow;
-    var resolutionNumber = report.Resolution?.Number ?? "";
     var actionText = request.Approved ? "گزارش ارسالی تأیید شد." : "گزارش ارسالی رد شد.";
     if (!string.IsNullOrWhiteSpace(report.AdminFeedback)) actionText += " توضیح ادمین: " + report.AdminFeedback;
     db.Events.Add(new ResolutionEvent
