@@ -43,6 +43,7 @@ type ReportTask = { resolutionId: number; number: string; text: string; dueDateJ
 type Report = { total: number; completed: number; delayed: number; pending: number; people: { nationalId: string; displayName: string; total: number; completed: number; delayed: number; pending: number; title?: string; tasks: ReportTask[] }[] };
 
 const asArray = <T,>(value: unknown): T[] => { if (Array.isArray(value)) return value as T[]; if (value && typeof value === "object") { const object = value as { items?: unknown; results?: unknown; data?: unknown }; for (const candidate of [object.items, object.results, object.data]) if (Array.isArray(candidate)) return candidate as T[]; } return []; };
+const asGroups = (value: unknown): Group[] => asArray<Partial<Group>>(value).filter(group => !!group && typeof group === "object").map(group => ({ ...group, members: asArray<Member>(group.members) } as Group));
 const labels: Record<string, string> = { before: "قبل از اجرا", in_progress: "در حال اجرا", completed: "اجرا شده", delayed: "دارای تأخیر", cancelled: "لغو شده", rejected: "رد شده" };
 const baleMessageStatusLabel = (status: string) => ({ pending: "در صف ارسال", processing: "در حال ارسال", sent: "ارسال شد", failed: "ناموفق" } as Record<string, string>)[status] ?? status;
 const frequencyLabels: Record<string, string> = { daily: "روزانه", weekly: "هفتگی", monthly: "ماهانه" };
@@ -219,12 +220,12 @@ export default function App() {
       setBaleNotificationsConfigured(!!baleSettings.configured);
       const dashboardData = await dashboardResponse.json();
       const resolutionData = asArray<Resolution>(await resolutionsResponse.json());
-      const groupData = asArray<Group>(await groupsResponse.json());
+      const groupData = asGroups(await groupsResponse.json());
       const reportData = await reportsResponse.json();
       const userData = asArray<{ nationalId: string; displayName: string; title?: string; organizationUnit?: string; mobile?: string; province?: string | null; role?: string; canChangeRole?: boolean }>(await usersResponse.json());
       const notificationData = asArray<UserNotification>(await notificationsResponse.json());
       const submissionData = asArray<ResolutionReport>(await submissionsResponse.json());
-      setDashboard(dashboardData && typeof dashboardData === "object" ? { ...dashboardData, groups: asArray<Group>(dashboardData.groups), resolutions: asArray<Resolution>(dashboardData.resolutions) } : null);
+      setDashboard(dashboardData && typeof dashboardData === "object" ? { ...dashboardData, groups: asGroups(dashboardData.groups), resolutions: asArray<Resolution>(dashboardData.resolutions) } : null);
       setResolutions(resolutionData);
       setGroups(groupData);
       setReports(reportData && typeof reportData === "object" ? { ...reportData, people: asArray(reportData.people) } as Report : { total: 0, completed: 0, delayed: 0, pending: 0, people: [] });
@@ -309,13 +310,13 @@ export default function App() {
         if (!dashboardResponse.ok || !notificationsResponse.ok) return;
         const rawDashboard = await dashboardResponse.json();
         const latestDashboard = rawDashboard && typeof rawDashboard === "object"
-          ? { ...rawDashboard, groups: asArray<Group>(rawDashboard.groups), resolutions: asArray<Resolution>(rawDashboard.resolutions) } as Dashboard
+          ? { ...rawDashboard, groups: asGroups(rawDashboard.groups), resolutions: asArray<Resolution>(rawDashboard.resolutions) } as Dashboard
           : null;
         const latestNotifications = asArray<UserNotification>(await notificationsResponse.json());
         if (active && latestDashboard) {
           setDashboard(latestDashboard);
           setResolutions(latestDashboard.resolutions);
-          setGroups(asArray<Group>(latestDashboard.groups));
+          setGroups(asGroups(latestDashboard.groups));
           setNotifications(latestNotifications);
         }
       } catch { /* keep the last loaded feed if the connection briefly drops */ }
@@ -610,7 +611,7 @@ export default function App() {
   const assignmentTerm = peopleQuery.trim().toLocaleLowerCase("fa");
   const allAssignmentOptions = useMemo<AssignmentOption[]>(() => {
     const options: AssignmentOption[] = [];
-    for (const group of groups) {
+    for (const group of asGroups(groups)) {
       if (isIndividualRecipientGroup(group.name)) continue;
       if (isResolutionGroup(group.name, group.category)) {
         options.push({ key: `group:${group.id}`, kind: "group", label: groupDisplayName(group.name), detail: `گروه · ${group.members.length} عضو`, groupId: group.id });
@@ -618,7 +619,7 @@ export default function App() {
         options.push({ key: `unit:${group.id}`, kind: "unit", label: group.name, detail: group.members.length ? `معاونت/اداره‌کل · ${group.members.length} مسئول` : "معاونت/اداره‌کل · مسئول ثبت نشده", groupId: group.id });
       }
     }
-    const groupMemberIds = new Set(groups.flatMap(group => group.members.map(member => member.nationalId)));
+    const groupMemberIds = new Set(asGroups(groups).flatMap(group => asArray<Member>(group.members).map(member => member.nationalId)));
     const postOptions = new Map<string, AssignmentOption>();
     for (const user of users) {
       const rawTitle = user.title?.trim() || "";
