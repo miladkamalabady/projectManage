@@ -56,7 +56,6 @@ app.Use(async (context, next) =>
             || (path.StartsWith("/api/users/", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPatch(context.Request.Method))
             || path.Equals("/api/users/search", StringComparison.OrdinalIgnoreCase)
             || (path.Equals("/api/settings/bale-notifications", StringComparison.OrdinalIgnoreCase) && (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsPut(context.Request.Method)))
-            || path.Equals("/api/reports", StringComparison.OrdinalIgnoreCase)
             || path.Equals("/api/reports/submissions", StringComparison.OrdinalIgnoreCase)
             || path.Equals("/api/reports/bale-messages", StringComparison.OrdinalIgnoreCase)
             || (path.Equals("/api/reports/warnings", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPost(context.Request.Method))
@@ -1128,6 +1127,19 @@ app.MapGet("/api/reports", async (HttpContext context, AppDb db) =>
     var id = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
     var isAdmin = context.User.IsInRole("ادمین");
     var records = await db.Resolutions.Where(item => !item.IsArchived).Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Group).ThenInclude(g => g!.Members).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).ThenInclude(g => g!.Members).ToListAsync();
+    if (!isAdmin)
+    {
+        var memberGroupIds = (await db.GroupMembers.Where(member => member.NationalId == id).Select(member => member.GroupId).ToListAsync()).ToHashSet();
+        records = records.Where(record =>
+            record.PublishToAll ||
+            record.Assignments.Any(assignment => assignment.NationalId == id) ||
+            record.Progress.Any(progress => progress.NationalId == id) ||
+            record.Group?.Members.Any(member => member.NationalId == id) == true ||
+            record.GroupAssignments.Any(assignment =>
+                memberGroupIds.Contains(assignment.GroupId) ||
+                assignment.Group?.Members.Any(member => member.NationalId == id) == true)
+        ).ToList();
+    }
     var directory = await db.Users.ToDictionaryAsync(u => u.NationalId, u => (DisplayName: u.DisplayName, Title: u.Title));
     var userTitles = await db.Users.ToDictionaryAsync(u => u.NationalId, u => u.OrgPositionDesc);
     var personRows = new List<(string NationalId, string DisplayName, string Title, int ResolutionId, string Number, string Text, string? DueDateJalali, string Status)>();
