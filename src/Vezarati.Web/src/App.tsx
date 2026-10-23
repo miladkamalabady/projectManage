@@ -47,7 +47,7 @@ const frequencyLabels: Record<string, string> = { daily: "روزانه", weekly:
 const statusEntries = Object.entries(labels);
 const coreGroupNames = new Set(["شورای معاونان", "مدیران کل"]);
 const regionalGroupNames = new Set(["تهران، شهرستان های تهران", "تهران،قم، خراسان", "هرمزگان، بوشهر، خوزستان، سیستان"]);
-const normalizeGroupName = (name: string) => name.replace(/[\\u200c\\s،؛,]+/g, "").replace(/[يى]/g, "ی").replace(/ك/g, "ک");
+const normalizeGroupName = (name: string) => name.split(String.fromCharCode(8204)).join("").replace(/[\s،؛,]+/g, "").replace(/[يى]/g, "ی").replace(/ك/g, "ک");
 const isRegionalGroup = (name: string) => Array.from(regionalGroupNames).some(item => normalizeGroupName(item) === normalizeGroupName(name));
 const isResolutionGroup = (name: string, category?: string) => category === "group" || (category !== "unit" && (coreGroupNames.has(name) || isRegionalGroup(name)));
 const isIndividualRecipientGroup = (name: string) => name.startsWith("آقای ");
