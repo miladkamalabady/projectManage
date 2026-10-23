@@ -378,7 +378,7 @@ export default function App() {
       }
       lines.push(cells.join(","));
     }
-    return "\\uFEFF" + lines.join("\\r\\n");
+    return "\uFEFF" + lines.join("\r\n");
   }
 
   async function changeGroupCategory(group: Group, category: "group" | "unit") {
