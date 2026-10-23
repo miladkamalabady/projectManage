@@ -238,3 +238,24 @@
 .nav{padding:9px 10px;font-size:12px}
 .sidebar-foot{padding:10px 12px}
 @media(max-width:720px){.sidebar{padding:10px}.brand{padding-bottom:10px}.nav{padding:8px 9px}}
+
+/* Top account bar keeps profile actions together while leaving the sidebar for navigation. */
+.account-bar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:-30px -38px 22px;padding:10px 38px;background:#fff;border-bottom:1px solid #e5eaec;min-height:68px}
+.account-bar-label{font-size:12px;font-weight:700;color:#718087}
+.account-menu-wrap{position:relative;z-index:21}
+.account-menu-trigger{display:flex;align-items:center;gap:10px;min-width:240px;border:1px solid #e7ecee;border-radius:12px;background:#fff;color:#34454c;padding:6px 9px;text-align:right}
+.account-menu-trigger:hover{border-color:#c8d9d5;background:#fbfdfc}
+.account-menu-trigger .avatar{width:36px;height:36px;flex:none}
+.account-menu-summary{display:grid;gap:3px;min-width:0;flex:1}
+.account-menu-summary b{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.account-menu-summary small{font-size:10px;color:#87949a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:270px}
+.account-menu-overlay{position:fixed;inset:0;z-index:20;border:0;background:transparent;cursor:default}
+.account-menu{position:absolute;top:calc(100% + 8px);left:0;z-index:22;width:min(310px,calc(100vw - 28px));padding:8px;background:#fff;border:1px solid #e3e9eb;border-radius:14px;box-shadow:0 14px 40px #1b32351f}
+.account-menu-identity{display:grid;gap:5px;padding:12px 11px 13px;margin-bottom:5px;border-bottom:1px solid #edf0f2}
+.account-menu-identity b{font-size:13px;color:#26383e}
+.account-menu-identity small{font-size:11px;color:#7c8a90;line-height:1.7}
+.account-menu>button:not(.account-menu-overlay){width:100%;display:block;text-align:right;border:0;background:#fff;color:#42555c;padding:11px;border-radius:9px;font-size:12px}
+.account-menu>button:not(.account-menu-overlay):hover{background:#f2f7f6;color:#147d73}
+.account-menu>button:disabled{opacity:.55;cursor:wait}
+.account-menu>button.account-menu-logout{color:#b84e49}
+@media(max-width:720px){.account-bar{margin:-20px -14px 18px;padding:9px 14px;min-height:58px}.account-bar-label{font-size:11px}.account-menu-trigger{min-width:0;max-width:72vw;gap:7px;padding:5px 7px}.account-menu-summary small{max-width:45vw}.account-menu{left:0}}
