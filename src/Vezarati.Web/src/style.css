@@ -126,3 +126,12 @@
 .notification-pagination button{min-height:34px;padding:6px 14px}
 .notification-pagination button:disabled{opacity:.45;cursor:not-allowed}
 @media(max-width:650px){.notification-pagination{align-items:stretch;flex-direction:column}.notification-pagination>div{justify-content:space-between}}
+
+
+.notification-tabs{display:flex;gap:8px;margin:14px 0;padding-bottom:10px;border-bottom:1px solid #e3eaec}
+.notification-tabs button{display:inline-flex;align-items:center;gap:7px;padding:9px 14px;border:1px solid #dce6e8;border-radius:9px;background:#f7fafb;color:#51666d;font-weight:700;font-size:11px;cursor:pointer}
+.notification-tabs button.active{border-color:#75bdb2;background:#e9f7f4;color:#087767;box-shadow:0 2px 8px #08776718}
+.notification-tabs button[aria-selected=true]{outline:0}
+.notification-tabs button span{display:inline-grid;place-items:center;min-width:22px;height:20px;padding:0 5px;border-radius:99px;background:#e2eaec;color:#435960;font-size:10px}
+.notification-tabs button.active span{background:#c9e9e2;color:#075d52}
+@media(max-width:500px){.notification-tabs button{flex:1;justify-content:center}}
