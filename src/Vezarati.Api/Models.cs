@@ -337,13 +337,31 @@ public static class SeedData
     private sealed record SeedResolution(string SourceKey, string MeetingDateJalali, string Number, string Text, string Notes, string Status, List<string> Groups);
     private sealed record SeedDocument(Dictionary<string, List<SeedMember>> Groups, List<SeedResolution> Resolutions);
 
+    private static bool IsCoreOrRegionalGroup(string name)
+    {
+        var allowed = new[] { "شورای معاونان", "مدیران کل", "تهران، شهرستان های تهران", "تهران،قم، خراسان", "هرمزگان، بوشهر، خوزستان، سیستان" };
+        static string Normalize(string value) => System.Text.RegularExpressions.Regex.Replace(value, @"[\u200c\s،؛,]+", "")
+            .Replace('ي', 'ی').Replace('ى', 'ی').Replace('ك', 'ک');
+        return allowed.Any(item => Normalize(item) == Normalize(name));
+    }
+
     public static async Task Initialize(AppDb db, IWebHostEnvironment environment)
     {
+        const string categoryVersionKey = "GroupCategoryClassificationV2";
+        if (!await db.Settings.AnyAsync(setting => setting.Key == categoryVersionKey))
+        {
+            var groupsWithCanonicalCategories = await db.Groups.ToListAsync();
+            foreach (var group in groupsWithCanonicalCategories)
+                group.Category = IsCoreOrRegionalGroup(group.Name) ? "group" : "unit";
+            db.Settings.Add(new AppSetting { Key = categoryVersionKey, Value = "1" });
+            await db.SaveChangesAsync();
+        }
+
         var groups = new Dictionary<string, ResolutionGroup>();
         foreach (var name in new[] { "شورای معاونان", "مدیران کل" })
         {
             var group = await db.Groups.Include(g => g.Members).FirstOrDefaultAsync(g => g.Name == name);
-            if (group is null) { group = new ResolutionGroup { Name = name }; db.Groups.Add(group); }
+            if (group is null) { group = new ResolutionGroup { Name = name, Category = "group" }; db.Groups.Add(group); }
             groups[name] = group;
         }
         await db.SaveChangesAsync();
@@ -364,7 +382,7 @@ public static class SeedData
                     var group = await db.Groups.Include(g => g.Members).FirstOrDefaultAsync(g => g.Name == groupName);
                     if (group is null)
                     {
-                        group = new ResolutionGroup { Name = groupName };
+                        group = new ResolutionGroup { Name = groupName, Category = IsCoreOrRegionalGroup(groupName) ? "group" : "unit" };
                         db.Groups.Add(group);
                     }
                     groups[groupName] = group;
