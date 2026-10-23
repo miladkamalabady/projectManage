@@ -363,6 +363,23 @@ export default function App() {
     const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = "گزارش-مصوبات.xls"; link.click(); URL.revokeObjectURL(url);
   }
   function printReport() { window.print(); }
+  function buildCsv(rows: ReadonlyArray<ReadonlyArray<unknown>>): string {
+    const lines: string[] = [];
+    for (const row of rows) {
+      const cells: string[] = [];
+      for (const value of row) {
+        const raw = String(value ?? "");
+        let escaped = "";
+        for (let index = 0; index < raw.length; index++) {
+          const character = raw.charAt(index);
+          escaped += character === '"' ? '""' : character;
+        }
+        cells.push('"' + escaped + '"');
+      }
+      lines.push(cells.join(","));
+    }
+    return "\\uFEFF" + lines.join("\\r\\n");
+  }
 
   async function changeGroupCategory(group: Group, category: "group" | "unit") {
     if (group.category === category) return;
@@ -440,14 +457,14 @@ export default function App() {
       const result = await response.json();
       if (!response.ok) throw new Error(result?.error || "گزارش ارسال‌های بله دریافت نشد.");
       const rows = [["نام گیرنده","موبایل","وضعیت ارسال","تعداد تلاش","زمان ثبت","زمان ارسال","متن پیام","آخرین خطا"], ...(result.items ?? []).map((item: BaleMessageReportItem) => [item.displayName,item.mobile,baleMessageStatusLabel(item.status),item.attempts,formatDateTime(item.createdAt),item.sentAt?formatDateTime(item.sentAt):"",item.text,item.lastError])];
-      const csv = "\uFEFF" + rows.map(row => row.map(value => '"' + String(value ?? "").split('"').join('""') + '"').join(",")).join("\r\n");
+      const csv = buildCsv(rows);
       const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
       const link = document.createElement("a"); link.href = url; link.download = "bale-message-report.csv"; link.click(); URL.revokeObjectURL(url);
     } catch (cause) { setMessage(cause instanceof Error ? cause.message : "خروجی گزارش ارسال‌های بله آماده نشد."); }
   }
   function exportReportSubmissions() {
     const rows = [["نام فرد","شماره مصوبه","نوع گزارش","دوره","تاریخ ارسال","متن گزارش"], ...filteredReportSubmissions.map(report => [report.userName, report.resolutionNumber, report.reportType === "periodic" ? "مستمر" : "اقدام/غیرمستمر", report.periodKey, report.submittedAt, report.text])];
-    const csv = "\uFEFF" + rows.map(row => row.map(value => '"' + String(value ?? "").split('"').join('""') + '"').join(",")).join("\r\n");
+    const csv = buildCsv(rows);
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a"); link.href = url; link.download = "resolution-reports.csv"; link.click(); URL.revokeObjectURL(url);
   }
