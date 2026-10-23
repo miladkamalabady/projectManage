@@ -725,9 +725,6 @@ app.MapGet("/api/reports/submissions", async (AppDb db) =>
             file.UploadedAt
         })
         .ToListAsync();
-    var attachmentsByReporter = attachments
-        .GroupBy(file => (file.ResolutionId, file.UploadedBy))
-        .ToDictionary(group => group.Key, group => group.ToList());
     var progressByReporter = await db.Progress.AsNoTracking()
         .Where(progress => resolutionIds.Contains(progress.ResolutionId) && nationalIds.Contains(progress.NationalId))
         .ToDictionaryAsync(progress => (progress.ResolutionId, progress.NationalId));
@@ -748,7 +745,7 @@ app.MapGet("/api/reports/submissions", async (AppDb db) =>
         DueDate = report.ReportType == "periodic" ? report.PeriodKey.Split(':').LastOrDefault() : null,
         ApprovalStatus = progressByReporter.GetValueOrDefault((report.ResolutionId, report.NationalId))?.ApprovalStatus ?? "none",
         AdminFeedback = progressByReporter.GetValueOrDefault((report.ResolutionId, report.NationalId))?.AdminFeedback ?? "",
-        Attachments = attachmentsByReporter.GetValueOrDefault((report.ResolutionId, report.NationalId), new List<object>())
+        Attachments = attachments.Where(file => file.ResolutionId == report.ResolutionId && file.UploadedBy == report.NationalId).ToList()
     }));
 });
 
