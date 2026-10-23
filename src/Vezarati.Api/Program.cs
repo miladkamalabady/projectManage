@@ -12,7 +12,7 @@ var builder = WebApplication.CreateBuilder(args);
 const long maxAttachmentSize = 50L * 1024 * 1024;
 builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = maxAttachmentSize);
 builder.Services.Configure<FormOptions>(options => options.MultipartBodyLengthLimit = maxAttachmentSize);
-builder.Services.AddDbContext<AppDb>(options => options.UseSqlite(builder.Configuration.GetConnectionString("Default") ?? "Data Source=data/vezarati.db"));
+builder.Services.AddDbContext<AppDb>(options => options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection") ?? "Server=.\\MSSQLSERVER2022;Database=vezarati;Integrated Security=True;Encrypt=True;TrustServerCertificate=True;"));
 builder.Services.AddScoped<NationalIdLookup, LocalNationalIdLookup>();
 builder.Services.AddScoped<MessageDispatcher>();
 builder.Services.AddHostedService<ResolutionStatusRefreshService>();
