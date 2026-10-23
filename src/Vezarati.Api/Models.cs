@@ -564,12 +564,26 @@ public static class BaleMessageText
         return string.IsNullOrWhiteSpace(jalali) ? JalaliDate.FromGregorian(date.Value).Replace('.', '/') : jalali.Replace('.', '/');
     }
 
-    public static string ForAssignment(Resolution item)
+    private static string Greeting(string recipientName, string? recipientTitle)
+    {
+        var name = Clip(string.IsNullOrWhiteSpace(recipientName) ? "کاربر" : recipientName, 80);
+        var title = (recipientTitle ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(title)) return name + " گرامی، سلام؛";
+
+        if (!title.Contains("محترم", StringComparison.Ordinal))
+        {
+            var firstSpace = title.IndexOf(' ');
+            title = firstSpace > 0 ? title[..firstSpace] + " محترم" + title[firstSpace..] : title + " محترم";
+        }
+
+        return title + " (" + name + ") سلام،";
+    }
+    public static string ForAssignment(Resolution item, string recipientName, string? recipientTitle = null)
     {
         var text = Clip(item.Text, 500);
         var notes = Clip(item.Notes, 260);
         return "📬 وظیفهٔ جدید از دفتر وزارتی\n"
-            + "سلام، یک مصوبه برای پیگیری به شما ارجاع شده است.\n"
+            + Greeting(recipientName, recipientTitle) + " یک مصوبه برای پیگیری به شما ارجاع شده است.\n"
             + "🔢 شماره مصوبه: " + item.Number + "\n"
             + "📝 موضوع: " + text + "\n"
             + "📅 تاریخ جلسه: " + Date(item.MeetingDate, item.MeetingDateJalali) + "\n"
@@ -579,12 +593,12 @@ public static class BaleMessageText
             + "\nلطفاً در سامانه «پیگیری مصوبات» جزئیات را بررسی و وضعیت یا گزارش اقدام خود را ثبت کنید.";
     }
 
-    public static string ForWarning(Resolution item, string recipientName, string status)
+    public static string ForWarning(Resolution item, string recipientName, string status, string? recipientTitle = null)
     {
         var text = Clip(item.Text, 420);
         var notes = Clip(item.Notes, 180);
         return "🚨 یادآوری پیگیری از دفتر وزارتی\n"
-            + "سلام " + Clip(recipientName, 80) + " گرامی،\n"
+            + Greeting(recipientName, recipientTitle) + "\n"
             + "برای وظیفهٔ شما در این مصوبه، وضعیت «" + status + "» ثبت شده است.\n"
             + "🔢 شماره مصوبه: " + item.Number + "\n"
             + "📝 موضوع: " + text + "\n"
@@ -594,7 +608,7 @@ public static class BaleMessageText
             + (string.IsNullOrWhiteSpace(notes) ? "" : "\nℹ️ توضیحات: " + notes)
             + "\nلطفاً جزئیات را در سامانه «پیگیری مصوبات» بررسی کنید و گزارش اقدام یا وضعیت جدید را ثبت کنید.";
     }
-    public static string ForOverdueWarnings(string recipientName, IEnumerable<Resolution> items, string nationalId)
+    public static string ForOverdueWarnings(string recipientName, IEnumerable<Resolution> items, string nationalId, string? recipientTitle = null)
     {
         var resolutions = items.Take(8).ToList();
         var details = resolutions.Select(item =>
@@ -607,7 +621,7 @@ public static class BaleMessageText
         var total = items.Count();
         var extra = total > resolutions.Count ? "\nو " + (total - resolutions.Count) + " مصوبهٔ دیگر." : "";
         return "⏰ یادآوری مهلت از دفتر وزارتی\n"
-            + "سلام " + Clip(recipientName, 80) + " گرامی،\n"
+            + Greeting(recipientName, recipientTitle) + "\n"
             + "برای پیگیری‌های زیر، مهلت اقدام گذشته است:\n"
             + string.Join("\n", details) + extra
             + "\nلطفاً در سامانه «پیگیری مصوبات» وضعیت را بررسی و اقدام یا گزارش خود را ثبت کنید.";
