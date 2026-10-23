@@ -259,8 +259,10 @@ app.MapGet("/api/auth/me", async (HttpContext context, AppDb db) =>
 app.MapGet("/api/push/public-key", (IConfiguration configuration) =>
 {
     var publicKey = configuration["Push:PublicKey"] ?? configuration["PUSH_PUBLIC_KEY"];
-    return string.IsNullOrWhiteSpace(publicKey)
-        ? Results.Problem("کلید عمومی Push روی سرور تنظیم نشده است.", statusCode: StatusCodes.Status503ServiceUnavailable)
+    var privateKey = configuration["Push:PrivateKey"] ?? configuration["PUSH_PRIVATE_KEY"];
+    var subject = configuration["Push:Subject"] ?? configuration["PUSH_SUBJECT"];
+    return string.IsNullOrWhiteSpace(publicKey) || string.IsNullOrWhiteSpace(privateKey) || string.IsNullOrWhiteSpace(subject)
+        ? Results.Problem("تنظیم کلیدهای VAPID اعلان مرورگر روی سرور کامل نیست.", statusCode: StatusCodes.Status503ServiceUnavailable)
         : Results.Ok(new { publicKey });
 });
 app.MapPost("/api/push/subscriptions", async (SaveBrowserPushSubscriptionRequest request, HttpContext context, AppDb db) =>
