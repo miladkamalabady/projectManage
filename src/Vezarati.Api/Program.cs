@@ -56,6 +56,7 @@ app.Use(async (context, next) =>
             || path.Equals("/api/users/search", StringComparison.OrdinalIgnoreCase)
             || path.Equals("/api/reports", StringComparison.OrdinalIgnoreCase)
             || path.Equals("/api/reports/submissions", StringComparison.OrdinalIgnoreCase)
+            || (path.Equals("/api/reports/warnings", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPost(context.Request.Method))
             || (path.StartsWith("/api/reports/warnings/", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPost(context.Request.Method))
             || (path.StartsWith("/api/resolutions", StringComparison.OrdinalIgnoreCase) &&
                 ((path.Equals("/api/resolutions", StringComparison.OrdinalIgnoreCase) && (HttpMethods.IsPost(context.Request.Method) || HttpMethods.IsDelete(context.Request.Method)))
@@ -1049,6 +1050,71 @@ app.MapGet("/api/reports", async (HttpContext context, AppDb db) =>
         .OrderByDescending(person => person.Total).ToList();
     if (!isAdmin) rows = rows.Where(row => row.NationalId == id).ToList();
     return Results.Ok(new { total = records.Count, completed = records.Count(r => r.Status == "completed"), delayed = records.Count(r => r.Status == "delayed"), pending = records.Count(r => r.Status is "before" or "in_progress"), people = rows });
+});
+app.MapPost("/api/reports/warnings", async (WarningRecipientsRequest request, AppDb db, MessageDispatcher sender, HttpContext context) =>
+{
+    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    var nationalIds = (request.NationalIds ?? new List<string>())
+        .Where(value => !string.IsNullOrWhiteSpace(value))
+        .Select(value => NormalizeDigits(value.Trim()))
+        .Where(value => value.Length > 0)
+        .Distinct()
+        .ToList();
+    if (nationalIds.Count == 0) return Results.BadRequest(new { error = "حداقل یک کاربر را انتخاب کنید." });
+    if (nationalIds.Count > 100) return Results.BadRequest(new { error = "در هر نوبت حداکثر ۱۰۰ کاربر قابل انتخاب است." });
+
+    var records = await db.Resolutions.Where(item => !item.IsArchived && item.Status != "cancelled")
+        .Include(item => item.Assignments)
+        .Include(item => item.Progress)
+        .Include(item => item.Group).ThenInclude(group => group!.Members)
+        .Include(item => item.GroupAssignments).ThenInclude(assignment => assignment.Group).ThenInclude(group => group!.Members)
+        .ToListAsync(context.RequestAborted);
+    var directory = await db.Directory.AsNoTracking()
+        .Where(person => nationalIds.Contains(person.NationalId))
+        .ToDictionaryAsync(person => person.NationalId, person => person.DisplayName, context.RequestAborted);
+    var accounts = await db.Users.AsNoTracking()
+        .Where(user => nationalIds.Contains(user.NationalId))
+        .ToDictionaryAsync(user => user.NationalId, context.RequestAborted);
+
+    using var sendLimit = new SemaphoreSlim(8);
+    var results = await Task.WhenAll(nationalIds.Select(async nationalId =>
+    {
+        var tasks = records.Where(record =>
+                record.Assignments.Any(assignment => assignment.NationalId == nationalId)
+                || record.Group?.Members.Any(member => member.NationalId == nationalId) == true
+                || record.GroupAssignments.Any(assignment => assignment.Group?.Members.Any(member => member.NationalId == nationalId) == true))
+            .Select(record => new
+            {
+                Record = record,
+                Status = record.Progress.FirstOrDefault(progress => progress.NationalId == nationalId)?.Status ?? record.Status
+            })
+            .Where(item => item.Status is "delayed" or "in_progress")
+            .ToList();
+        var name = directory.GetValueOrDefault(nationalId, accounts.GetValueOrDefault(nationalId)?.DisplayName ?? nationalId);
+        if (tasks.Count == 0)
+            return new { nationalId, displayName = name, sent = false, reason = "وظیفهٔ با تأخیر یا در حال اجرا ندارد." };
+        var mobile = accounts.GetValueOrDefault(nationalId)?.Mobile;
+        if (string.IsNullOrWhiteSpace(mobile))
+            return new { nationalId, displayName = name, sent = false, reason = "شمارهٔ موبایل ثبت نشده است." };
+
+        var numbers = string.Join("، ", tasks.Select(item => item.Record.Number).Distinct());
+        var message = "هشدار دفتر وزارتی: برای وظایف دارای تأخیر یا در حال اجرا در مصوبه‌های شماره "
+            + numbers + " لطفاً اقدام لازم را انجام داده و وضعیت را در سامانه به‌روز کنید.";
+        await sendLimit.WaitAsync(context.RequestAborted);
+        try
+        {
+            var sent = await sender.SendAsync(mobile, message, context.RequestAborted);
+            return new { nationalId, displayName = name, sent, reason = sent ? "" : "ارسال پیام از سرویس بله ناموفق بود." };
+        }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested) { throw; }
+        catch
+        {
+            return new { nationalId, displayName = name, sent = false, reason = "ارسال پیام از سرویس بله ناموفق بود." };
+        }
+        finally { sendLimit.Release(); }
+    }));
+    var sentCount = results.Count(item => item.sent);
+    return Results.Ok(new { selected = nationalIds.Count, sent = sentCount, failed = results.Length - sentCount, results });
 });
 app.MapPost("/api/reports/warnings/{nationalId}", async (string nationalId, AppDb db, MessageDispatcher sender, HttpContext context) =>
 {
