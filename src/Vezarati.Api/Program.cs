@@ -824,6 +824,7 @@ app.MapGet("/api/reports/submissions", async (AppDb db) =>
 app.MapPatch("/api/reports/submissions/{reportId:int}/review", async (int reportId, ReportReviewRequest request, HttpContext context, AppDb db) =>
 {
     if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    if (!request.Approved && string.IsNullOrWhiteSpace(request.Feedback)) return Results.BadRequest(new { error = "برای رد گزارش، علت را وارد کنید." });
     var report = await db.ResolutionReports.Include(item => item.Resolution).FirstOrDefaultAsync(item => item.Id == reportId);
     if (report is null) return Results.NotFound();
     report.ApprovalStatus = request.Approved ? "approved" : "rejected";
