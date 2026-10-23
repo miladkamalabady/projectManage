@@ -292,7 +292,6 @@ public sealed class AppDb(DbContextOptions<AppDb> options, ILogger<AppDb> logger
         model.Entity<BaleQueuedMessage>().HasIndex(x => new { x.Status, x.NextAttemptAtUnixMs, x.CreatedAtUnixMs });
         model.Entity<ResolutionGroup>().HasIndex(x => x.Name).IsUnique();
         model.Entity<GroupMember>().HasIndex(x => new { x.GroupId, x.NationalId }).IsUnique();
-        model.Entity<AppUser>().HasIndex(x => x.NationalId).IsUnique();
         model.Entity<Resolution>().HasIndex(x => x.SourceKey).IsUnique();
         model.Entity<Resolution>().HasOne(x => x.Group).WithMany().HasForeignKey(x => x.GroupId).OnDelete(DeleteBehavior.SetNull);
         model.Entity<ResolutionAssignment>().HasOne(x => x.Resolution).WithMany(x => x.Assignments).HasForeignKey(x => x.ResolutionId).OnDelete(DeleteBehavior.Cascade);
