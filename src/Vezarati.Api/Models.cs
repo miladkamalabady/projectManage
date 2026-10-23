@@ -48,6 +48,8 @@ public sealed class ResolutionReport
     public string Text { get; set; } = "";
     public string ReportType { get; set; } = "completion";
     public string PeriodKey { get; set; } = "";
+    public string ApprovalStatus { get; set; } = "pending";
+    public string AdminFeedback { get; set; } = "";
     public DateTimeOffset SubmittedAt { get; set; }
 }
 
@@ -512,6 +514,9 @@ public static class SchemaCompatibility
         if (columns.Count > 0 && !columns.Contains("PublishToAll")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN PublishToAll INTEGER NOT NULL DEFAULT 0;");
         await db.Database.ExecuteSqlRawAsync("UPDATE Resolutions SET StartDate = MeetingDate, StartDateJalali = MeetingDateJalali WHERE StartDate IS NULL;");
         await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_Resolutions_SourceKey ON Resolutions (SourceKey);");
+        var reportColumns = await ReadColumns(db, "ResolutionReports");
+        if (reportColumns.Count > 0 && !reportColumns.Contains("ApprovalStatus")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE ResolutionReports ADD COLUMN ApprovalStatus TEXT NOT NULL DEFAULT 'pending';");
+        if (reportColumns.Count > 0 && !reportColumns.Contains("AdminFeedback")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE ResolutionReports ADD COLUMN AdminFeedback TEXT NOT NULL DEFAULT '';");
         var userColumns = await ReadColumns(db, "Users");
         var userTextColumnSql = new Dictionary<string, string>
         {
