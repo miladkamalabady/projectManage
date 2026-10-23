@@ -54,6 +54,7 @@ app.Use(async (context, next) =>
             || (path.Equals("/api/users", StringComparison.OrdinalIgnoreCase) && (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsPost(context.Request.Method)))
             || (path.StartsWith("/api/users/", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPatch(context.Request.Method))
             || path.Equals("/api/users/search", StringComparison.OrdinalIgnoreCase)
+            || (path.Equals("/api/settings/bale-notifications", StringComparison.OrdinalIgnoreCase) && (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsPut(context.Request.Method)))
             || path.Equals("/api/reports", StringComparison.OrdinalIgnoreCase)
             || path.Equals("/api/reports/submissions", StringComparison.OrdinalIgnoreCase)
             || (path.Equals("/api/reports/warnings", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPost(context.Request.Method))
@@ -332,22 +333,6 @@ app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpC
         db.Notifications.Add(new UserNotification { NationalId = recipient, ResolutionId = record.Id, Type = "assigned", DateKey = record.Id.ToString(), Text = "مصوبه " + record.Number + " برای پیگیری به شما ارجاع شد.", CreatedAt = DateTimeOffset.UtcNow });
     db.Events.Add(new ResolutionEvent { ResolutionId = record.Id, NationalId = primaryAdminNationalId, UserName = record.CreatedBy, Text = "مصوبه ثبت و برای پیگیری ارجاع شد.", CreatedAt = DateTimeOffset.UtcNow });
     await db.SaveChangesAsync();
-    var messageSender = http.RequestServices.GetRequiredService<MessageDispatcher>();
-    var dueText = record.DueDateJalali.Length > 0 ? " مهلت پیگیری: " + record.DueDateJalali + "." : "";
-    var externalMessage = "مصوبه شماره " + record.Number + " ثبت شد. لطفاً متن مصوبه را بررسی و پیگیری کنید." + dueText;
-    var recipientMobiles = await db.Users.AsNoTracking().Where(user => recipientIds.Contains(user.NationalId)).Select(user => user.Mobile).Where(mobile => mobile != "").Distinct().ToListAsync(http.RequestAborted);
-    using (var sendLimit = new SemaphoreSlim(8))
-    {
-        var deliveries = recipientMobiles.Select(async mobile =>
-        {
-            await sendLimit.WaitAsync(http.RequestAborted);
-            try { await messageSender.SendAsync(mobile, externalMessage, http.RequestAborted); }
-            catch (OperationCanceledException) when (http.RequestAborted.IsCancellationRequested) { throw; }
-            catch { /* external delivery must not roll back a saved resolution */ }
-            finally { sendLimit.Release(); }
-        });
-        await Task.WhenAll(deliveries);
-    }
     return Results.Created("/api/resolutions/" + record.Id, record);
 });
 app.MapPut("/api/resolutions/{id:int}", async (int id, ResolutionCreate request, AppDb db) =>
@@ -1009,6 +994,27 @@ app.MapPatch("/api/users/{nationalId}/role", async (string nationalId, SetUserRo
     await db.SaveChangesAsync();
     return Results.Ok(new { nationalId = normalizedId, displayName = person.DisplayName, role = account.Role });
 });
+app.MapGet("/api/settings/bale-notifications", async (HttpContext context, AppDb db, IConfiguration configuration) =>
+{
+    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    var setting = await db.Settings.AsNoTracking().FirstOrDefaultAsync(item => item.Key == "BaleNotificationsEnabled");
+    var username = configuration["BALE_USERNAME"] ?? configuration["Bale:Username"];
+    var password = configuration["BALE_PASSWORD"] ?? configuration["Bale:Password"];
+    var configured = !string.IsNullOrWhiteSpace(username) && !string.IsNullOrWhiteSpace(password);
+    return Results.Ok(new { enabled = setting?.Value == "true", configured });
+});
+app.MapPut("/api/settings/bale-notifications", async (BaleNotificationSettingRequest request, HttpContext context, AppDb db) =>
+{
+    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    var setting = await db.Settings.FirstOrDefaultAsync(item => item.Key == "BaleNotificationsEnabled");
+    if (setting is null)
+        db.Settings.Add(new AppSetting { Key = "BaleNotificationsEnabled", Value = request.Enabled ? "true" : "false" });
+    else
+        setting.Value = request.Enabled ? "true" : "false";
+    await db.SaveChangesAsync();
+    return Results.Ok(new { enabled = request.Enabled });
+});
+
 app.MapGet("/api/reports", async (HttpContext context, AppDb db) =>
 {
     var id = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
