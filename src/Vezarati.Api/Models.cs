@@ -172,6 +172,11 @@ public sealed class AppUser
     public DateTimeOffset? LastLoginAt { get; set; }
 }
 
+public sealed class SetUserRoleRequest
+{
+    public bool IsAdmin { get; set; }
+}
+
 public sealed class AppDb(DbContextOptions<AppDb> options) : DbContext(options)
 {
     public DbSet<Resolution> Resolutions => Set<Resolution>();
