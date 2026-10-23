@@ -80,3 +80,8 @@
 .personal-status-control select{min-width:135px}
 .rejected-lock{margin:10px 0;background:#f5effa;color:#5c2683;border-color:#d8b4fe}
 .member-progress-row .status.rejected{display:inline-flex}
+
+.bulk-member-status{display:flex;flex-wrap:wrap;align-items:end;gap:10px;padding:10px 12px;border:1px solid #dce8ea;border-radius:10px;background:#f6fafb;margin-bottom:10px}
+.bulk-member-status label{display:grid;gap:5px;min-width:180px;color:#435960;font-size:11px;font-weight:700}
+.bulk-member-status select{min-width:180px}
+.bulk-member-status button{min-height:36px}
