@@ -308,6 +308,8 @@ public sealed class AppDb(DbContextOptions<AppDb> options, ILogger<AppDb> logger
         model.Entity<ResolutionProgress>().HasIndex(x => new { x.ResolutionId, x.NationalId }).IsUnique();
         model.Entity<ResolutionProgress>().HasOne<Resolution>().WithMany(x => x.Progress).HasForeignKey(x => x.ResolutionId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<GroupMember>().HasOne(x => x.Group).WithMany(x => x.Members).HasForeignKey(x => x.GroupId).OnDelete(DeleteBehavior.Cascade);
+        model.Entity<AppUser>().Property(x => x.NationalId).HasMaxLength(11);
+        model.Entity<GroupMember>().Property(x => x.NationalId).HasMaxLength(11);
         model.Entity<AppUser>().HasAlternateKey(x => x.NationalId);
         model.Entity<GroupMember>().HasOne(x => x.User).WithMany().HasForeignKey(x => x.NationalId).HasPrincipalKey(x => x.NationalId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<GroupMember>().Navigation(x => x.User).AutoInclude();
