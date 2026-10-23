@@ -192,17 +192,15 @@ app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context
         user.OrgPositionTypeDesc = ReadString("orgPositionTypeDesc");
         user.RegionId = ReadInt("regionId");
         user.LastLoginAt = DateTimeOffset.UtcNow;
-        var directory = await db.Directory.FirstOrDefaultAsync(item => item.NationalId == nationalId, context.RequestAborted);
-        if (directory is null) { directory = new DirectoryUser { NationalId = nationalId }; db.Directory.Add(directory); }
-        directory.DisplayName = displayName;
-        directory.Title = string.IsNullOrWhiteSpace(position) ? ReadString("orgPositionTypeDesc") : position;
-        var memberships = await db.GroupMembers.Where(member => member.NationalId == nationalId).ToListAsync(context.RequestAborted);
-        foreach (var member in memberships) { member.DisplayName = displayName; member.Title = directory.Title; }
+        user.DisplayName = displayName;
+        user.Title = string.IsNullOrWhiteSpace(position) ? ReadString("orgPositionTypeDesc") : position;
+        if (string.IsNullOrWhiteSpace(user.OrganizationUnit)) user.OrganizationUnit = user.RegionId?.ToString() ?? "";
+
         await db.SaveChangesAsync(context.RequestAborted);
         var claims = new[]
         {
             new Claim(ClaimTypes.NameIdentifier, nationalId), new Claim(ClaimTypes.Name, displayName),
-            new Claim(ClaimTypes.Role, role), new Claim("title", directory.Title), new Claim("regionId", user.RegionId?.ToString() ?? "")
+            new Claim(ClaimTypes.Role, role), new Claim("title", user.Title), new Claim("regionId", user.RegionId?.ToString() ?? "")
         };
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme));
         await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal, new AuthenticationProperties { IsPersistent = true, ExpiresUtc = DateTimeOffset.UtcNow.AddHours(8) });
@@ -244,13 +242,13 @@ app.MapGet("/api/auth/me", async (HttpContext context, AppDb db) =>
             new Claim(ClaimTypes.NameIdentifier, id),
             new Claim(ClaimTypes.Name, user.DisplayName),
             new Claim(ClaimTypes.Role, user.Role),
-            new Claim("title", user.OrgPositionDesc),
+            new Claim("title", string.IsNullOrWhiteSpace(user.Title) ? user.OrgPositionDesc : user.Title),
             new Claim("regionId", user.RegionId?.ToString() ?? "")
         };
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme));
         await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal, new AuthenticationProperties { IsPersistent = true, ExpiresUtc = DateTimeOffset.UtcNow.AddHours(8) });
     }
-    return Results.Ok(new { nationalId = id, displayName = user.DisplayName, role = user.Role, title = user.OrgPositionDesc, province = user.RegionId?.ToString() });
+    return Results.Ok(new { nationalId = id, displayName = user.DisplayName, role = user.Role, title = string.IsNullOrWhiteSpace(user.Title) ? user.OrgPositionDesc : user.Title, organizationUnit = user.OrganizationUnit, province = user.RegionId?.ToString() });
 });
 app.MapPost("/api/auth/logout", async (HttpContext context) =>
 {
@@ -284,10 +282,9 @@ app.MapGet("/api/dashboard", async (HttpContext context, AppDb db) =>
     }
     else
     {
-        var person = await db.Directory.AsNoTracking().FirstOrDefaultAsync(u => u.NationalId == id);
-        var titles = groups.SelectMany(g => g.Members).Where(m => m.NationalId == id && !string.IsNullOrWhiteSpace(m.Title)).Select(m => m.Title).Distinct().ToList();
-        var role = titles.Count > 0 ? string.Join("، ", titles) : person?.Title ?? "کاربر";
-        currentUser = person is null ? null : new { nationalId = person.NationalId, displayName = person.DisplayName, role };
+        var person = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.NationalId == id);
+        var role = string.IsNullOrWhiteSpace(person?.Title) ? "کاربر" : person.Title;
+        currentUser = person is null ? null : new { nationalId = person.NationalId, displayName = person.DisplayName, role, title = person.Title, organizationUnit = person.OrganizationUnit };
     }
     return Results.Ok(new { currentUser, groups = isAdmin ? (object)groups : groups.Where(g => g.Members.Any(m => m.NationalId == id)).Select(g => new { g.Id, g.Name, g.Category, Members = g.Members.Where(m => m.NationalId == id).ToList() }), resolutions = mine });
 });
@@ -330,9 +327,9 @@ app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpC
     var recipientIds = request.People.Distinct().ToHashSet();
     var groupIdsToNotify = (request.GroupIds ?? (request.GroupId.HasValue ? [request.GroupId.Value] : [])).Distinct().ToHashSet();
     recipientIds.UnionWith(await db.GroupMembers.Where(member => groupIdsToNotify.Contains(member.GroupId)).Select(member => member.NationalId).ToListAsync());
-    if (record.PublishToAll) recipientIds.UnionWith(await db.Directory.Select(person => person.NationalId).ToListAsync());
+    if (record.PublishToAll) recipientIds.UnionWith(await db.Users.Select(person => person.NationalId).ToListAsync());
     var recipientIdList = recipientIds.ToList();
-    var recipientProfiles = await db.Directory.AsNoTracking().Where(person => recipientIdList.Contains(person.NationalId)).ToListAsync();
+    var recipientProfiles = await db.Users.AsNoTracking().Where(person => recipientIdList.Contains(person.NationalId)).ToListAsync();
     var recipientAccounts = await db.Users.AsNoTracking().Where(user => recipientIdList.Contains(user.NationalId)).ToListAsync();
     foreach (var recipient in recipientIds)
     {
@@ -392,9 +389,9 @@ app.MapPut("/api/resolutions/{id:int}", async (int id, ResolutionCreate request,
     await db.SaveChangesAsync();
     var newRecipients = request.People.Distinct().ToHashSet();
     newRecipients.UnionWith(await db.GroupMembers.Where(member => groupIds.Contains(member.GroupId)).Select(member => member.NationalId).ToListAsync());
-    if (request.PublishToAll && !wasPublic) newRecipients.UnionWith(await db.Directory.Select(person => person.NationalId).ToListAsync());
+    if (request.PublishToAll && !wasPublic) newRecipients.UnionWith(await db.Users.Select(person => person.NationalId).ToListAsync());
     var newlyAssigned = newRecipients.Except(priorRecipients).ToList();
-    var recipientProfiles = await db.Directory.AsNoTracking().Where(person => newlyAssigned.Contains(person.NationalId)).ToListAsync();
+    var recipientProfiles = await db.Users.AsNoTracking().Where(person => newlyAssigned.Contains(person.NationalId)).ToListAsync();
     var recipientAccounts = await db.Users.AsNoTracking().Where(user => newlyAssigned.Contains(user.NationalId)).ToListAsync();
     foreach (var recipient in newlyAssigned)
     {
@@ -444,10 +441,7 @@ app.MapPatch("/api/resolutions/{id:int}/status", async (int id, ResolutionStatus
         progress.UpdatedAt = DateTimeOffset.UtcNow;
         progress.ApprovalStatus = "none";
         if (request.Status != "completed") progress.AdminFeedback = "";
-        var targetName = await db.Directory.Where(person => person.NationalId == targetNationalId).Select(person => person.DisplayName).FirstOrDefaultAsync()
-            ?? await db.Users.Where(person => person.NationalId == targetNationalId).Select(person => person.DisplayName).FirstOrDefaultAsync()
-            ?? await db.GroupMembers.Where(person => person.NationalId == targetNationalId).Select(person => person.DisplayName).FirstOrDefaultAsync()
-            ?? "عضو مصوبه";
+        var targetName = await db.Users.Where(person => person.NationalId == targetNationalId).Select(person => person.DisplayName).FirstOrDefaultAsync() ?? "عضو مصوبه";
         var statusName = request.Status switch { "completed" => "اجرا شده", "rejected" => "رد شده", "in_progress" => "در حال اجرا", _ => request.Status };
         db.Events.Add(new ResolutionEvent
         {
@@ -490,16 +484,12 @@ app.MapPatch("/api/resolutions/{id:int}/progress/bulk-status", async (int id, Re
     nationalIds.UnionWith(await db.GroupMembers.Where(member => groupIds.Contains(member.GroupId)).Select(member => member.NationalId).ToListAsync());
     if (resolution.PublishToAll)
     {
-        nationalIds.UnionWith(await db.Directory.Select(person => person.NationalId).ToListAsync());
+        nationalIds.UnionWith(await db.Users.Select(person => person.NationalId).ToListAsync());
         nationalIds.UnionWith(await db.Users.Select(user => user.NationalId).ToListAsync());
     }
     if (nationalIds.Count == 0) return Results.BadRequest(new { error = "برای این مصوبه فرد ارجاع‌شده‌ای پیدا نشد." });
 
-    var names = await db.Directory.AsNoTracking().ToDictionaryAsync(person => person.NationalId, person => person.DisplayName);
-    foreach (var person in await db.Users.AsNoTracking().ToListAsync())
-        if (!string.IsNullOrWhiteSpace(person.DisplayName)) names[person.NationalId] = person.DisplayName;
-    foreach (var person in await db.GroupMembers.AsNoTracking().ToListAsync())
-        if (!string.IsNullOrWhiteSpace(person.DisplayName) && !names.ContainsKey(person.NationalId)) names[person.NationalId] = person.DisplayName;
+    var names = await db.Users.AsNoTracking().ToDictionaryAsync(person => person.NationalId, person => person.DisplayName);
     var statusName = request.Status switch { "completed" => "اجرا شده", "rejected" => "رد شده", "in_progress" => "در حال اجرا", _ => request.Status };
     foreach (var nationalId in nationalIds)
     {
@@ -548,7 +538,7 @@ app.MapPost("/api/resolutions/{id:int}/events", async (int id, ResolutionEventCr
              db.ResolutionGroups.Any(rg => rg.ResolutionId == id && rg.GroupId == m.GroupId)));
         if (!direct && !inGroup && !resolution.PublishToAll) return Results.StatusCode(StatusCodes.Status403Forbidden);
     }
-    var directoryUser = await db.Directory.AsNoTracking().FirstOrDefaultAsync(user => user.NationalId == nationalId);
+    var directoryUser = await db.Users.AsNoTracking().FirstOrDefaultAsync(user => user.NationalId == nationalId);
     var member = await db.GroupMembers.AsNoTracking().FirstOrDefaultAsync(user => user.NationalId == nationalId);
     var eventEntry = new ResolutionEvent
     {
@@ -594,7 +584,7 @@ app.MapPost("/api/resolutions/{id:int}/completion-report", async (int id, Comple
     progress.AdminFeedback = "";
     progress.UpdatedAt = DateTimeOffset.UtcNow;
     if (progress.Status != "completed") progress.Status = "in_progress";
-    var personName = await db.Directory.Where(person => person.NationalId == nationalId).Select(person => person.DisplayName).FirstOrDefaultAsync() ?? request.UserName;
+    var personName = await db.Users.Where(person => person.NationalId == nationalId).Select(person => person.DisplayName).FirstOrDefaultAsync() ?? request.UserName;
     var submittedAt = DateTimeOffset.UtcNow;
     db.ResolutionReports.Add(new ResolutionReport { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = text, ReportType = "completion", PeriodKey = "completion:" + submittedAt.ToUnixTimeMilliseconds(), SubmittedAt = submittedAt });
     db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = "گزارش اقدام برای بررسی ادمین ارسال شد.", CreatedAt = DateTimeOffset.UtcNow });
@@ -628,7 +618,7 @@ app.MapPost("/api/resolutions/{id:int}/reports", async (int id, ResolutionSubmis
     var submittedPeriods = await db.ResolutionReports.Where(report => report.ResolutionId == id && report.NationalId == nationalId && report.ReportType == "periodic").Select(report => report.PeriodKey).ToListAsync();
     var period = duePeriods.FirstOrDefault(value => !submittedPeriods.Contains(value.Key));
     if (string.IsNullOrEmpty(period.Key)) return Results.Conflict(new { error = "گزارش این دوره قبلاً ثبت شده و موعد بعدی هنوز نرسیده است." });
-    var personName = await db.Directory.Where(person => person.NationalId == nationalId).Select(person => person.DisplayName).FirstOrDefaultAsync() ?? context.User.Identity?.Name ?? nationalId;
+    var personName = await db.Users.Where(person => person.NationalId == nationalId).Select(person => person.DisplayName).FirstOrDefaultAsync() ?? context.User.Identity?.Name ?? nationalId;
     var submittedAt = DateTimeOffset.UtcNow;
     db.ResolutionReports.Add(new ResolutionReport { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = text, ReportType = "periodic", PeriodKey = period.Key, SubmittedAt = submittedAt });
     db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = "گزارش دوره‌ای (" + period.Key + ") برای مصوبه " + resolution.Number + " ثبت شد.", CreatedAt = submittedAt });
@@ -644,7 +634,7 @@ app.MapGet("/api/reports/bale-messages", async (HttpContext context, AppDb db, s
     page = Math.Max(1, page);
     pageSize = Math.Clamp(pageSize, 1, 5000);
     var query = from message in db.BaleMessageQueue.AsNoTracking()
-                join directory in db.Directory.AsNoTracking() on message.NationalId equals directory.NationalId into people
+                join directory in db.Users.AsNoTracking() on message.NationalId equals directory.NationalId into people
                 from person in people.DefaultIfEmpty()
                 select new { Message = message, DisplayName = person == null ? "کاربر حذف‌شده" : person.DisplayName };
 
@@ -707,7 +697,7 @@ app.MapGet("/api/reports/submissions", async (AppDb db) =>
     var reports = (await db.ResolutionReports.Include(report => report.Resolution).ToListAsync())
         .OrderByDescending(report => report.SubmittedAt)
         .ToList();
-    var directory = await db.Directory.AsNoTracking().ToDictionaryAsync(person => person.NationalId, person => (person.DisplayName, person.Title));
+    var directory = await db.Users.AsNoTracking().ToDictionaryAsync(person => person.NationalId, person => (person.DisplayName, person.Title));
     var positions = await db.Users.AsNoTracking().ToDictionaryAsync(user => user.NationalId, user => user.OrgPositionDesc);
     return Results.Ok(reports.Select(report => new
     {
@@ -835,7 +825,7 @@ app.MapPost("/api/resolutions/{id:int}/attachments", async (int id, HttpRequest 
     await using (var output = System.IO.File.Create(destination)) await file.CopyToAsync(output);
     var provider = new FileExtensionContentTypeProvider();
     if (!provider.TryGetContentType(file.FileName, out var contentType)) contentType = "application/octet-stream";
-    var directoryPerson = await db.Directory.AsNoTracking().FirstOrDefaultAsync(person => person.NationalId == nationalId);
+    var directoryPerson = await db.Users.AsNoTracking().FirstOrDefaultAsync(person => person.NationalId == nationalId);
     var memberPerson = await db.GroupMembers.AsNoTracking().FirstOrDefaultAsync(person => person.NationalId == nationalId);
     var resolvedUploaderName = directoryPerson?.DisplayName ?? memberPerson?.DisplayName ?? uploaderName;
 
@@ -953,14 +943,14 @@ app.MapGet("/api/users/search", async (string? q, AppDb db) =>
         .Trim().ToLowerInvariant();
     var normalized = Normalize(term);
     var digits = new string(term.Where(char.IsDigit).ToArray());
-    var directory = await db.Directory.AsNoTracking().ToListAsync();
-    var users = await db.Users.AsNoTracking().ToDictionaryAsync(user => user.NationalId, user => user.OrgPositionDesc);
+    var directory = await db.Users.AsNoTracking().ToListAsync();
+    
     var people = directory
         .Where(person => Normalize(person.DisplayName).Contains(normalized) ||
             (digits.Length >= 2 && person.NationalId.Contains(digits)))
         .OrderBy(person => person.DisplayName)
         .Take(30)
-        .Select(person => new { person.NationalId, person.DisplayName, Title = string.IsNullOrWhiteSpace(users.GetValueOrDefault(person.NationalId)) ? person.Title : users.GetValueOrDefault(person.NationalId) })
+        .Select(person => new { person.NationalId, person.DisplayName, Title = string.IsNullOrWhiteSpace(person.Title) ? person.OrgPositionDesc : person.Title, person.OrganizationUnit })
         .ToList();
     return Results.Ok(people);
 });
@@ -968,12 +958,8 @@ app.MapPost("/api/groups/{id:int}/members/lookup", async (int id, MemberLookupRe
 {
     var group = await db.Groups.Include(g => g.Members).FirstOrDefaultAsync(g => g.Id == id); if (group is null) return Results.NotFound();
     var person = await lookup.FindAsync(request.NationalId); if (person is null) return Results.NotFound(new { error = "کاربری با این کد ملی در فهرست کاربران پیدا نشد." });
-    var appUser = await db.Users.AsNoTracking().FirstOrDefaultAsync(user => user.NationalId == person.NationalId);
-    var directoryUser = await db.Directory.AsNoTracking().FirstOrDefaultAsync(user => user.NationalId == person.NationalId);
-    var title = !string.IsNullOrWhiteSpace(appUser?.OrgPositionDesc) ? appUser.OrgPositionDesc : directoryUser?.Title ?? "";
     var existingMember = group.Members.FirstOrDefault(member => member.NationalId == person.NationalId);
-    if (existingMember is null) group.Members.Add(new GroupMember { NationalId = person.NationalId, DisplayName = person.DisplayName, Title = title });
-    else { existingMember.DisplayName = person.DisplayName; existingMember.Title = title; }
+    if (existingMember is null) group.Members.Add(new GroupMember { NationalId = person.NationalId });
     await db.SaveChangesAsync(); return Results.Ok(group);
 });
 app.MapDelete("/api/groups/{id:int}/members/{nationalId}", async (int id, string nationalId, AppDb db) =>
@@ -986,18 +972,17 @@ app.MapPost("/api/users", async (CreateDirectoryPerson request, AppDb db) =>
     var nationalId = NormalizeDigits(request.NationalId.Trim());
     var firstName = request.FirstName.Trim();
     var lastName = request.LastName.Trim();
-    var title = "";
     if (nationalId.Length is < 8 or > 11 || !nationalId.All(char.IsDigit))
         return Results.BadRequest(new { error = "کد ملی باید بین ۸ تا ۱۱ رقم باشد." });
     if (string.IsNullOrWhiteSpace(firstName) || string.IsNullOrWhiteSpace(lastName))
         return Results.BadRequest(new { error = "نام و نام خانوادگی الزامی است." });
-    var existing = await db.Directory.FirstOrDefaultAsync(person => person.NationalId == nationalId);
+    var existing = await db.Users.FirstOrDefaultAsync(person => person.NationalId == nationalId);
     if (existing is not null)
-        return Results.Conflict(new { error = "این کد ملی قبلاً در فهرست اشخاص ثبت شده است." });
-    var person = new DirectoryUser { NationalId = nationalId, DisplayName = $"{firstName} {lastName}", Title = title };
-    db.Directory.Add(person);
+        return Results.Conflict(new { error = "این کد ملی قبلاً در فهرست کاربران ثبت شده است." });
+    var person = new AppUser { NationalId = nationalId, DisplayName = $"{firstName} {lastName}", Title = request.Title.Trim(), OrganizationUnit = request.OrganizationUnit.Trim() };
+    db.Users.Add(person);
     await db.SaveChangesAsync();
-    return Results.Created($"/api/users/{person.NationalId}", new { person.NationalId, person.DisplayName, person.Title });
+    return Results.Created($"/api/users/{person.NationalId}", new { person.NationalId, person.DisplayName, person.Title, person.OrganizationUnit });
 });
 static string NormalizeDigits(string value)
 {
@@ -1012,29 +997,39 @@ static string NormalizeDigits(string value)
 app.MapGet("/api/users", async (HttpContext context, AppDb db) =>
 {
     if (!context.User.IsInRole("ادمین")) return Results.StatusCode(StatusCodes.Status403Forbidden);
-    var directory = await db.Directory.AsNoTracking().OrderBy(u => u.DisplayName).ToListAsync();
-    var usersById = await db.Users.AsNoTracking().ToDictionaryAsync(user => user.NationalId, user => user);
-    return Results.Ok(directory.Select(user =>
+    var users = await db.Users.AsNoTracking().OrderBy(user => user.DisplayName).ToListAsync();
+    return Results.Ok(users.Select(user =>
     {
-        var account = usersById.GetValueOrDefault(user.NationalId);
-        var title = account?.OrgPositionDesc ?? user.Title;
+        var title = string.IsNullOrWhiteSpace(user.Title) ? user.OrgPositionDesc : user.Title;
         return new
         {
             user.NationalId,
             user.DisplayName,
             Title = title,
-            Role = account?.Role ?? "کاربر",
-            Mobile = account?.Mobile ?? "",
+            OrganizationUnit = user.OrganizationUnit,
+            Role = user.Role,
+            Mobile = user.Mobile,
             CanChangeRole = user.NationalId != primaryAdminNationalId && user.NationalId != context.User.FindFirstValue(ClaimTypes.NameIdentifier),
             Province = title.Contains("مدیر کل", StringComparison.OrdinalIgnoreCase) ? ExtractProvince(title) : null
         };
     }));
 });
+app.MapPatch("/api/users/{nationalId}/profile", async (string nationalId, UpdateUserProfileRequest request, HttpContext context, AppDb db) =>
+{
+    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    var id = NormalizeDigits(nationalId.Trim());
+    var user = await db.Users.FirstOrDefaultAsync(item => item.NationalId == id);
+    if (user is null) return Results.NotFound(new { error = "کاربر پیدا نشد." });
+    user.Title = request.Title.Trim();
+    user.OrganizationUnit = request.OrganizationUnit.Trim();
+    await db.SaveChangesAsync();
+    return Results.Ok(new { user.NationalId, user.DisplayName, user.Title, user.OrganizationUnit });
+});
 app.MapPatch("/api/users/{nationalId}/mobile", async (string nationalId, UpdateMobileRequest request, HttpContext context, AppDb db) =>
 {
     if (!context.User.IsInRole("ادمین")) return Results.Forbid();
     var normalizedId = NormalizeDigits(nationalId.Trim());
-    var person = await db.Directory.FirstOrDefaultAsync(user => user.NationalId == normalizedId);
+    var person = await db.Users.FirstOrDefaultAsync(user => user.NationalId == normalizedId);
     if (person is null) return Results.NotFound(new { error = "کاربر در فهرست اشخاص پیدا نشد." });
     var mobile = NormalizeDigits(request.Mobile ?? "").Trim();
     var digits = new string(mobile.Where(char.IsDigit).ToArray());
@@ -1054,7 +1049,7 @@ app.MapPatch("/api/users/{nationalId}/mobile", async (string nationalId, UpdateM
 app.MapPatch("/api/users/{nationalId}/role", async (string nationalId, SetUserRoleRequest request, HttpContext context, AppDb db) =>
 {
     var normalizedId = NormalizeDigits(nationalId.Trim());
-    var person = await db.Directory.FirstOrDefaultAsync(user => user.NationalId == normalizedId);
+    var person = await db.Users.FirstOrDefaultAsync(user => user.NationalId == normalizedId);
     if (person is null) return Results.NotFound(new { error = "کاربر در فهرست اشخاص پیدا نشد." });
     if (!request.IsAdmin && normalizedId == primaryAdminNationalId)
         return Results.Conflict(new { error = "دسترسی ادمین اصلی قابل حذف نیست." });
@@ -1103,7 +1098,7 @@ app.MapGet("/api/reports", async (HttpContext context, AppDb db) =>
     var id = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
     var isAdmin = context.User.IsInRole("ادمین");
     var records = await db.Resolutions.Where(item => !item.IsArchived).Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Group).ThenInclude(g => g!.Members).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).ThenInclude(g => g!.Members).ToListAsync();
-    var directory = await db.Directory.ToDictionaryAsync(u => u.NationalId, u => (DisplayName: u.DisplayName, Title: u.Title));
+    var directory = await db.Users.ToDictionaryAsync(u => u.NationalId, u => (DisplayName: u.DisplayName, Title: u.Title));
     var userTitles = await db.Users.ToDictionaryAsync(u => u.NationalId, u => u.OrgPositionDesc);
     var personRows = new List<(string NationalId, string DisplayName, string Title, int ResolutionId, string Number, string Text, string? DueDateJalali, string Status)>();
     foreach (var record in records)
@@ -1162,7 +1157,7 @@ app.MapPost("/api/resolutions/{id:int}/warnings", async (int id, WarningRecipien
         .FirstOrDefaultAsync(context.RequestAborted);
     if (resolution is null) return Results.NotFound(new { error = "مصوبه پیدا نشد یا لغو شده است." });
 
-    var directory = await db.Directory.AsNoTracking()
+    var directory = await db.Users.AsNoTracking()
         .Where(person => nationalIds.Contains(person.NationalId))
         .ToDictionaryAsync(person => person.NationalId, context.RequestAborted);
     var accounts = await db.Users.AsNoTracking()
@@ -1243,9 +1238,9 @@ app.MapPost("/api/reports/warnings/{nationalId}", async (string nationalId, AppD
     if (delayed.Count == 0) return Results.Conflict(new { error = "برای این شخص مصوبه دارای تأخیر پیدا نشد." });
 
     var account = await db.Users.AsNoTracking().FirstOrDefaultAsync(user => user.NationalId == normalizedId, context.RequestAborted);
-    var directoryProfile = await db.Directory.AsNoTracking().FirstOrDefaultAsync(person => person.NationalId == normalizedId, context.RequestAborted);
+    var directoryProfile = await db.Users.AsNoTracking().FirstOrDefaultAsync(person => person.NationalId == normalizedId, context.RequestAborted);
     var displayName = directoryProfile?.DisplayName ?? account?.DisplayName ?? "کاربر";
-    var title = string.IsNullOrWhiteSpace(directoryProfile?.Title) ? account?.OrgPositionDesc : directoryProfile.Title;
+    var title = string.IsNullOrWhiteSpace(account?.Title) ? account?.OrgPositionDesc : account.Title;
     var message = BaleMessageText.ForOverdueWarnings(displayName, delayed, normalizedId, title);
     var now = DateTimeOffset.UtcNow;
     db.Notifications.Add(new UserNotification
@@ -1317,7 +1312,7 @@ static async Task<Dictionary<string, string>> LoadPersonDisplayNames(AppDb db)
         if (!string.IsNullOrWhiteSpace(member.DisplayName)) names[member.NationalId] = member.DisplayName;
     foreach (var user in await db.Users.AsNoTracking().Select(user => new { user.NationalId, user.DisplayName }).ToListAsync())
         if (!string.IsNullOrWhiteSpace(user.DisplayName)) names[user.NationalId] = user.DisplayName;
-    foreach (var person in await db.Directory.AsNoTracking().Select(person => new { person.NationalId, person.DisplayName }).ToListAsync())
+    foreach (var person in await db.Users.AsNoTracking().Select(person => new { person.NationalId, person.DisplayName }).ToListAsync())
         if (!string.IsNullOrWhiteSpace(person.DisplayName)) names[person.NationalId] = person.DisplayName;
     return names;
 }
@@ -1377,7 +1372,7 @@ static class ResolutionStatusUpdater
             var memberships = groupIds.Count == 0 ? new List<(int GroupId, string NationalId)>()
                 : (await db.GroupMembers.Where(member => groupIds.Contains(member.GroupId)).Select(member => new { member.GroupId, member.NationalId }).ToListAsync())
                     .Select(member => (member.GroupId, member.NationalId)).ToList();
-            var directoryIds = await db.Directory.Select(person => person.NationalId).ToListAsync();
+            var directoryIds = await db.Users.Select(person => person.NationalId).ToListAsync();
             var userIds = await db.Users.Select(user => user.NationalId).ToListAsync();
             var changed = false;
             foreach (var item in records)
@@ -1445,7 +1440,7 @@ static class AttachmentFileTypes
     };
 }
 
-record CreateDirectoryPerson(string NationalId, string FirstName, string LastName);
+record CreateDirectoryPerson(string NationalId, string FirstName, string LastName, string Title = "", string OrganizationUnit = "");
 record SsoLoginRequest(string? Code);
 
 sealed class RawUpstreamResult(byte[] body, string? contentType, int statusCode) : IResult
