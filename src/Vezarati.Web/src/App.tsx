@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import DatePicker from "react-multi-date-picker";
 import persian from "react-date-object/calendars/persian";
 import persian_fa from "react-date-object/locales/persian_fa";
-import { Archive, Bell, CalendarDays, CheckCheck, CircleAlert, ClipboardList, FileText, LayoutDashboard, Paperclip, Plus, Search, ShieldCheck, Trash2, Users, X } from "lucide-react";
+import { Archive, Bell, CalendarDays, CheckCheck, ChevronDown, CircleAlert, ClipboardList, FileText, LayoutDashboard, Paperclip, Plus, Search, ShieldCheck, Trash2, Users, X } from "lucide-react";
 
 type Member = { id: number; nationalId: string; displayName: string; title: string; organizationUnit?: string; mobile?: string };
 type Group = { id: number; name: string; category?: string; members: Member[] };
@@ -169,6 +169,7 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const isAdmin = authUser?.role === "ادمین";
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [resolutions, setResolutions] = useState<Resolution[]>([]);
@@ -832,12 +833,27 @@ export default function App() {
   return <div className="shell">
     <aside className="sidebar">
       <div className="brand"><span className="brand-icon"><ShieldCheck /></span><div><b>دفتر وزارتی</b><small>پیگیری مصوبات</small></div></div>
-      <div className="profile"><div className="avatar">{authUser.displayName?.[0] || "م"}</div><div><b>{authUser.displayName || dashboard?.currentUser.displayName || "کاربر"}</b><small>نقش: {authUser.role}</small><small>پست: {authUser.title || "ثبت نشده"}</small><small>موبایل: {authUser.mobile || "ثبت نشده"}</small><button type="button" className="secondary profile-mobile-edit" onClick={()=>void editMyMobile()}>ویرایش موبایل من</button><button type="button" className="secondary profile-mobile-edit" disabled={pushBusy} onClick={()=>void toggleBrowserPush()}>{pushBusy ? "در حال تنظیم اعلان…" : pushEnabled ? "غیرفعال‌سازی اعلان مرورگر" : "فعال‌سازی اعلان مرورگر"}</button><button className="logout-btn" onClick={() => void logout()}>خروج</button></div></div>
       <nav>{[["wall", LayoutDashboard, "دیواره من"], ["notifications", Bell, `اعلان‌ها ${notifications.filter(item=>!item.isRead).length ? "(" + notifications.filter(item=>!item.isRead).length + ")" : ""}`], ["resolutions", ClipboardList, "مصوبات"], ...(isAdmin ? [["archive", Archive, "بایگانی"], ["groups", Users, "گروه‌ها و اعضا"], ["reports", FileText, "گزارش‌ها"]] : [])].map(([key, Icon, title]: any) => <button key={key} className={`nav ${tab === key ? "active" : ""}`} onClick={() => setTab(key)}><Icon size={18} />{title}</button>)}</nav>
       <div className="sidebar-foot">محیط پیگیری اجرایی<br /><span>دفتر وزارتی</span></div>
     </aside>
 
     <main className="main">
+      <div className="account-bar">
+        <span className="account-bar-label">حساب کاربری</span>
+        <div className="account-menu-wrap">
+          <button type="button" className="account-menu-trigger" aria-expanded={accountMenuOpen} onClick={()=>setAccountMenuOpen(open=>!open)}>
+            <span className="avatar">{authUser.displayName?.[0] || "م"}</span>
+            <span className="account-menu-summary"><b>{authUser.displayName || dashboard?.currentUser.displayName || "کاربر"}</b><small>{authUser.title || "پست ثبت نشده"}</small></span>
+            <ChevronDown size={16}/>
+          </button>
+          {accountMenuOpen && <><button type="button" className="account-menu-overlay" aria-label="بستن منوی کاربر" onClick={()=>setAccountMenuOpen(false)}/><div className="account-menu">
+            <div className="account-menu-identity"><b>{authUser.displayName || "کاربر"}</b><small>نقش: {authUser.role}</small><small>پست: {authUser.title || "ثبت نشده"}</small></div>
+            <button type="button" onClick={()=>{setAccountMenuOpen(false);void editMyMobile();}}>ویرایش موبایل</button>
+            <button type="button" disabled={pushBusy} onClick={()=>{setAccountMenuOpen(false);void toggleBrowserPush();}}>{pushBusy ? "در حال تنظیم اعلان…" : pushEnabled ? "غیرفعال‌سازی اعلان مرورگر" : "فعال‌سازی اعلان مرورگر"}</button>
+            <button type="button" className="account-menu-logout" onClick={()=>{setAccountMenuOpen(false);void logout();}}>خروج از حساب</button>
+          </div></>}
+        </div>
+      </div>
       <header className="top"><div><div className="eyebrow">پیگیری مصوبات</div><h1>{tab === "wall" ? "دیواره پیگیری من" : tab === "resolutions" ? "مصوبات و جلسات" : tab === "groups" ? "گروه‌های اصلی و مسئولان معاونت‌ها" : tab === "archive" ? "بایگانی مصوبات" : tab === "notifications" ? "اعلان‌های من" : "گزارش‌های اجرایی"}</h1><p>مصوبات، مسئولیت‌ها و روند اجرای اقدامات</p></div><div className="top-actions"><span className="today"><CalendarDays size={16} />{formatDate(today(), gregorianToJalali(today()).replace(/\./g, "/"))}</span>{isAdmin && tab !== "groups" && tab !== "archive" && tab !== "notifications" && tab !== "reports" && <button className="primary" onClick={openCreateResolution}><Plus size={17} />ثبت مصوبه</button>}</div></header>
       {error && <div className="notice">{error}<button onClick={() => void load()}>تلاش دوباره</button></div>}{message && <div className="notice">{message}</div>}
       <section className="metrics"><Metric icon={<ClipboardList />} label="کل مصوبات" value={isAdmin ? reports?.total ?? resolutions.length : mine.length} color="blue" active={wallStatusFilter === "all" && tab === "wall"} onClick={() => { setTab("wall"); setWallStatusFilter("all"); }} /><Metric icon={<CheckCheck />} label="اجراشده" value={completed} color="green" active={tab === "wall" && wallStatusFilter === "completed"} onClick={() => { setTab("wall"); setWallStatusFilter("completed"); }} /><Metric icon={<CircleAlert />} label="نیازمند پیگیری" value={pending} color="amber" active={tab === "wall" && wallStatusFilter === "pending"} onClick={() => { setTab("wall"); setWallStatusFilter("pending"); }} />{isAdmin && <Metric icon={<CalendarDays />} label="دارای تأخیر" value={delayed} color="red" active={tab === "wall" && wallStatusFilter === "delayed"} onClick={() => { setTab("wall"); setWallStatusFilter("delayed"); }} />}</section>
