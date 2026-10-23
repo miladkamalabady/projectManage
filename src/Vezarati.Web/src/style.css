@@ -211,3 +211,21 @@
 
 /* Keep all sidebar options reachable on short viewports. */
 .sidebar{height:100vh;height:100dvh;overflow:hidden}.sidebar nav{flex:1;min-height:0;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#cbd8d4 transparent}.sidebar nav::-webkit-scrollbar{width:6px}.sidebar nav::-webkit-scrollbar-thumb{background:#cbd8d4;border-radius:8px}@media(max-width:720px){.sidebar{height:auto;overflow:visible}.sidebar nav{flex:initial;overflow-x:auto;overflow-y:hidden}}
+
+.reports-page .reports-main-tabs{display:flex;gap:8px;overflow-x:auto;padding:4px 1px 12px;margin-bottom:8px;border-bottom:1px solid #e6ece9;scrollbar-width:thin}
+.reports-main-tabs button{flex:0 0 auto;display:inline-flex;align-items:center;gap:8px;border:1px solid #dfe8e4;background:#fff;color:#62716c;border-radius:10px;padding:10px 13px;font:inherit;font-size:12px;font-weight:700;white-space:nowrap;cursor:pointer}
+.reports-main-tabs button:hover{border-color:#9fc8b7;color:#226d53}
+.reports-main-tabs button.active{background:#e8f4ef;border-color:#9fc8b7;color:#176847}
+.reports-page .bale-settings-panel,.reports-page .report-actions-head,.reports-page .report-kpis,.reports-page .bale-message-report,.reports-page .submitted-reports-panel,.reports-page .review-queue,.reports-page .manager-report-grid,.reports-page .event-report,.reports-page .individual-report{display:none}
+.reports-page .manager-report-grid>*{display:none}
+.reports-tab-overview .report-actions-head{display:flex}
+.reports-tab-overview .report-kpis{display:grid}
+.reports-tab-overview .manager-report-grid{display:grid}
+.reports-tab-overview .manager-report-grid>.executive-panel,.reports-tab-overview .manager-report-grid>.trend-panel{display:block}
+.reports-tab-bale .bale-settings-panel,.reports-tab-bale .bale-message-report{display:block}
+.reports-tab-actions .submitted-reports-panel,.reports-tab-actions .review-queue{display:block}
+.reports-tab-groups .manager-report-grid,.reports-tab-units .manager-report-grid,.reports-tab-people .manager-report-grid{display:block}
+.reports-tab-groups .manager-report-grid>.group-report-panel,.reports-tab-units .manager-report-grid>.group-report-panel,.reports-tab-people .manager-report-grid>.group-report-panel{display:block}
+.reports-tab-people .individual-report{display:block}
+.reports-tab-events .event-report{display:block}
+@media(max-width:720px){.reports-page .reports-main-tabs{margin-inline:-4px;padding-inline:4px}.reports-main-tabs button{padding:9px 11px;font-size:11px}}
