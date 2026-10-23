@@ -511,7 +511,7 @@ export default function App() {
     } catch (cause) { setMessage(cause instanceof Error ? cause.message : "خروجی گزارش ارسال‌های بله آماده نشد."); }
   }
   function exportReportSubmissions() {
-    const rows = [["نام فرد","شماره مصوبه","نوع گزارش","دوره","تاریخ ارسال","متن گزارش"], ...filteredReportSubmissions.map(report => [report.userName, report.resolutionNumber, report.reportType === "periodic" ? "مستمر" : "اقدام/غیرمستمر", report.periodKey, report.submittedAt, report.text])];
+    const rows = [["نام فرد","شماره مصوبه","شناسه یکتا","نوع گزارش","دوره","تاریخ ارسال","متن گزارش"], ...filteredReportSubmissions.map(report => [report.userName, report.resolutionNumber, report.resolutionId, report.reportType === "periodic" ? "مستمر" : "اقدام/غیرمستمر", report.periodKey, report.submittedAt, report.text])];
     const csv = buildCsv(rows);
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a"); link.href = url; link.download = "resolution-reports.csv"; link.click(); URL.revokeObjectURL(url);
