@@ -229,3 +229,12 @@
 .reports-tab-people .individual-report{display:block}
 .reports-tab-events .event-report{display:block}
 @media(max-width:720px){.reports-page .reports-main-tabs{margin-inline:-4px;padding-inline:4px}.reports-main-tabs button{padding:9px 11px;font-size:11px}}
+
+/* Compact sidebar chrome to give navigation more vertical room. */
+.sidebar{padding:16px 12px}
+.brand{padding:0 6px 14px}
+.profile{padding:12px 5px 14px}
+.sidebar nav{gap:3px}
+.nav{padding:9px 10px;font-size:12px}
+.sidebar-foot{padding:10px 12px}
+@media(max-width:720px){.sidebar{padding:10px}.brand{padding-bottom:10px}.nav{padding:8px 9px}}
