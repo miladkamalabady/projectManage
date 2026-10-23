@@ -700,7 +700,11 @@ app.MapGet("/api/notifications", async (HttpContext context, AppDb db, ILogger<P
         logger.LogInformation(exception, "A concurrent notification insert was ignored.");
         db.ChangeTracker.Clear();
     }
-    var notifications = await db.Notifications.Where(notification => notification.NationalId == nationalId).OrderByDescending(notification => notification.Id).Take(100).ToListAsync();
+    var notifications = (await db.Notifications.Where(notification => notification.NationalId == nationalId).ToListAsync())
+        .OrderByDescending(notification => notification.CreatedAt)
+        .ThenByDescending(notification => notification.Id)
+        .Take(100)
+        .ToList();
     var resolutionIds = notifications.Where(notification => notification.ResolutionId.HasValue).Select(notification => notification.ResolutionId!.Value).Distinct().ToList();
     var numbers = await db.Resolutions.Where(item => resolutionIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, item => item.Number);
     return Results.Ok(notifications.Select(notification => new { notification.Id, notification.ResolutionId, ResolutionNumber = notification.ResolutionId.HasValue ? numbers.GetValueOrDefault(notification.ResolutionId.Value, "") : "", notification.Type, notification.Text, notification.IsRead, notification.CreatedAt }));
