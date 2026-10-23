@@ -53,7 +53,7 @@ app.Use(async (context, next) =>
             || (path.StartsWith("/api/groups/", StringComparison.OrdinalIgnoreCase) && (HttpMethods.IsPost(context.Request.Method) || HttpMethods.IsDelete(context.Request.Method)))
             || (path.Equals("/api/attachments", StringComparison.OrdinalIgnoreCase) == false && path.StartsWith("/api/attachments/", StringComparison.OrdinalIgnoreCase) && path.EndsWith("/approval", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPatch(context.Request.Method))
             || (path.Equals("/api/users", StringComparison.OrdinalIgnoreCase) && (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsPost(context.Request.Method)))
-            || (path.StartsWith("/api/users/", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPatch(context.Request.Method))
+            || (path.StartsWith("/api/users/", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPatch(context.Request.Method) && !path.EndsWith("/mobile", StringComparison.OrdinalIgnoreCase))
             || path.Equals("/api/users/search", StringComparison.OrdinalIgnoreCase)
             || (path.Equals("/api/settings/bale-notifications", StringComparison.OrdinalIgnoreCase) && (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsPut(context.Request.Method)))
             || path.Equals("/api/reports/submissions", StringComparison.OrdinalIgnoreCase)
@@ -252,7 +252,7 @@ app.MapGet("/api/auth/me", async (HttpContext context, AppDb db) =>
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme));
         await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal, new AuthenticationProperties { IsPersistent = true, ExpiresUtc = DateTimeOffset.UtcNow.AddHours(8) });
     }
-    return Results.Ok(new { nationalId = id, displayName = user.DisplayName, role = user.Role, title = string.IsNullOrWhiteSpace(user.Title) ? user.OrgPositionDesc : user.Title, organizationUnit = user.OrganizationUnit, province = user.RegionId?.ToString() });
+    return Results.Ok(new { nationalId = id, displayName = user.DisplayName, role = user.Role, title = string.IsNullOrWhiteSpace(user.Title) ? user.OrgPositionDesc : user.Title, organizationUnit = user.OrganizationUnit, province = user.RegionId?.ToString(), mobile = user.Mobile });
 });
 app.MapPost("/api/auth/logout", async (HttpContext context) =>
 {
@@ -1056,8 +1056,10 @@ app.MapPatch("/api/users/{nationalId}/profile", async (string nationalId, Update
 });
 app.MapPatch("/api/users/{nationalId}/mobile", async (string nationalId, UpdateMobileRequest request, HttpContext context, AppDb db) =>
 {
-    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
     var normalizedId = NormalizeDigits(nationalId.Trim());
+    var currentId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
+    if (!context.User.IsInRole("ادمین") && !string.Equals(currentId, normalizedId, StringComparison.Ordinal))
+        return Results.Forbid();
     var person = await db.Users.FirstOrDefaultAsync(user => user.NationalId == normalizedId);
     if (person is null) return Results.NotFound(new { error = "کاربر در فهرست اشخاص پیدا نشد." });
     var mobile = NormalizeDigits(request.Mobile ?? "").Trim();
@@ -1072,6 +1074,10 @@ app.MapPatch("/api/users/{nationalId}/mobile", async (string nationalId, UpdateM
     }
     account.Mobile = digits;
     account.MobileOverriddenByAdmin = true;
+    var unsentMessages = await db.BaleMessageQueue
+        .Where(message => message.NationalId == normalizedId && message.Status != "sent")
+        .ToListAsync();
+    foreach (var queuedMessage in unsentMessages) queuedMessage.Mobile = digits;
     await db.SaveChangesAsync();
     return Results.Ok(new { person.NationalId, person.DisplayName, Mobile = account.Mobile });
 });
