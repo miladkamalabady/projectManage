@@ -154,6 +154,7 @@ public sealed class ResolutionAttachment
 {
     public int Id { get; set; }
     public int ResolutionId { get; set; }
+    public int? ResolutionReportId { get; set; }
     [JsonIgnore]
     public Resolution? Resolution { get; set; }
     public string OriginalName { get; set; } = "";
@@ -299,6 +300,7 @@ public sealed class AppDb(DbContextOptions<AppDb> options, ILogger<AppDb> logger
         model.Entity<ResolutionAssignment>().HasOne(x => x.Resolution).WithMany(x => x.Assignments).HasForeignKey(x => x.ResolutionId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<ResolutionProgress>().ToTable("ResolutionProgress");
         model.Entity<ResolutionAttachment>().ToTable("ResolutionAttachments");
+        model.Entity<ResolutionAttachment>().HasIndex(x => x.ResolutionReportId);
         model.Entity<UserNotification>().HasIndex(x => new { x.NationalId, x.ResolutionId, x.Type, x.DateKey }).IsUnique();
         model.Entity<ResolutionEvent>().ToTable("ResolutionEvents");
         model.Entity<ResolutionReport>().ToTable("ResolutionReports");
@@ -503,6 +505,7 @@ public static class SchemaCompatibility
         {
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.ResolutionReports', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.ResolutionReports', N'ApprovalStatus') IS NULL ALTER TABLE dbo.ResolutionReports ADD ApprovalStatus nvarchar(max) NOT NULL CONSTRAINT DF_ResolutionReports_ApprovalStatus DEFAULT N'pending';");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.ResolutionReports', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.ResolutionReports', N'AdminFeedback') IS NULL ALTER TABLE dbo.ResolutionReports ADD AdminFeedback nvarchar(max) NOT NULL CONSTRAINT DF_ResolutionReports_AdminFeedback DEFAULT N'';");
+            await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.ResolutionAttachments', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.ResolutionAttachments', N'ResolutionReportId') IS NULL ALTER TABLE dbo.ResolutionAttachments ADD ResolutionReportId int NULL;");
             return;
         }
         var columns = await ReadColumns(db, "Resolutions");
@@ -522,6 +525,8 @@ public static class SchemaCompatibility
         var reportColumns = await ReadColumns(db, "ResolutionReports");
         if (reportColumns.Count > 0 && !reportColumns.Contains("ApprovalStatus")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE ResolutionReports ADD COLUMN ApprovalStatus TEXT NOT NULL DEFAULT 'pending';");
         if (reportColumns.Count > 0 && !reportColumns.Contains("AdminFeedback")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE ResolutionReports ADD COLUMN AdminFeedback TEXT NOT NULL DEFAULT '';");
+        var attachmentColumns = await ReadColumns(db, "ResolutionAttachments");
+        if (attachmentColumns.Count > 0 && !attachmentColumns.Contains("ResolutionReportId")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE ResolutionAttachments ADD COLUMN ResolutionReportId INTEGER NULL;");
         var userColumns = await ReadColumns(db, "Users");
         var userTextColumnSql = new Dictionary<string, string>
         {
