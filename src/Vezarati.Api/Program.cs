@@ -708,6 +708,30 @@ app.MapGet("/api/reports/submissions", async (AppDb db) =>
         .ToList();
     var directory = await db.Users.AsNoTracking().ToDictionaryAsync(person => person.NationalId, person => (person.DisplayName, person.Title));
     var positions = await db.Users.AsNoTracking().ToDictionaryAsync(user => user.NationalId, user => user.OrgPositionDesc);
+    var resolutionIds = reports.Select(report => report.ResolutionId).Distinct().ToList();
+    var nationalIds = reports.Select(report => report.NationalId).Distinct().ToList();
+    var attachments = await db.Attachments.AsNoTracking()
+        .Where(file => resolutionIds.Contains(file.ResolutionId) && nationalIds.Contains(file.UploadedBy))
+        .Select(file => new
+        {
+            file.Id,
+            file.ResolutionId,
+            file.UploadedBy,
+            file.OriginalName,
+            file.ContentType,
+            file.Size,
+            file.UploaderName,
+            file.ApprovedForAll,
+            file.UploadedAt
+        })
+        .ToListAsync();
+    var attachmentsByReporter = attachments
+        .GroupBy(file => (file.ResolutionId, file.UploadedBy))
+        .ToDictionary(group => group.Key, group => group.ToList());
+    var progressByReporter = await db.Progress.AsNoTracking()
+        .Where(progress => resolutionIds.Contains(progress.ResolutionId) && nationalIds.Contains(progress.NationalId))
+        .ToDictionaryAsync(progress => (progress.ResolutionId, progress.NationalId));
+
     return Results.Ok(reports.Select(report => new
     {
         report.Id,
@@ -721,7 +745,10 @@ app.MapGet("/api/reports/submissions", async (AppDb db) =>
         report.ReportType,
         report.PeriodKey,
         report.SubmittedAt,
-        DueDate = report.ReportType == "periodic" ? report.PeriodKey.Split(':').LastOrDefault() : null
+        DueDate = report.ReportType == "periodic" ? report.PeriodKey.Split(':').LastOrDefault() : null,
+        ApprovalStatus = progressByReporter.GetValueOrDefault((report.ResolutionId, report.NationalId))?.ApprovalStatus ?? "none",
+        AdminFeedback = progressByReporter.GetValueOrDefault((report.ResolutionId, report.NationalId))?.AdminFeedback ?? "",
+        Attachments = attachmentsByReporter.GetValueOrDefault((report.ResolutionId, report.NationalId), new List<object>())
     }));
 });
 
