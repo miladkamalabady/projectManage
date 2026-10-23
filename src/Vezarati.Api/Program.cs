@@ -626,7 +626,6 @@ app.MapPost("/api/resolutions/{id:int}/completion-report", async (int id, HttpRe
     var submittedAt = DateTimeOffset.UtcNow;
     var report = new ResolutionReport { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = text, ReportType = "completion", PeriodKey = "completion:" + submittedAt.ToUnixTimeMilliseconds(), ApprovalStatus = "pending", SubmittedAt = submittedAt };
     db.ResolutionReports.Add(report);
-    reportId = report.Id;
     db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = "گزارش اقدام برای بررسی ادمین ارسال شد.", CreatedAt = submittedAt });
     var notifyKey = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
     var reportSummary = text.Length > 500 ? text[..500] + "…" : text;
@@ -637,6 +636,7 @@ app.MapPost("/api/resolutions/{id:int}/completion-report", async (int id, HttpRe
         + "🔎 برای مشاهدهٔ گزارش کامل، جزئیات مصوبه را در سامانه بررسی کنید.";
     db.Notifications.Add(new UserNotification { NationalId = primaryAdminNationalId, ResolutionId = id, Type = "report", DateKey = id + ":" + notifyKey, Text = reportNotificationText, CreatedAt = DateTimeOffset.UtcNow });
     await db.SaveChangesAsync();
+    reportId = report.Id;
 
     var uploadDirectory = Path.Combine(environment.ContentRootPath, "data", "uploads");
     Directory.CreateDirectory(uploadDirectory);
