@@ -494,7 +494,6 @@ export default function App() {
     (!reportGroupQuery.trim() || group.name.toLocaleLowerCase("fa").includes(reportGroupQuery.trim().toLocaleLowerCase("fa")))
     && (reportViewTab === "units" ? reportGroupKind(group) === "unit" : reportViewTab === "groups" ? reportGroupKind(group) !== "unit" : false)
   );
-  const visibleGroupReport = groupReport.filter(group => reportViewTab === "units" ? reportGroupKind(reportableGroups.find(item => item.id === group.id) ?? { id: group.id, name: group.name, members: [] }) === "unit" : reportViewTab === "groups" && reportGroupKind(reportableGroups.find(item => item.id === group.id) ?? { id: group.id, name: group.name, members: [] }) !== "unit");
   const groupReport = reportableGroups.filter(group => selectedReportGroupIds.length === 0 || selectedReportGroupIds.includes(String(group.id))).map(group => {
     const items = activeResolutions.filter(item => item.groupId === group.id || item.groupAssignments?.some(assignment => assignment.groupId === group.id));
     const states = items.flatMap(item => {
@@ -507,6 +506,7 @@ export default function App() {
     const groupPending = states.filter(status => status === "before" || status === "in_progress").length;
     return { id: group.id, name: group.name, resolutions: items.length, total: groupTotal, completed: groupCompleted, delayed: groupDelayed, pending: groupPending, percent: groupTotal ? Math.round(groupCompleted * 100 / groupTotal) : 0 };
   }).sort((left, right) => right.percent - left.percent || right.resolutions - left.resolutions);
+  const visibleGroupReport = groupReport.filter(group => reportViewTab === "units" ? reportGroupKind(reportableGroups.find(item => item.id === group.id) ?? { id: group.id, name: group.name, members: [] }) === "unit" : reportViewTab === "groups" && reportGroupKind(reportableGroups.find(item => item.id === group.id) ?? { id: group.id, name: group.name, members: [] }) !== "unit");
   const wallItems = wallStatusFilter === "all" ? [] : mine.filter(item => { const status = isAdmin ? item.status : item.progress?.find(progress => progress.nationalId === viewerId)?.status ?? item.status; return wallStatusFilter === "pending" ? status === "before" || status === "in_progress" : status === wallStatusFilter; });
   const unreadNotifications = notifications.filter(item => !item.isRead).length;
   const notificationFeed = useMemo(() => [
