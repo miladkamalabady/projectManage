@@ -593,7 +593,12 @@ app.MapPost("/api/resolutions/{id:int}/completion-report", async (int id, Comple
     db.ResolutionReports.Add(new ResolutionReport { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = text, ReportType = "completion", PeriodKey = "completion:" + submittedAt.ToUnixTimeMilliseconds(), SubmittedAt = submittedAt });
     db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = "گزارش اقدام برای بررسی ادمین ارسال شد.", CreatedAt = DateTimeOffset.UtcNow });
     var notifyKey = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
-    db.Notifications.Add(new UserNotification { NationalId = primaryAdminNationalId, ResolutionId = id, Type = "report", DateKey = id + ":" + notifyKey, Text = "گزارش اقدام جدید برای مصوبه " + resolution.Number + " ثبت شد.", CreatedAt = DateTimeOffset.UtcNow });
+    var reportSummary = text.Length > 500 ? text[..500] + "…" : text;
+    var reportNotificationText = "📥 گزارش اقدام جدید برای مصوبه شماره " + resolution.Number + " ثبت شد.\n"
+        + "👤 گزارش‌دهنده: " + personName + "\n"
+        + "📝 شرح اقدام: " + reportSummary + "\n"
+        + "🔎 برای مشاهدهٔ گزارش کامل، جزئیات مصوبه را در سامانه بررسی کنید.";
+    db.Notifications.Add(new UserNotification { NationalId = primaryAdminNationalId, ResolutionId = id, Type = "report", DateKey = id + ":" + notifyKey, Text = reportNotificationText, CreatedAt = DateTimeOffset.UtcNow });
     await db.SaveChangesAsync();
     await ResolutionStatusUpdater.RefreshResolutionStatuses(db);
     return Results.Ok(progress);
