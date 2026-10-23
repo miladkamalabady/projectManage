@@ -676,7 +676,7 @@ public static class BaleMessageText
     public static string WithDetectedResolutionTags(string text)
     {
         var matches = System.Text.RegularExpressions.Regex.Matches(text, @"مصوبه\s+(?:شماره\s*)?([\p{Nd}]+(?:[/._-][\p{Nd}]+)*)");
-        var numbers = matches.Select(match => match.Groups[1].Value).Distinct(StringComparer.Ordinal).ToList();
+        var numbers = matches.Cast<System.Text.RegularExpressions.Match>().Select(match => match.Groups[1].Value).Distinct(StringComparer.Ordinal).ToList();
         foreach (var number in numbers)
             text = WithResolutionTag(text, number);
         return text;
