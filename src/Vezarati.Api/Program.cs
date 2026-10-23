@@ -1475,6 +1475,16 @@ app.MapPost("/api/resolutions/{id:int}/warnings", async (int id, WarningRecipien
             CreatedAtUnixMs = now.ToUnixTimeMilliseconds(),
             NextAttemptAtUnixMs = now.ToUnixTimeMilliseconds()
         });
+        db.BrowserPushQueue.Add(new BrowserPushQueueItem
+        {
+            NationalId = nationalId,
+            Title = "هشدار پیگیری مصوبه شماره " + resolution.Number,
+            Text = message,
+            Url = "/?resolution=" + resolution.Id,
+            Status = "pending",
+            CreatedAtUnixMs = now.ToUnixTimeMilliseconds(),
+            NextAttemptAtUnixMs = now.ToUnixTimeMilliseconds()
+        });
         queued++;
         results.Add(new { nationalId, displayName = name, queued = true, inApp = true, reason = "" });
     }
