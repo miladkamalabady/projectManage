@@ -584,10 +584,10 @@ export default function App() {
     const postOptions = new Map<string, AssignmentOption>();
     for (const user of users) {
       const rawTitle = user.title?.trim() || "";
-      if (!rawTitle || /^(عضو|کاربر)(\\s|$)/.test(rawTitle)) continue;
-      const isManagerOrUnitLead = /مدیر\\s*کل|معاون|رئیس|سرپرست/.test(rawTitle);
+      if (!rawTitle || /^(عضو|کاربر)(\s|$)/.test(rawTitle)) continue;
+      const isManagerOrUnitLead = /مدیر\s*کل|معاون|رئیس|سرپرست/.test(rawTitle);
       if (!groupMemberIds.has(user.nationalId) && !isManagerOrUnitLead) continue;
-      const title = rawTitle.replace(/^مدیرکل\\s+(?:استان|شهر)\\s+/, "مدیرکل ").replace(/^مدیر\\s+کل\\s+(?:استان|شهر)\\s+/, "مدیرکل ");
+      const title = rawTitle.replace(/^مدیرکل\s+(?:استان|شهر)\s+/, "مدیرکل ").replace(/^مدیر\s+کل\s+(?:استان|شهر)\s+/, "مدیرکل ");
       const key = `post:${user.nationalId}`;
       const detail = [user.organizationUnit, user.province].filter(Boolean).join(" · ") || "پست ثبت‌شده در فهرست کاربران";
       postOptions.set(key, { key, kind: "post", label: `${title} (${user.displayName})`, detail: `پست مسئول · ${detail}`, nationalId: user.nationalId });
