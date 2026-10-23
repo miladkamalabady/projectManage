@@ -346,6 +346,7 @@ app.MapPut("/api/resolutions/{id:int}", async (int id, ResolutionCreate request,
     var priorGroupIds = record.GroupAssignments.Select(assignment => assignment.GroupId).ToList();
     priorRecipients.UnionWith(await db.GroupMembers.Where(member => priorGroupIds.Contains(member.GroupId)).Select(member => member.NationalId).ToListAsync());
     var wasPublic = record.PublishToAll;
+    var scheduleChanged = record.MeetingDate != request.MeetingDate || record.StartDate != request.StartDate || record.DueDate != request.DueDate;
     record.MeetingDate = request.MeetingDate;
     record.StartDate = request.StartDate;
     record.StartDateJalali = request.StartDate is null ? "" : (request.StartDateJalali ?? JalaliDate.FromGregorian(request.StartDate.Value));
@@ -357,7 +358,8 @@ app.MapPut("/api/resolutions/{id:int}", async (int id, ResolutionCreate request,
     record.PublishToAll = request.PublishToAll;
     record.MeetingDateJalali = string.IsNullOrWhiteSpace(request.MeetingDateJalali) ? JalaliDate.FromGregorian(request.MeetingDate) : request.MeetingDateJalali;
     record.Number = request.Number.Trim(); record.Text = request.Text.Trim(); record.Notes = request.Notes?.Trim() ?? "";
-    if (record.Status is not ("completed" or "cancelled")) record.Status = ResolutionStatusUpdater.TimeBasedResolutionStatus(record.MeetingDate, request.StartDate.Value, request.DueDate, DateOnly.FromDateTime(DateTime.Today)); record.GroupId = request.GroupId; record.UpdatedAt = DateTimeOffset.UtcNow;
+    if (record.Status != "cancelled" && (scheduleChanged || record.Status != "completed")) record.Status = ResolutionStatusUpdater.TimeBasedResolutionStatus(record.MeetingDate, request.StartDate.Value, request.DueDate, DateOnly.FromDateTime(DateTime.Today));
+    record.GroupId = request.GroupId; record.UpdatedAt = DateTimeOffset.UtcNow;
     db.ResolutionGroups.RemoveRange(record.GroupAssignments);
     foreach (var groupId in groupIds) record.GroupAssignments.Add(new ResolutionGroupAssignment { ResolutionId = id, GroupId = groupId });
     db.Assignments.RemoveRange(record.Assignments);
@@ -369,7 +371,9 @@ app.MapPut("/api/resolutions/{id:int}", async (int id, ResolutionCreate request,
     foreach (var recipient in newRecipients.Except(priorRecipients))
         db.Notifications.Add(new UserNotification { NationalId = recipient, ResolutionId = id, Type = "assigned", DateKey = id + ":" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), Text = "مصوبه " + record.Number + " برای پیگیری به شما ارجاع شد.", CreatedAt = DateTimeOffset.UtcNow });
     db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = primaryAdminNationalId, UserName = "مدیر دفتر وزارتی", Text = "اطلاعات مصوبه، مهلت و ارجاع‌های آن ویرایش شد.", CreatedAt = DateTimeOffset.UtcNow });
-    await db.SaveChangesAsync(); return Results.Ok(record);
+    await db.SaveChangesAsync();
+    await ResolutionStatusUpdater.RefreshResolutionStatuses(db);
+    return Results.Ok(record);
 });
 app.MapDelete("/api/resolutions/{id:int}", async (int id, AppDb db) =>
 {
