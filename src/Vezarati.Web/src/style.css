@@ -216,7 +216,7 @@
 .reports-main-tabs button{flex:0 0 auto;display:inline-flex;align-items:center;gap:8px;border:1px solid #dfe8e4;background:#fff;color:#62716c;border-radius:10px;padding:10px 13px;font:inherit;font-size:12px;font-weight:700;white-space:nowrap;cursor:pointer}
 .reports-main-tabs button:hover{border-color:#9fc8b7;color:#226d53}
 .reports-main-tabs button.active{background:#e8f4ef;border-color:#9fc8b7;color:#176847}
-.reports-page .bale-settings-panel,.reports-page .report-actions-head,.reports-page .report-kpis,.reports-page .bale-message-report,.reports-page .submitted-reports-panel,.reports-page .review-queue,.reports-page .manager-report-grid,.reports-page .event-report,.reports-page .individual-report{display:none}
+.reports-page .bale-settings-panel,.reports-page .report-kpis,.reports-page .bale-message-report,.reports-page .submitted-reports-panel,.reports-page .review-queue,.reports-page .manager-report-grid,.reports-page .event-report,.reports-page .individual-report{display:none}
 .reports-page .manager-report-grid>*{display:none}
 .reports-tab-overview .report-actions-head{display:flex}
 .reports-tab-overview .report-kpis{display:grid}
