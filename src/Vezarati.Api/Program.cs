@@ -1136,7 +1136,8 @@ app.MapGet("/api/users/search", async (string? q, AppDb db) =>
     var term = (q ?? "").Trim();
     if (term.Length < 2) return Results.Ok(Array.Empty<object>());
     static string Normalize(string value) => value
-        .Replace("ي", "ی").Replace("ك", "ک").Replace("‌", " ")
+        .Normalize(System.Text.NormalizationForm.FormKC)
+        .Replace("ي", "ی").Replace("ى", "ی").Replace("ك", "ک").Replace("‌", " ")
         .Trim().ToLowerInvariant();
     var normalized = Normalize(term);
     var digits = new string(term.Where(char.IsDigit).ToArray());
