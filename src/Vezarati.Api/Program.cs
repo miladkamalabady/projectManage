@@ -1448,9 +1448,11 @@ app.MapPost("/api/reports/warnings/{nationalId}", async (string nationalId, AppD
         .Include(item => item.Assignments).Include(item => item.Progress).Include(item => item.Group).ThenInclude(group => group!.Members)
         .Include(item => item.GroupAssignments).ThenInclude(assignment => assignment.Group).ThenInclude(group => group!.Members).ToListAsync(context.RequestAborted);
     var delayed = records.Where(item =>
-        (item.Progress.FirstOrDefault(progress => progress.NationalId == normalizedId)?.Status ?? item.Status) == "delayed"
-        || (((item.Progress.FirstOrDefault(progress => progress.NationalId == normalizedId)?.Status ?? item.Status) != "completed")
-            && item.DueDate.HasValue && item.DueDate.Value < today))
+    {
+        var status = item.Progress.FirstOrDefault(progress => progress.NationalId == normalizedId)?.Status ?? item.Status;
+        return status == "delayed" || status == "in_progress"
+            || (status != "completed" && item.DueDate.HasValue && item.DueDate.Value < today);
+    })
         .Where(item => item.Assignments.Any(assignment => assignment.NationalId == normalizedId)
             || item.Group?.Members.Any(member => member.NationalId == normalizedId) == true
             || item.GroupAssignments.Any(assignment => assignment.Group?.Members.Any(member => member.NationalId == normalizedId) == true))
