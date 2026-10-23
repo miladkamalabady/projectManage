@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using System.Text.Json.Serialization;
 
 namespace Vezarati.Api.Models;
@@ -125,6 +127,20 @@ public sealed class UserNotification
     public DateTimeOffset CreatedAt { get; set; }
 }
 
+public sealed class BaleQueuedMessage
+{
+    public long Id { get; set; }
+    public string NationalId { get; set; } = "";
+    public string Mobile { get; set; } = "";
+    public string Text { get; set; } = "";
+    public string Status { get; set; } = "pending";
+    public int Attempts { get; set; }
+    public long CreatedAtUnixMs { get; set; }
+    public long NextAttemptAtUnixMs { get; set; }
+    public long? SentAtUnixMs { get; set; }
+    public string LastError { get; set; } = "";
+}
+
 public sealed class ResolutionAttachment
 {
     public int Id { get; set; }
@@ -199,7 +215,7 @@ public sealed class AppSetting
     public string Value { get; set; } = "";
 }
 
-public sealed class AppDb(DbContextOptions<AppDb> options, MessageDispatcher messageSender, ILogger<AppDb> logger) : DbContext(options)
+public sealed class AppDb(DbContextOptions<AppDb> options, ILogger<AppDb> logger) : DbContext(options)
 {
     public DbSet<Resolution> Resolutions => Set<Resolution>();
     public DbSet<ResolutionReport> ResolutionReports => Set<ResolutionReport>();
@@ -214,48 +230,60 @@ public sealed class AppDb(DbContextOptions<AppDb> options, MessageDispatcher mes
     public DbSet<DirectoryUser> Directory => Set<DirectoryUser>();
     public DbSet<AppUser> Users => Set<AppUser>();
     public DbSet<AppSetting> Settings => Set<AppSetting>();
+    public DbSet<BaleQueuedMessage> BaleMessageQueue => Set<BaleQueuedMessage>();
 
     public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
         var pendingNotifications = ChangeTracker.Entries<UserNotification>()
-            .Where(entry => entry.State == EntityState.Added)
+            .Where(entry => entry.State == EntityState.Added && entry.Entity.Type != "bale-warning")
             .Select(entry => entry.Entity)
             .ToList();
 
-        var saved = await base.SaveChangesAsync(cancellationToken);
-        if (pendingNotifications.Count == 0) return saved;
-
-        try
+        if (pendingNotifications.Count > 0)
         {
-            var enabled = await Settings.AsNoTracking().AnyAsync(
-                setting => setting.Key == "BaleNotificationsEnabled" && setting.Value == "true",
-                CancellationToken.None);
-            if (!enabled) return saved;
-
-            var recipientIds = pendingNotifications.Select(notification => notification.NationalId).Distinct().ToList();
-            var userMobiles = await Users.AsNoTracking()
-                .Where(user => recipientIds.Contains(user.NationalId) && user.Mobile != "")
-                .Select(user => new { user.NationalId, user.Mobile })
-                .ToListAsync(CancellationToken.None);
-            var mobiles = userMobiles
-                .GroupBy(user => user.NationalId)
-                .ToDictionary(group => group.Key, group => group.First().Mobile);
-
-            foreach (var notification in pendingNotifications)
-                if (mobiles.TryGetValue(notification.NationalId, out var mobile))
-                    await messageSender.SendAsync(mobile, notification.Text, CancellationToken.None);
+            try
+            {
+                var enabled = await Settings.AsNoTracking().AnyAsync(
+                    setting => setting.Key == "BaleNotificationsEnabled" && setting.Value == "true",
+                    CancellationToken.None);
+                if (enabled)
+                {
+                    var recipientIds = pendingNotifications.Select(notification => notification.NationalId).Distinct().ToList();
+                    var mobiles = await Users.AsNoTracking()
+                        .Where(user => recipientIds.Contains(user.NationalId) && user.Mobile != "")
+                        .Select(user => new { user.NationalId, user.Mobile })
+                        .ToListAsync(CancellationToken.None);
+                    var mobileById = mobiles.GroupBy(user => user.NationalId)
+                        .ToDictionary(group => group.Key, group => group.First().Mobile);
+                    foreach (var entry in ChangeTracker.Entries<AppUser>().Where(entry => entry.State != EntityState.Deleted && recipientIds.Contains(entry.Entity.NationalId)))
+                        mobileById[entry.Entity.NationalId] = entry.Entity.Mobile;
+                    foreach (var notification in pendingNotifications)
+                        if (mobileById.TryGetValue(notification.NationalId, out var mobile) && !string.IsNullOrWhiteSpace(mobile))
+                            BaleMessageQueue.Add(new BaleQueuedMessage
+                            {
+                                NationalId = notification.NationalId,
+                                Mobile = mobile,
+                                Text = notification.Text,
+                                Status = "pending",
+                                CreatedAtUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                                NextAttemptAtUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                            });
+                }
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(exception, "Could not enqueue automatic Bale notifications.");
+            }
         }
-        catch (Exception exception)
-        {
-            logger.LogWarning(exception, "Automatic Bale notification delivery failed.");
-        }
 
-        return saved;
+        return await base.SaveChangesAsync(cancellationToken);
     }
 
     protected override void OnModelCreating(ModelBuilder model)
     {
         model.Entity<AppSetting>().ToTable("Settings").HasKey(x => x.Key);
+        model.Entity<BaleQueuedMessage>().ToTable("BaleMessageQueue");
+        model.Entity<BaleQueuedMessage>().HasIndex(x => new { x.Status, x.NextAttemptAtUnixMs, x.CreatedAtUnixMs });
         model.Entity<ResolutionGroup>().HasIndex(x => x.Name).IsUnique();
         model.Entity<GroupMember>().HasIndex(x => new { x.GroupId, x.NationalId }).IsUnique();
         model.Entity<DirectoryUser>().HasIndex(x => x.NationalId).IsUnique();
@@ -507,6 +535,8 @@ public static class SchemaCompatibility
                 await db.Database.ExecuteSqlRawAsync(sql);
         await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_Notifications_NationalId_ResolutionId_Type_DateKey ON Notifications (NationalId, ResolutionId, Type, DateKey);");
         await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS Settings (Key TEXT NOT NULL CONSTRAINT PK_Settings PRIMARY KEY, Value TEXT NOT NULL DEFAULT '');");
+        await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS BaleMessageQueue (Id INTEGER NOT NULL CONSTRAINT PK_BaleMessageQueue PRIMARY KEY AUTOINCREMENT, NationalId TEXT NOT NULL, Mobile TEXT NOT NULL, Text TEXT NOT NULL, Status TEXT NOT NULL DEFAULT 'pending', Attempts INTEGER NOT NULL DEFAULT 0, CreatedAtUnixMs INTEGER NOT NULL, NextAttemptAtUnixMs INTEGER NOT NULL, SentAtUnixMs INTEGER NULL, LastError TEXT NOT NULL DEFAULT '');");
+        await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS IX_BaleMessageQueue_Status_NextAttemptAtUnixMs_CreatedAtUnixMs ON BaleMessageQueue (Status, NextAttemptAtUnixMs, CreatedAtUnixMs);");
     }
 
     private static async Task<HashSet<string>> ReadColumns(AppDb db, string table)
@@ -518,6 +548,71 @@ public static class SchemaCompatibility
         await using var reader = await command.ExecuteReaderAsync(); while (await reader.ReadAsync()) columns.Add(reader.GetString(1));
         return columns;
     }
+}
+
+public static class BaleMessageText
+{
+    private static string Clip(string? value, int length)
+    {
+        var clean = string.Join(" ", (value ?? "").Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return clean.Length <= length ? clean : clean[..length] + "…";
+    }
+
+    private static string Date(DateOnly? date, string? jalali)
+    {
+        if (!date.HasValue) return "تعیین نشده";
+        return string.IsNullOrWhiteSpace(jalali) ? JalaliDate.FromGregorian(date.Value).Replace('.', '/') : jalali.Replace('.', '/');
+    }
+
+    public static string ForAssignment(Resolution item)
+    {
+        var text = Clip(item.Text, 500);
+        var notes = Clip(item.Notes, 260);
+        return "📬 وظیفهٔ جدید از دفتر وزارتی\n"
+            + "سلام، یک مصوبه برای پیگیری به شما ارجاع شده است.\n"
+            + "🔢 شماره مصوبه: " + item.Number + "\n"
+            + "📝 موضوع: " + text + "\n"
+            + "📅 تاریخ جلسه: " + Date(item.MeetingDate, item.MeetingDateJalali) + "\n"
+            + "🚀 شروع پیگیری: " + Date(item.StartDate, item.StartDateJalali) + "\n"
+            + "⏰ مهلت اقدام: " + Date(item.DueDate, item.DueDateJalali)
+            + (string.IsNullOrWhiteSpace(notes) ? "" : "\nℹ️ توضیحات: " + notes)
+            + "\nلطفاً در سامانه «پیگیری مصوبات» جزئیات را بررسی و وضعیت یا گزارش اقدام خود را ثبت کنید.";
+    }
+
+    public static string ForWarning(Resolution item, string recipientName, string status)
+    {
+        var text = Clip(item.Text, 420);
+        var notes = Clip(item.Notes, 180);
+        return "🚨 یادآوری پیگیری از دفتر وزارتی\n"
+            + "سلام " + Clip(recipientName, 80) + " گرامی،\n"
+            + "برای وظیفهٔ شما در این مصوبه، وضعیت «" + status + "» ثبت شده است.\n"
+            + "🔢 شماره مصوبه: " + item.Number + "\n"
+            + "📝 موضوع: " + text + "\n"
+            + "📅 تاریخ جلسه: " + Date(item.MeetingDate, item.MeetingDateJalali) + "\n"
+            + "🚀 شروع پیگیری: " + Date(item.StartDate, item.StartDateJalali) + "\n"
+            + "⏳ مهلت اقدام: " + Date(item.DueDate, item.DueDateJalali)
+            + (string.IsNullOrWhiteSpace(notes) ? "" : "\nℹ️ توضیحات: " + notes)
+            + "\nلطفاً جزئیات را در سامانه «پیگیری مصوبات» بررسی کنید و گزارش اقدام یا وضعیت جدید را ثبت کنید.";
+    }
+    public static string ForOverdueWarnings(string recipientName, IEnumerable<Resolution> items, string nationalId)
+    {
+        var resolutions = items.Take(8).ToList();
+        var details = resolutions.Select(item =>
+        {
+            var status = item.Progress.FirstOrDefault(progress => progress.NationalId == nationalId)?.Status ?? item.Status;
+            var label = status == "delayed" ? "دارای تأخیر" : "در حال اجرا";
+            return "• مصوبه " + item.Number + " | " + label + " | سررسید: " + Date(item.DueDate, item.DueDateJalali)
+                + " | " + Clip(item.Text, 150);
+        });
+        var total = items.Count();
+        var extra = total > resolutions.Count ? "\nو " + (total - resolutions.Count) + " مصوبهٔ دیگر." : "";
+        return "⏰ یادآوری مهلت از دفتر وزارتی\n"
+            + "سلام " + Clip(recipientName, 80) + " گرامی،\n"
+            + "برای پیگیری‌های زیر، مهلت اقدام گذشته است:\n"
+            + string.Join("\n", details) + extra
+            + "\nلطفاً در سامانه «پیگیری مصوبات» وضعیت را بررسی و اقدام یا گزارش خود را ثبت کنید.";
+    }
+
 }
 
 public sealed record BaleDeliveryResult(bool Sent, string Reason);
@@ -730,5 +825,86 @@ public sealed class MessageDispatcher(IHttpClientFactory clients, IConfiguration
             }
         }
         return null;
+    }
+}
+
+public sealed class BaleMessageQueueService(IServiceScopeFactory scopeFactory, ILogger<BaleMessageQueueService> logger) : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        using var scope = scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDb>();
+        var sender = scope.ServiceProvider.GetRequiredService<MessageDispatcher>();
+
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                var batch = await db.BaleMessageQueue
+                    .Where(message => (message.Status == "pending" || message.Status == "processing") && message.NextAttemptAtUnixMs <= now)
+                    .OrderBy(message => message.NextAttemptAtUnixMs)
+                    .ThenBy(message => message.CreatedAtUnixMs)
+                    .Take(5)
+                    .ToListAsync(stoppingToken);
+
+                if (batch.Count == 0)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
+                    continue;
+                }
+
+                foreach (var message in batch)
+                {
+                    message.Status = "processing";
+                    message.NextAttemptAtUnixMs = now + (5 * 60 * 1000);
+                }
+                await db.SaveChangesAsync(stoppingToken);
+
+                var deliveries = await Task.WhenAll(batch.Select(async message =>
+                    (Message: message, Result: await sender.SendWithResultAsync(message.Mobile, message.Text, stoppingToken))));
+
+                foreach (var (message, result) in deliveries)
+                {
+                    message.Attempts++;
+                    if (result.Sent)
+                    {
+                        message.Status = "sent";
+                        message.SentAtUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                        message.LastError = "";
+                    }
+                    else
+                    {
+                        message.LastError = result.Reason.Length <= 500 ? result.Reason : result.Reason[..500];
+                        if (message.Attempts >= 8)
+                        {
+                            message.Status = "failed";
+                            logger.LogError("Bale message {QueueId} to {NationalId} failed after {Attempts} attempts: {Reason}",
+                                message.Id, message.NationalId, message.Attempts, message.LastError);
+                        }
+                        else
+                        {
+                            message.Status = "pending";
+                            var retrySeconds = Math.Min(1800, 20 * (1 << Math.Min(message.Attempts, 6)));
+                            message.NextAttemptAtUnixMs = DateTimeOffset.UtcNow.AddSeconds(retrySeconds).ToUnixTimeMilliseconds();
+                        }
+                    }
+                }
+                await db.SaveChangesAsync(stoppingToken);
+                db.ChangeTracker.Clear();
+                await Task.Delay(TimeSpan.FromMilliseconds(300), stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception exception)
+            {
+                db.ChangeTracker.Clear();
+                logger.LogError(exception, "Bale message queue processing failed.");
+                try { await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken); }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+            }
+        }
     }
 }
