@@ -269,7 +269,8 @@ app.MapPost("/api/push/subscriptions", async (SaveBrowserPushSubscriptionRequest
 {
     var nationalId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
     if (string.IsNullOrWhiteSpace(nationalId)) return Results.Unauthorized();
-    if (!Uri.TryCreate(request.Endpoint, UriKind.Absolute, out var endpoint) || endpoint.Scheme != Uri.UriSchemeHttps
+    if (request.Keys is null || string.IsNullOrWhiteSpace(request.Endpoint) || request.Endpoint.Length > 2048
+        || !Uri.TryCreate(request.Endpoint, UriKind.Absolute, out var endpoint) || endpoint.Scheme != Uri.UriSchemeHttps
         || string.IsNullOrWhiteSpace(request.Keys.P256dh) || request.Keys.P256dh.Length > 512
         || string.IsNullOrWhiteSpace(request.Keys.Auth) || request.Keys.Auth.Length > 512)
         return Results.BadRequest(new { error = "اطلاعات اشتراک اعلان مرورگر معتبر نیست." });
