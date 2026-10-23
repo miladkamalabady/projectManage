@@ -410,7 +410,19 @@ app.MapPatch("/api/resolutions/{id:int}/status", async (int id, ResolutionStatus
         progress.UpdatedAt = DateTimeOffset.UtcNow;
         progress.ApprovalStatus = "none";
         if (request.Status != "completed") progress.AdminFeedback = "";
-        db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = isAdmin ? primaryAdminNationalId : nationalId, UserName = isAdmin ? "مدیر دفتر وزارتی" : (context.User.Identity?.Name ?? "کاربر"), Text = (isAdmin ? "وضعیت پیگیری " + targetNationalId : "وضعیت پیگیری کاربر") + " به «" + request.Status + "» تغییر کرد.", CreatedAt = DateTimeOffset.UtcNow });
+        var targetName = await db.Directory.Where(person => person.NationalId == targetNationalId).Select(person => person.DisplayName).FirstOrDefaultAsync()
+            ?? await db.Users.Where(person => person.NationalId == targetNationalId).Select(person => person.DisplayName).FirstOrDefaultAsync()
+            ?? await db.GroupMembers.Where(person => person.NationalId == targetNationalId).Select(person => person.DisplayName).FirstOrDefaultAsync()
+            ?? "عضو مصوبه";
+        var statusName = request.Status switch { "completed" => "اجرا شده", "rejected" => "رد شده", "in_progress" => "در حال اجرا", _ => request.Status };
+        db.Events.Add(new ResolutionEvent
+        {
+            ResolutionId = id,
+            NationalId = isAdmin ? primaryAdminNationalId : nationalId,
+            UserName = isAdmin ? "مدیر دفتر وزارتی" : targetName,
+            Text = "وضعیت پیگیری " + targetName + " به «" + statusName + "» تغییر کرد.",
+            CreatedAt = DateTimeOffset.UtcNow
+        });
         record.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync();
         await ResolutionStatusUpdater.RefreshResolutionStatuses(db);
