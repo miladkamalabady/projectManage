@@ -208,3 +208,6 @@
 .report-review-feedback{display:grid;gap:6px;margin-top:12px;font-size:.9rem;font-weight:700}.report-review-feedback textarea{width:100%;resize:vertical;border:1px solid #cbd8d1;border-radius:9px;padding:10px 12px;font:inherit;line-height:1.8}.review-actions button:disabled{opacity:.5;cursor:not-allowed}
 
 .notification-heading-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}.mark-all-read{white-space:nowrap}.mark-all-read:disabled{opacity:.55;cursor:not-allowed}
+
+/* Keep all sidebar options reachable on short viewports. */
+.sidebar{height:100vh;height:100dvh;overflow:hidden}.sidebar nav{flex:1;min-height:0;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#cbd8d4 transparent}.sidebar nav::-webkit-scrollbar{width:6px}.sidebar nav::-webkit-scrollbar-thumb{background:#cbd8d4;border-radius:8px}@media(max-width:720px){.sidebar{height:auto;overflow:visible}.sidebar nav{flex:initial;overflow-x:auto;overflow-y:hidden}}
