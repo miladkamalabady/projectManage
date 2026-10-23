@@ -167,6 +167,8 @@ export default function App() {
   const [viewerId, setViewerId] = useState("");
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authReady, setAuthReady] = useState(false);
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
   const isAdmin = authUser?.role === "ادمین";
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [resolutions, setResolutions] = useState<Resolution[]>([]);
@@ -280,6 +282,19 @@ export default function App() {
   }, []);  useEffect(() => { const safe=normalizeJalaliMonth(calendarMonth); if(safe!==calendarMonth) setCalendarMonth(safe); }, [calendarMonth]);
   useEffect(() => { const normalized=normalizeJalaliDate(selectedDay); if(normalized!==selectedDay){setSelectedDay(normalized);setCalendarMonth(normalized.slice(0,7)+".01");} }, [selectedDay]);
   useEffect(() => { if (authUser) void load(); }, [authUser?.nationalId]);
+  useEffect(() => {
+    if (!authUser || !("serviceWorker" in navigator) || !("PushManager" in window)) { setPushEnabled(false); return; }
+    let active = true;
+    void navigator.serviceWorker.getRegistration("/").then(async registration => {
+      const subscription = await registration?.pushManager.getSubscription();
+      if (!active) return;
+      setPushEnabled(!!subscription);
+      if (subscription) {
+        await fetch("/api/push/subscriptions", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(subscription) });
+      }
+    }).catch(() => { if (active) setPushEnabled(false); });
+    return () => { active = false; };
+  }, [authUser?.nationalId]);
   useEffect(() => {
     if (!isAdmin || tab !== "reports") return;
     let active = true;
@@ -468,6 +483,47 @@ export default function App() {
     if (title === null) return;
     await request(`/api/users/${encodeURIComponent(user.nationalId)}/profile`, "PATCH", { title, organizationUnit: user.organizationUnit ?? "" });
   }
+  async function toggleBrowserPush() {
+    if (!authUser) return;
+    if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
+      setMessage("این مرورگر اعلان Push را پشتیبانی نمی‌کند.");
+      return;
+    }
+    setPushBusy(true);
+    try {
+      const registration = await navigator.serviceWorker.register("/service-worker.js", { scope: "/" });
+      let subscription = await registration.pushManager.getSubscription();
+      if (subscription && pushEnabled) {
+        const response = await fetch("/api/push/subscriptions", { method: "DELETE", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(subscription) });
+        if (!response.ok) throw new Error("لغو اشتراک اعلان مرورگر انجام نشد.");
+        await subscription.unsubscribe();
+        setPushEnabled(false);
+        setMessage("اعلان مرورگر غیرفعال شد.");
+        return;
+      }
+      const permission = Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
+      if (permission !== "granted") throw new Error("مجوز اعلان مرورگر داده نشد.");
+      const keyResponse = await fetch("/api/push/public-key", { credentials: "include" });
+      const keyResult = await keyResponse.json();
+      if (!keyResponse.ok || !keyResult.publicKey) throw new Error(keyResult.detail || keyResult.error || "کلید عمومی Push روی سرور تنظیم نشده است.");
+      const base64 = String(keyResult.publicKey).replace(/-/g, "+").replace(/_/g, "/");
+      const padded = base64 + "=".repeat((4 - base64.length % 4) % 4);
+      const binary = atob(padded);
+      const applicationServerKey = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index++) applicationServerKey[index] = binary.charCodeAt(index);
+      subscription = subscription || await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey });
+      const response = await fetch("/api/push/subscriptions", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(subscription) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "ذخیره اشتراک اعلان مرورگر انجام نشد.");
+      setPushEnabled(true);
+      setMessage("اعلان مرورگر برای این دستگاه فعال شد.");
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "فعال‌سازی اعلان مرورگر انجام نشد.");
+    } finally {
+      setPushBusy(false);
+    }
+  }
+
   async function editMyMobile() {
     if (!authUser) return;
     const mobile = window.prompt("شماره موبایل خود را وارد کنید:", authUser.mobile ?? "");
@@ -771,7 +827,7 @@ export default function App() {
   return <div className="shell">
     <aside className="sidebar">
       <div className="brand"><span className="brand-icon"><ShieldCheck /></span><div><b>دفتر وزارتی</b><small>پیگیری مصوبات</small></div></div>
-      <div className="profile"><div className="avatar">{authUser.displayName?.[0] || "م"}</div><div><b>{authUser.displayName || dashboard?.currentUser.displayName || "کاربر"}</b><small>نقش: {authUser.role}</small><small>پست: {authUser.title || "ثبت نشده"}</small><small>موبایل: {authUser.mobile || "ثبت نشده"}</small><button type="button" className="secondary profile-mobile-edit" onClick={()=>void editMyMobile()}>ویرایش موبایل من</button><button className="logout-btn" onClick={() => void logout()}>خروج</button></div></div>
+      <div className="profile"><div className="avatar">{authUser.displayName?.[0] || "م"}</div><div><b>{authUser.displayName || dashboard?.currentUser.displayName || "کاربر"}</b><small>نقش: {authUser.role}</small><small>پست: {authUser.title || "ثبت نشده"}</small><small>موبایل: {authUser.mobile || "ثبت نشده"}</small><button type="button" className="secondary profile-mobile-edit" onClick={()=>void editMyMobile()}>ویرایش موبایل من</button><button type="button" className="secondary profile-mobile-edit" disabled={pushBusy} onClick={()=>void toggleBrowserPush()}>{pushBusy ? "در حال تنظیم اعلان…" : pushEnabled ? "غیرفعال‌سازی اعلان مرورگر" : "فعال‌سازی اعلان مرورگر"}</button><button className="logout-btn" onClick={() => void logout()}>خروج</button></div></div>
       <nav>{[["wall", LayoutDashboard, "دیواره من"], ["notifications", Bell, `اعلان‌ها ${notifications.filter(item=>!item.isRead).length ? "(" + notifications.filter(item=>!item.isRead).length + ")" : ""}`], ["resolutions", ClipboardList, "مصوبات"], ...(isAdmin ? [["archive", Archive, "بایگانی"], ["groups", Users, "گروه‌ها و اعضا"], ["reports", FileText, "گزارش‌ها"]] : [])].map(([key, Icon, title]: any) => <button key={key} className={`nav ${tab === key ? "active" : ""}`} onClick={() => setTab(key)}><Icon size={18} />{title}</button>)}</nav>
       <div className="sidebar-foot">محیط پیگیری اجرایی<br /><span>دفتر وزارتی</span></div>
     </aside>
