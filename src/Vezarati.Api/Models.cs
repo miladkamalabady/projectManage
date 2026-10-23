@@ -529,15 +529,27 @@ public static class SchemaCompatibility
         var legacyMembershipColumns = await ReadColumns(db, "GroupMembers");
         if (legacyMembershipColumns.Count > 0 && legacyMembershipColumns.Contains("DisplayName"))
         {
-            var memberTitle = legacyMembershipColumns.Contains("Title") ? "COALESCE(gm.Title, '')" : "''";
-            await db.Database.ExecuteSqlRawAsync($@"INSERT OR IGNORE INTO Users
-                (NationalId, DisplayName, Role, Title, OrganizationUnit, FirstName, LastName, Father, Gender, BirthDate, PersianBirthDate, Mobile, MobileOverriddenByAdmin, UserType, PersonnelCode, OrgPositionCode, OrgPositionDesc, OrgPositionTypeCode, OrgPositionTypeDesc, RegionId, LastLoginAt)
-                SELECT gm.NationalId, COALESCE(gm.DisplayName, ''), 'کاربر', {memberTitle}, '', '', '', '', NULL, '', '', '', 0, NULL, '', '', '', NULL, '', NULL, NULL
-                FROM GroupMembers gm WHERE trim(COALESCE(gm.NationalId, '')) <> '';");
-            await db.Database.ExecuteSqlRawAsync($@"UPDATE Users SET
-                DisplayName = COALESCE(NULLIF(DisplayName, ''), (SELECT gm.DisplayName FROM GroupMembers gm WHERE gm.NationalId = Users.NationalId LIMIT 1)),
-                Title = COALESCE(NULLIF(Title, ''), (SELECT {memberTitle} FROM GroupMembers gm WHERE gm.NationalId = Users.NationalId LIMIT 1))
-                WHERE EXISTS (SELECT 1 FROM GroupMembers gm WHERE gm.NationalId = Users.NationalId);");
+            if (legacyMembershipColumns.Contains("Title"))
+            {
+                await db.Database.ExecuteSqlRawAsync(@"INSERT OR IGNORE INTO Users
+                    (NationalId, DisplayName, Role, Title, OrganizationUnit, FirstName, LastName, Father, Gender, BirthDate, PersianBirthDate, Mobile, MobileOverriddenByAdmin, UserType, PersonnelCode, OrgPositionCode, OrgPositionDesc, OrgPositionTypeCode, OrgPositionTypeDesc, RegionId, LastLoginAt)
+                    SELECT gm.NationalId, COALESCE(gm.DisplayName, ''), 'کاربر', COALESCE(gm.Title, ''), '', '', '', '', NULL, '', '', '', 0, NULL, '', '', '', NULL, '', NULL, NULL
+                    FROM GroupMembers gm WHERE trim(COALESCE(gm.NationalId, '')) <> '';");
+                await db.Database.ExecuteSqlRawAsync(@"UPDATE Users SET
+                    DisplayName = COALESCE(NULLIF(DisplayName, ''), (SELECT gm.DisplayName FROM GroupMembers gm WHERE gm.NationalId = Users.NationalId LIMIT 1)),
+                    Title = COALESCE(NULLIF(Title, ''), (SELECT gm.Title FROM GroupMembers gm WHERE gm.NationalId = Users.NationalId LIMIT 1))
+                    WHERE EXISTS (SELECT 1 FROM GroupMembers gm WHERE gm.NationalId = Users.NationalId);");
+            }
+            else
+            {
+                await db.Database.ExecuteSqlRawAsync(@"INSERT OR IGNORE INTO Users
+                    (NationalId, DisplayName, Role, Title, OrganizationUnit, FirstName, LastName, Father, Gender, BirthDate, PersianBirthDate, Mobile, MobileOverriddenByAdmin, UserType, PersonnelCode, OrgPositionCode, OrgPositionDesc, OrgPositionTypeCode, OrgPositionTypeDesc, RegionId, LastLoginAt)
+                    SELECT gm.NationalId, COALESCE(gm.DisplayName, ''), 'کاربر', '', '', '', '', '', NULL, '', '', '', 0, NULL, '', '', '', NULL, '', NULL, NULL
+                    FROM GroupMembers gm WHERE trim(COALESCE(gm.NationalId, '')) <> '';");
+                await db.Database.ExecuteSqlRawAsync(@"UPDATE Users SET
+                    DisplayName = COALESCE(NULLIF(DisplayName, ''), (SELECT gm.DisplayName FROM GroupMembers gm WHERE gm.NationalId = Users.NationalId LIMIT 1))
+                    WHERE EXISTS (SELECT 1 FROM GroupMembers gm WHERE gm.NationalId = Users.NationalId);");
+            }
         }
         await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_Users_NationalId ON Users (NationalId);");
         var groupColumns = await ReadColumns(db, "Groups");
