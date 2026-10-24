@@ -609,7 +609,7 @@ app.MapPatch("/api/resolutions/{id:int}/status", async (int id, ResolutionStatus
     if (request.Status == "cancelled") record.CancellationReason = request.Notes!.Trim();
     record.Notes = request.Notes ?? record.Notes;
     record.UpdatedAt = DateTimeOffset.UtcNow;
-    db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = primaryAdminNationalId, UserName = "مدیر دفتر وزارتی", Text = "وضعیت کلی مصوبه به «" + request.Status + "» تغییر کرد.", CreatedAt = DateTimeOffset.UtcNow });
+    db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = primaryAdminNationalId, UserName = "مدیر دفتر وزارتی", Text = "وضعیت کلی مصوبه به «" + ResolutionStatusLabel(request.Status) + "» تغییر کرد.", CreatedAt = DateTimeOffset.UtcNow });
     await db.SaveChangesAsync();
     return Results.Ok(record);
 });
@@ -1671,19 +1671,34 @@ static async Task<Dictionary<string, string>> LoadPersonDisplayNames(AppDb db)
     return names;
 }
 
+static string ResolutionStatusLabel(string status) => status switch
+{
+    "before" => "قبل از اجرا",
+    "in_progress" => "در حال اجرا",
+    "completed" => "اجرا شده",
+    "delayed" => "دارای تأخیر",
+    "cancelled" => "لغو شده",
+    "rejected" => "رد شده",
+    _ => status
+};
+
 static string NormalizeStatusEventText(ResolutionEvent entry, IReadOnlyDictionary<string, string> displayNames)
 {
+    var normalizedText = entry.Text
+        .Replace("«before»", "«قبل از اجرا»", StringComparison.Ordinal)
+        .Replace("«in_progress»", "«در حال اجرا»", StringComparison.Ordinal)
+        .Replace("«completed»", "«اجرا شده»", StringComparison.Ordinal)
+        .Replace("«delayed»", "«دارای تأخیر»", StringComparison.Ordinal)
+        .Replace("«cancelled»", "«لغو شده»", StringComparison.Ordinal)
+        .Replace("«rejected»", "«رد شده»", StringComparison.Ordinal);
     const string prefix = "وضعیت پیگیری ";
-    if (!entry.Text.StartsWith(prefix, StringComparison.Ordinal)) return entry.Text;
-    var marker = entry.Text.IndexOf(" به «", prefix.Length, StringComparison.Ordinal);
-    if (marker < 0) return entry.Text;
-    var target = entry.Text[prefix.Length..marker].Trim();
+    if (!normalizedText.StartsWith(prefix, StringComparison.Ordinal)) return normalizedText;
+    var marker = normalizedText.IndexOf(" به «", prefix.Length, StringComparison.Ordinal);
+    if (marker < 0) return normalizedText;
+    var target = normalizedText[prefix.Length..marker].Trim();
     var targetId = target.All(char.IsDigit) ? target : target == "کاربر" ? entry.NationalId : "";
     var name = targetId.Length > 0 ? displayNames.GetValueOrDefault(targetId, "عضو مصوبه") : target;
-    var detail = entry.Text[marker..]
-        .Replace("«rejected»", "«رد شده»", StringComparison.Ordinal)
-        .Replace("«in_progress»", "«در حال اجرا»", StringComparison.Ordinal)
-        .Replace("«completed»", "«اجرا شده»", StringComparison.Ordinal);
+    var detail = normalizedText[marker..];
     return prefix + name + detail;
 }
 
