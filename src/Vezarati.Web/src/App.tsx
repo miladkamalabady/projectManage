@@ -724,7 +724,7 @@ export default function App() {
       setMessage(`${result.inAppNotifications} اعلان داخل سامانه ثبت شد و ${result.queued} پیام در صف ارسال بله قرار گرفت.` + failureText);
       const sentIds = (result.results ?? []).filter((item: { nationalId?: string; NationalId?: string; queued?: boolean; inApp?: boolean; Queued?: boolean; InApp?: boolean }) => item.queued || item.inApp || item.Queued || item.InApp).map((item: { nationalId?: string; NationalId?: string }) => item.nationalId ?? item.NationalId).filter((nationalId: string | undefined): nationalId is string => !!nationalId);
       const confirmedIds = sentIds.length ? sentIds : ((result.inAppNotifications ?? result.InAppNotifications ?? 0) > 0 || (result.queued ?? result.Queued ?? 0) > 0 ? nationalIds : []);
-      if (confirmedIds.length) setSentWarningKeys(current => Array.from(new Set([...current, ...confirmedIds.map(nationalId => `${resolutionId}:${nationalId}`)])));
+      if (confirmedIds.length) setSentWarningKeys(current => Array.from(new Set([...current, ...confirmedIds.map((nationalId: string) => `${resolutionId}:${nationalId}`)])));
       return confirmedIds;
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : "ارسال هشدار انجام نشد.");
