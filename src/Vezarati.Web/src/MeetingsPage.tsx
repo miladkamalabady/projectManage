@@ -10,7 +10,7 @@ type MeetingAttendee = { id: number; nationalId: string; displayName: string; ti
 type Meeting = { id: number; date: string; dateJalali: string; title: string; guestText: string; attendees: MeetingAttendee[] };
 type Resolution = { id: number; meetingId?: number | null; number: string; text: string; status: string; dueDateJalali?: string };
 type MeetingDraft = { date: string; dateJalali: string; title: string; guestText: string; attendees: Record<string, { isPresent: boolean; absenceReason: string }> };
-type Props = { users: Person[]; groups: Group[]; resolutions: Resolution[]; onCreateResolution: (meeting: Meeting) => void; onRefresh: () => void };
+type Props = { users: Person[]; groups: Group[]; resolutions: Resolution[]; openCreateRequest: number; onCreateResolution: (meeting: Meeting) => void; onRefresh: () => void };
 
 const todayKey = () => { const d = new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
 const toJalali = (value: string) => { if (!value) return ""; const d = new Date(value+"T12:00:00"); return Number.isNaN(d.getTime()) ? "" : new Intl.DateTimeFormat("fa-IR-u-ca-persian",{year:"numeric",month:"2-digit",day:"2-digit",numberingSystem:"latn"}).format(d).replace(/\//g,"."); };
@@ -19,7 +19,7 @@ const formatJalali = (value: string, jalali?: string) => jalali || toJalali(valu
 const norm = (value: string) => value.normalize("NFKC").replace(/[يى]/g,"ی").replace(/ك/g,"ک").trim().toLocaleLowerCase("fa");
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, character => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[character] ?? character));
 
-export default function MeetingsPage({ users, groups, resolutions, onCreateResolution, onRefresh }: Props) {
+export default function MeetingsPage({ users, groups, resolutions, openCreateRequest, onCreateResolution, onRefresh }: Props) {
   const [section,setSection]=useState<"meetings"|"attendance">("meetings");
   const [meetings,setMeetings]=useState<Meeting[]>([]);
   const [busy,setBusy]=useState(false);
@@ -52,6 +52,7 @@ export default function MeetingsPage({ users, groups, resolutions, onCreateResol
     if(response.ok){const result=await response.json();if(Array.isArray(result))setAbsenceReasons(result);}
   }
   useEffect(()=>{void loadMeetings().catch(error=>setMessage(error.message));void loadReasons();},[]);
+  useEffect(()=>{if(openCreateRequest>0){setSection("meetings");openNew();}},[openCreateRequest]);
   useEffect(()=>{if(section==="meetings")void loadMeetings().catch(error=>setMessage(error.message));},[section]);
   useEffect(()=>{
     if(section!=="attendance")return;
