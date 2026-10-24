@@ -723,13 +723,12 @@ app.MapPost("/api/resolutions/{id:int}/completion-report", async (int id, HttpRe
     db.ResolutionReports.Add(report);
     db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = "گزارش اقدام ثبت شد.", CreatedAt = submittedAt });
     var notifyKey = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
-    var reportSummary = text.Length > 500 ? text[..500] + "…" : text;
-    var reportNotificationText = "📥 گزارش اقدام جدید برای مصوبه شماره " + resolution.Number + " ثبت شد.\n"
-        + "👤 گزارش‌دهنده: " + personName + "\n"
-        + "📝 شرح اقدام: " + reportSummary + "\n"
-        + (files.Count > 0 ? "📎 پیوست: " + files.Count + " فایل\n" : "")
-        + "🔎 برای مشاهدهٔ گزارش کامل، جزئیات مصوبه را در سامانه بررسی کنید.";
-    db.Notifications.Add(new UserNotification { NationalId = primaryAdminNationalId, ResolutionId = id, Type = "report", DateKey = id + ":" + notifyKey, Text = reportNotificationText, CreatedAt = DateTimeOffset.UtcNow });
+    var reportNotificationText = "✅ گزارش اقدام شما با موفقیت ثبت و تأیید شد.\n"
+        + "📌 مصوبه شماره " + resolution.Number + " · شناسه یکتا: " + resolution.Id + " (#مصوبه_" + resolution.Number + ")\n"
+        + "🎯 وضعیت پیگیری شما به «انجام‌شده» تغییر کرد.\n"
+        + "📝 شرح اقدام و " + (files.Count > 0 ? "پیوست‌های ارسالی شما (" + files.Count + " فایل) " : "گزارش ثبت‌شدهٔ شما ")
+        + "در سوابق مصوبه نگهداری می‌شود. ممنون از پیگیری شما 🌟";
+    db.Notifications.Add(new UserNotification { NationalId = nationalId, ResolutionId = id, Type = "report-confirmed", DateKey = id + ":" + notifyKey, Text = reportNotificationText, CreatedAt = DateTimeOffset.UtcNow });
     await db.SaveChangesAsync();
     reportId = report.Id;
 
