@@ -454,9 +454,21 @@ public static class SeedData
             await db.SaveChangesAsync();
         }
 
+        var deletedGroupKeys = (await db.Settings.AsNoTracking()
+            .Where(setting => setting.Key.StartsWith(DeletedSeedGroupPrefix))
+            .Select(setting => setting.Key)
+            .ToListAsync())
+            .ToHashSet(StringComparer.Ordinal);
+        var deletedMemberKeys = (await db.Settings.AsNoTracking()
+            .Where(setting => setting.Key.StartsWith(DeletedSeedMemberPrefix))
+            .Select(setting => setting.Key)
+            .ToListAsync())
+            .ToHashSet(StringComparer.Ordinal);
+
         var groups = new Dictionary<string, ResolutionGroup>();
         foreach (var name in new[] { "شورای معاونان", "مدیران کل" })
         {
+            if (deletedGroupKeys.Contains(DeletedSeedGroupKey(name))) continue;
             var group = await db.Groups.Include(g => g.Members).FirstOrDefaultAsync(g => g.Name == name);
             if (group is null) { group = new ResolutionGroup { Name = name, Category = "group" }; db.Groups.Add(group); }
             groups[name] = group;
@@ -475,7 +487,7 @@ public static class SeedData
                 var allSeedGroupNames = seed.Groups.Keys.Concat(seed.Resolutions.SelectMany(item => item.Groups)).Distinct(StringComparer.Ordinal).ToList();
                 foreach (var groupName in allSeedGroupNames)
                 {
-                    if (groups.ContainsKey(groupName)) continue;
+                    if (deletedGroupKeys.Contains(DeletedSeedGroupKey(groupName)) || groups.ContainsKey(groupName)) continue;
                     var group = await db.Groups.Include(g => g.Members).FirstOrDefaultAsync(g => g.Name == groupName);
                     if (group is null)
                     {
@@ -491,6 +503,7 @@ public static class SeedData
                     if (!groups.TryGetValue(groupName, out var group)) continue;
                     foreach (var member in members)
                     {
+                        if (deletedMemberKeys.Contains(DeletedSeedMemberKey(groupName, member.NationalId))) continue;
                         if (!directoryUsers.TryGetValue(member.NationalId, out var user))
                         {
                             user = new AppUser { NationalId = member.NationalId, DisplayName = member.DisplayName, Title = member.Title };
@@ -547,6 +560,12 @@ public static class SeedData
         if (!await db.Users.AnyAsync()) db.Users.Add(new AppUser { NationalId = "admin", DisplayName = "مدیر دفتر وزارتی", Role = "ادمین" });
         await db.SaveChangesAsync();
     }
+
+    private const string DeletedSeedGroupPrefix = "DeletedSeedGroup:";
+    private const string DeletedSeedMemberPrefix = "DeletedSeedMember:";
+    public static string DeletedSeedGroupKey(string groupName) => DeletedSeedGroupPrefix + Uri.EscapeDataString(groupName);
+    public static string DeletedSeedMemberKey(string groupName, string nationalId) =>
+        DeletedSeedMemberPrefix + Uri.EscapeDataString(groupName) + ":" + Uri.EscapeDataString(nationalId);
 
     private static string NormalizeImportedText(string value) => string.Join(" ",
         value.Replace('\u200c', ' ').Replace('ي', 'ی').Replace('ك', 'ک')
