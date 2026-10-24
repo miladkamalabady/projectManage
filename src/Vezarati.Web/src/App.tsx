@@ -183,6 +183,7 @@ export default function App() {
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const isAdmin = authUser?.role === "ادمین";
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
+  const [dashboardLoaded, setDashboardLoaded] = useState(false);
   const [resolutions, setResolutions] = useState<Resolution[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [meetings, setMeetings] = useState<MeetingOption[]>([]);
@@ -264,6 +265,7 @@ export default function App() {
       const meetingData = asArray<MeetingOption>(await meetingsResponse.json());
       setMeetings(meetingData);
       setDashboard(dashboardData && typeof dashboardData === "object" ? { ...dashboardData, groups: asGroups(dashboardData.groups), resolutions: asArray<Resolution>(dashboardData.resolutions) } : null);
+      setDashboardLoaded(true);
       setResolutions(resolutionData);
       setGroups(groupData);
       setReports(reportData && typeof reportData === "object" ? { ...reportData, people: asArray(reportData.people) } as Report : { total: 0, completed: 0, delayed: 0, pending: 0, people: [] });
@@ -1003,6 +1005,7 @@ export default function App() {
 
   if (!authReady) return <div className="auth-screen"><div className="auth-card"><ShieldCheck size={36}/><h1>دفتر وزارتی</h1><p>در حال بررسی نشست ورود…</p></div></div>;
   if (!authUser) return <div className="auth-screen"><div className="auth-card"><ShieldCheck size={36}/><h1>ورود به دفتر وزارتی</h1><p>{error || (new URLSearchParams(window.location.search).has("code") ? "ورود انجام نشد. لطفاً از درگاه سازمانی دوباره وارد شوید." : "برای ورود، از درگاه یکپارچه آموزش‌وپرورش به این صفحه بازگردید.")}</p></div></div>;
+  if (dashboardLoaded && !isAdmin && mine.length === 0) return <div className="auth-screen"><div className="auth-card access-denied-card"><ShieldCheck size={36}/><h1>شما دسترسی به این سامانه ندارید</h1><p>برای حساب کاربری «{authUser.displayName}» هیچ وظیفه‌ای ثبت یا ارجاع نشده است. در صورت نیاز، با دفتر وزارتی تماس بگیرید.</p><button type="button" className="primary" onClick={()=>void logout()}>خروج از حساب</button></div></div>;
   return <div className="shell">
     <aside className="sidebar">
       <div className="brand"><span className="brand-icon"><ShieldCheck /></span><div><b>دفتر وزارتی</b><small>پیگیری مصوبات</small></div></div>
