@@ -27,6 +27,7 @@ export default function MeetingsPage({ users, groups, resolutions, onCreateResol
   const [meetingQuery,setMeetingQuery]=useState("");
   const [expandedId,setExpandedId]=useState<number|null>(null);
   const [editing,setEditing]=useState<Meeting|null>(null);
+  const [creating,setCreating]=useState(false);
   const [search,setSearch]=useState("");
   const [groupToAdd,setGroupToAdd]=useState("");
   const [absenceReasons,setAbsenceReasons]=useState<string[]>(["ماموریت","بیماری","سایر"]);
@@ -48,6 +49,7 @@ export default function MeetingsPage({ users, groups, resolutions, onCreateResol
     if(response.ok){const result=await response.json();if(Array.isArray(result))setAbsenceReasons(result);}
   }
   useEffect(()=>{void loadMeetings().catch(error=>setMessage(error.message));void loadReasons();},[]);
+  useEffect(()=>{if(section==="meetings")void loadMeetings().catch(error=>setMessage(error.message));},[section]);
   useEffect(()=>{
     if(section!=="attendance")return;
     const query=new URLSearchParams();if(from)query.set("from",from);if(to)query.set("to",to);
@@ -75,11 +77,11 @@ export default function MeetingsPage({ users, groups, resolutions, onCreateResol
   const stats=useMemo(()=>meetings.reduce((sum,meeting)=>{sum.meetings++;for(const person of meeting.attendees||[]){sum.total++;if(person.isPresent)sum.present++;else sum.absent++;}return sum;},{meetings:0,total:0,present:0,absent:0}),[meetings]);
 
   function openNew() {
-    setEditing(null);setSearch("");setGroupToAdd("");
+    setEditing(null);setCreating(true);setSearch("");setGroupToAdd("");
     setDraft({date:todayKey(),dateJalali:toJalali(todayKey()),title:"",guestText:"",attendees:{}});
   }
   function openEdit(meeting:Meeting) {
-    setEditing(meeting);setSearch("");setGroupToAdd("");
+    setEditing(meeting);setCreating(false);setSearch("");setGroupToAdd("");
     const attendees:MeetingDraft["attendees"]={};
     for(const person of meeting.attendees||[])attendees[person.nationalId]={isPresent:person.isPresent,absenceReason:person.absenceReason||""};
     setDraft({date:meeting.date,dateJalali:meeting.dateJalali||toJalali(meeting.date),title:meeting.title,guestText:meeting.guestText||"",attendees});
@@ -101,7 +103,7 @@ export default function MeetingsPage({ users, groups, resolutions, onCreateResol
     try{
       const response=await fetch(editing?"/api/meetings/"+editing.id:"/api/meetings",{method:editing?"PUT":"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
       const result=await response.json();if(!response.ok)throw new Error(result?.error||"ذخیره جلسه انجام نشد.");
-      setEditing(null);setMessage("جلسه ذخیره شد.");await loadMeetings();onRefresh();
+      setEditing(null);setCreating(false);setMessage("جلسه ذخیره شد.");await loadMeetings();onRefresh();
     }catch(error){setMessage(error instanceof Error?error.message:"ذخیره جلسه انجام نشد.");}finally{setBusy(false);}
   }
   async function saveReasons() {
@@ -135,13 +137,12 @@ export default function MeetingsPage({ users, groups, resolutions, onCreateResol
       <section className="panel attendance-detail"><h3>جزئیات جلسه‌ها</h3>{meetings.map(meeting=><details key={meeting.id}><summary>{formatJalali(meeting.date,meeting.dateJalali)} · {meeting.title}</summary><div>{(meeting.attendees||[]).filter(person=>!personQuery||norm(person.displayName+" "+person.title).includes(norm(personQuery))).map(person=><p key={person.nationalId}><b>{person.displayName}</b> — {person.isPresent?"حاضر":"غایب"}{person.absenceReason?" · "+person.absenceReason:""}</p>)}</div></details>)}{meetings.length===0&&<p className="muted">جلسه‌ای در این بازه ثبت نشده است.</p>}</section>
     </>}
     {editing&&<div className="modal-backdrop" onClick={()=>setEditing(null)}><section className="modal meeting-modal" onClick={event=>event.stopPropagation()}><div className="modal-head"><div><h2>ویرایش جلسه</h2><p>اطلاعات جلسه و وضعیت حضور افراد را تنظیم کنید.</p></div><button className="icon-btn" onClick={()=>setEditing(null)}><X/></button></div>{renderForm()}</section></div>}
-    {!editing&&draft.title!==""&&<div className="modal-backdrop" onClick={()=>setDraft(current=>({...current,title:""}))}><section className="modal meeting-modal" onClick={event=>event.stopPropagation()}><div className="modal-head"><div><h2>ثبت جلسه</h2><p>ابتدا مشخصات جلسه و حاضرین را ثبت کنید.</p></div><button className="icon-btn" onClick={()=>setDraft(current=>({...current,title:""}))}><X/></button></div>{renderForm()}</section></div>}
+    {creating&&!editing&&<div className="modal-backdrop" onClick={()=>setCreating(false)}><section className="modal meeting-modal" onClick={event=>event.stopPropagation()}><div className="modal-head"><div><h2>ثبت جلسه</h2><p>ابتدا مشخصات جلسه و حاضرین را ثبت کنید.</p></div><button className="icon-btn" onClick={()=>setCreating(false)}><X/></button></div>{renderForm()}</section></div>}
   </div>;
 
   function renderForm() {
     return <><div className="meeting-form-grid"><label className="date-field">تاریخ جلسه<DatePicker calendar={persian} locale={persian_fa} format="YYYY/MM/DD" value={draft.dateJalali.replace(/\./g,"/")} onChange={date=>{if(date)setDraft(current=>({...current,date:dateKey(date.toDate()),dateJalali:date.format("YYYY.MM.DD")}));}} /></label><label>عنوان جلسه<input autoFocus value={draft.title} onChange={event=>setDraft(current=>({...current,title:event.target.value}))} placeholder="مثلاً جلسه شورای معاونان"/></label><label className="span2">مهمانان جلسه<textarea rows={2} value={draft.guestText} onChange={event=>setDraft(current=>({...current,guestText:event.target.value}))} placeholder="نام مهمانان را وارد کنید"/></label></div>
       <section className="meeting-people-picker"><div className="meeting-picker-head"><div><b>حاضرین جلسه</b><small>{selectedCount} نفر انتخاب‌شده · انتخاب‌شده‌ها ابتدا حاضر هستند</small></div><div><button className="secondary" onClick={selectAll}>انتخاب همه</button><button className="secondary" onClick={clearAll}>لغو همه</button></div></div><div className="meeting-picker-tools"><select value={groupToAdd} onChange={event=>addGroupMembers(event.target.value)}><option value="">افزودن همه اعضای یک گروه…</option>{groups.filter(group=>group.members?.length).map(group=><option key={group.id} value={group.id}>{group.name} ({group.members.length})</option>)}</select><div className="search"><Search size={14}/><input value={search} onChange={event=>setSearch(event.target.value)} placeholder="جستجوی نام، سمت یا کد ملی"/></div></div><div className="meeting-people-list">{visiblePeople.map(person=>{const selected=draft.attendees[person.nationalId];return <div className="meeting-person-row" key={person.nationalId}><label><input type="checkbox" checked={!!selected} onChange={event=>selectPerson(person.nationalId,event.target.checked)}/><span><b>{person.displayName}</b><small>{person.title||person.organizationUnit||"سمت ثبت نشده"}</small></span></label>{selected&&<div className="meeting-person-status"><select value={selected.isPresent?"present":"absent"} onChange={event=>setDraft(current=>({...current,attendees:{...current.attendees,[person.nationalId]:{...selected,isPresent:event.target.value==="present",absenceReason:event.target.value==="present"?"":selected.absenceReason}}}))}><option value="present">حاضر</option><option value="absent">غایب</option></select>{!selected.isPresent&&<select value={selected.absenceReason} onChange={event=>setDraft(current=>({...current,attendees:{...current.attendees,[person.nationalId]:{...selected,absenceReason:event.target.value}}}))}><option value="">بدون دلیل</option>{absenceReasons.map(reason=><option key={reason}>{reason}</option>)}</select>}</div>}</div>;})}{visiblePeople.length===0&&<p className="muted">فردی پیدا نشد.</p>}</div></section>
-      <label className="meeting-event-field">رویداد جلسه<textarea rows={2} value={(draft as any).eventText||""} onChange={event=>setDraft(current=>({...current,...({eventText:event.target.value} as any)}))} placeholder="یادداشت یا رویداد اولیه جلسه (اختیاری)"/></label>
-      <div className="modal-actions"><button className="secondary" onClick={()=>{setEditing(null);setDraft(current=>({...current,title:""}));}}>انصراف</button><button className="primary" disabled={busy} onClick={()=>void saveMeeting()}><Save size={15}/>{busy?"در حال ذخیره…":editing?"ذخیره تغییرات":"ثبت جلسه"}</button></div></>;
+      <div className="modal-actions"><button className="secondary" onClick={()=>{setEditing(null);setCreating(false);}}>انصراف</button><button className="primary" disabled={busy} onClick={()=>void saveMeeting()}><Save size={15}/>{busy?"در حال ذخیره…":editing?"ذخیره تغییرات":"ثبت جلسه"}</button></div></>;
   }
 }
