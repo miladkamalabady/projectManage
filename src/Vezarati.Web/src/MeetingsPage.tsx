@@ -8,7 +8,7 @@ type Person = { nationalId: string; displayName: string; title?: string; organiz
 type Group = { id: number; name: string; members: Person[] };
 type MeetingAttendee = { id: number; nationalId: string; displayName: string; title: string; isPresent: boolean; absenceReason: string };
 type Meeting = { id: number; date: string; dateJalali: string; title: string; guestText: string; attendees: MeetingAttendee[] };
-type Resolution = { id: number; meetingId?: number | null; number: string; text: string; status: string; dueDateJalali?: string };
+type Resolution = { id: number; meetingId?: number | null; number: string; text: string; status: string; dueDate?: string | null; dueDateJalali?: string };
 type MeetingDraft = { date: string; dateJalali: string; title: string; guestText: string; attendees: Record<string, { isPresent: boolean; absenceReason: string }> };
 type Props = { users: Person[]; groups: Group[]; resolutions: Resolution[]; openCreateRequest: number; onCreateResolution: (meeting: Meeting) => void; onRefresh: () => void };
 
@@ -22,6 +22,8 @@ const escapeHtml = (value: string) => value.replace(/[&<>"']/g, character => ({ 
 export default function MeetingsPage({ users, groups, resolutions, openCreateRequest, onCreateResolution, onRefresh }: Props) {
   const [section,setSection]=useState<"meetings"|"attendance">("meetings");
   const [meetings,setMeetings]=useState<Meeting[]>([]);
+  const [meetingsLoaded,setMeetingsLoaded]=useState(false);
+  const defaultMeetingSelected=useRef(false);
   const [busy,setBusy]=useState(false);
   const [message,setMessage]=useState("");
   const [meetingQuery,setMeetingQuery]=useState("");
@@ -45,7 +47,7 @@ export default function MeetingsPage({ users, groups, resolutions, openCreateReq
     const response=await fetch("/api/meetings",{credentials:"include"});
     const result=await response.json();
     if(!response.ok) throw new Error(result?.error||"فهرست جلسات دریافت نشد.");
-    setMeetings(Array.isArray(result)?result:[]);
+    setMeetings(Array.isArray(result)?result:[]);setMeetingsLoaded(true);
   }
   async function loadReasons() {
     const response=await fetch("/api/attendance/reasons",{credentials:"include"});
@@ -68,7 +70,9 @@ export default function MeetingsPage({ users, groups, resolutions, openCreateReq
   },[users,groups]);
   const visiblePeople=people.filter(person=>!search||norm(person.displayName+" "+(person.title||"")+" "+(person.organizationUnit||"")).includes(norm(search)));
   const selectedCount=Object.keys(draft.attendees).length;
-  const meetingList=meetings.filter(meeting=>!meetingQuery||norm(meeting.title+" "+meeting.dateJalali+" "+(meeting.guestText||"")).includes(norm(meetingQuery)));
+  const meetingHasOpenTasks=(meeting:Meeting)=>resolutions.some(item=>item.meetingId===meeting.id&&item.status!=="completed"&&item.status!=="cancelled");
+  const meetingList=meetings.filter(meeting=>!meetingQuery||norm(meeting.title+" "+meeting.dateJalali+" "+(meeting.guestText||"")).includes(norm(meetingQuery))).slice().sort((left,right)=>Number(meetingHasOpenTasks(right))-Number(meetingHasOpenTasks(left))||(right.date||"").localeCompare(left.date||"")||right.id-left.id);
+  useEffect(()=>{if(!meetingsLoaded||defaultMeetingSelected.current)return;defaultMeetingSelected.current=true;const preferred=meetings.slice().sort((left,right)=>Number(meetingHasOpenTasks(right))-Number(meetingHasOpenTasks(left))||(right.date||"").localeCompare(left.date||"")||right.id-left.id)[0];if(preferred)setExpandedId(preferred.id);},[meetingsLoaded,meetings,resolutions]);
   const peopleStats=useMemo(()=>{
     const totals=new Map<string,{nationalId:string;displayName:string;title:string;total:number;present:number;absent:number;reasons:Record<string,number>}>();
     for(const meeting of meetings)for(const attendee of meeting.attendees||[]){
