@@ -437,3 +437,5 @@
 @media(max-width:720px){.quick-attendance-summary{grid-template-columns:1fr 78px 1fr;gap:7px;padding:11px}.quick-attendance-donut{width:72px;height:72px}.quick-attendance-donut:before{inset:10px}.quick-attendance-donut>span>b{font-size:16px}.person-attendance-summary{gap:6px}}
 
 .warning-tooltip-wrap{display:inline-flex;position:relative;max-width:100%}.warning-tooltip-wrap>button:disabled{pointer-events:none}
+
+.warning-sent-tooltip{position:absolute;z-index:80;right:0;bottom:calc(100% + 7px);width:max-content;max-width:min(340px,85vw);padding:8px 11px;border:1px solid #cfe8d9;border-radius:9px;background:#eaf7ef;color:#245d3e;box-shadow:0 5px 18px #173d2822;font-size:10px;font-weight:700;line-height:1.7;white-space:normal;pointer-events:none;animation:warning-tooltip-in .16s ease-out}@keyframes warning-tooltip-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}.warning-tooltip-wrap{overflow:visible}
