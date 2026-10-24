@@ -559,6 +559,7 @@ app.MapPatch("/api/resolutions/{id:int}/status", async (int id, ResolutionStatus
 {
     var isAdmin = context.User.IsInRole("ادمین");
     if (!isAdmin) return Results.Forbid();
+    if (!string.IsNullOrWhiteSpace(request.NationalId)) return Results.Json(new { error = "ادمین اجازه تغییر مستقیم وضعیت افراد را ندارد؛ گزارش را با ذکر دلیل رد کنید." }, statusCode: StatusCodes.Status403Forbidden);
     var nationalId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
     var record = await db.Resolutions.Include(r => r.Progress).FirstOrDefaultAsync(r => r.Id == id);
     if (record is null) return Results.NotFound();
@@ -615,6 +616,7 @@ app.MapPatch("/api/resolutions/{id:int}/status", async (int id, ResolutionStatus
 });
 app.MapPatch("/api/resolutions/{id:int}/progress/bulk-status", async (int id, ResolutionBulkStatusUpdate request, HttpContext context, AppDb db) =>
 {
+    return Results.Json(new { error = "تغییر گروهی وضعیت افراد غیرفعال است؛ گزارش هر فرد را با ذکر دلیل رد کنید." }, statusCode: StatusCodes.Status403Forbidden);
     if (!context.User.IsInRole("ادمین")) return Results.StatusCode(StatusCodes.Status403Forbidden);
     if (request.Status is not ("completed" or "rejected" or "in_progress"))
         return Results.BadRequest(new { error = "وضعیت افراد باید اجرا شده، رد شده یا در حال اجرا باشد." });
@@ -758,13 +760,13 @@ app.MapPost("/api/resolutions/{id:int}/completion-report", async (int id, HttpRe
     var progress = resolution.Progress.FirstOrDefault(item => item.NationalId == nationalId);
     if (progress is null) { progress = new ResolutionProgress { ResolutionId = id, NationalId = nationalId }; resolution.Progress.Add(progress); }
     progress.ReportText = text;
-    progress.ApprovalStatus = "pending";
+    progress.ApprovalStatus = "approved";
     progress.AdminFeedback = "";
     progress.UpdatedAt = DateTimeOffset.UtcNow;
-    progress.Status = "in_progress";
+    progress.Status = "completed";
     var personName = await db.Users.Where(person => person.NationalId == nationalId).Select(person => person.DisplayName).FirstOrDefaultAsync() ?? requestedUserName ?? context.User.Identity?.Name ?? nationalId;
     var submittedAt = DateTimeOffset.UtcNow;
-    var report = new ResolutionReport { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = text, ReportType = "completion", PeriodKey = "completion:" + submittedAt.ToUnixTimeMilliseconds(), ApprovalStatus = "pending", SubmittedAt = submittedAt };
+    var report = new ResolutionReport { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = text, ReportType = "completion", PeriodKey = "completion:" + submittedAt.ToUnixTimeMilliseconds(), ApprovalStatus = "approved", SubmittedAt = submittedAt };
     db.ResolutionReports.Add(report);
     db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = "گزارش اقدام برای بررسی ادمین ارسال شد.", CreatedAt = submittedAt });
     var notifyKey = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
@@ -844,7 +846,7 @@ app.MapPost("/api/resolutions/{id:int}/reports", async (int id, ResolutionSubmis
     if (string.IsNullOrEmpty(period.Key)) return Results.Conflict(new { error = "گزارش این دوره قبلاً ثبت شده و موعد بعدی هنوز نرسیده است." });
     var personName = await db.Users.Where(person => person.NationalId == nationalId).Select(person => person.DisplayName).FirstOrDefaultAsync() ?? context.User.Identity?.Name ?? nationalId;
     var submittedAt = DateTimeOffset.UtcNow;
-    db.ResolutionReports.Add(new ResolutionReport { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = text, ReportType = "periodic", PeriodKey = period.Key, SubmittedAt = submittedAt });
+    db.ResolutionReports.Add(new ResolutionReport { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = text, ReportType = "periodic", PeriodKey = period.Key, ApprovalStatus = "approved", SubmittedAt = submittedAt });
     db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = "گزارش دوره‌ای (" + period.Key + ") برای مصوبه " + resolution.Number + " ثبت شد.", CreatedAt = submittedAt });
     db.Notifications.Add(new UserNotification { NationalId = primaryAdminNationalId, ResolutionId = id, Type = "periodic-report", DateKey = id + ":" + submittedAt.ToUnixTimeMilliseconds(), Text = "گزارش دوره‌ای جدید از " + personName + " برای مصوبه " + resolution.Number + " ثبت شد.", CreatedAt = submittedAt });
     await db.SaveChangesAsync();
@@ -963,12 +965,12 @@ app.MapGet("/api/reports/submissions", async (AppDb db) =>
 app.MapPatch("/api/reports/submissions/{reportId:int}/review", async (int reportId, ReportReviewRequest request, HttpContext context, AppDb db) =>
 {
     if (!context.User.IsInRole("ادمین")) return Results.Forbid();
-    if (!request.Approved && string.IsNullOrWhiteSpace(request.Feedback)) return Results.BadRequest(new { error = "برای رد گزارش، علت را وارد کنید." });
+    if (request.Approved) return Results.BadRequest(new { error = "ادمین فقط می‌تواند گزارش را با ذکر دلیل رد کند." });
+    if (string.IsNullOrWhiteSpace(request.Feedback)) return Results.BadRequest(new { error = "برای رد گزارش، علت را وارد کنید." });
     var report = await db.ResolutionReports.Include(item => item.Resolution).FirstOrDefaultAsync(item => item.Id == reportId);
     if (report is null) return Results.NotFound();
-    if ((report.ApprovalStatus == "approved" && request.Approved) || (report.ApprovalStatus == "rejected" && !request.Approved))
-        return Results.Conflict(new { error = report.ApprovalStatus == "approved" ? "گزارش تأیید شده است؛ فقط می‌توانید آن را رد کنید." : "گزارش رد شده است؛ فقط می‌توانید آن را تأیید کنید." });
-    report.ApprovalStatus = request.Approved ? "approved" : "rejected";
+    if (report.ApprovalStatus == "rejected") return Results.Conflict(new { error = "این گزارش قبلاً رد شده است." });
+    report.ApprovalStatus = "rejected";
     report.AdminFeedback = request.Feedback?.Trim() ?? "";
     var progress = await db.Progress.FirstOrDefaultAsync(item => item.ResolutionId == report.ResolutionId && item.NationalId == report.NationalId);
     if (progress is null)
@@ -1008,10 +1010,11 @@ app.MapPatch("/api/reports/submissions/{reportId:int}/review", async (int report
 
 app.MapPatch("/api/resolutions/{id:int}/completion-review", async (int id, CompletionReviewRequest request, HttpContext context, AppDb db) =>
 {
+    if (request.Approved) return Results.BadRequest(new { error = "ادمین فقط می‌تواند گزارش را با ذکر دلیل رد کند." });
+    if (string.IsNullOrWhiteSpace(request.Feedback)) return Results.BadRequest(new { error = "برای رد گزارش، علت را وارد کنید." });
     var progress = await db.Progress.FirstOrDefaultAsync(item => item.ResolutionId == id && item.NationalId == request.AssigneeNationalId);
     if (progress is null || string.IsNullOrWhiteSpace(progress.ReportText)) return Results.NotFound();
-    if ((progress.ApprovalStatus == "approved" && request.Approved) || (progress.ApprovalStatus == "rejected" && !request.Approved))
-        return Results.Conflict(new { error = progress.ApprovalStatus == "approved" ? "گزارش تأیید شده است؛ فقط می‌توانید آن را رد کنید." : "گزارش رد شده است؛ فقط می‌توانید آن را تأیید کنید." });
+    if (progress.ApprovalStatus == "rejected") return Results.Conflict(new { error = "این گزارش قبلاً رد شده است." });
     var resolution = await db.Resolutions.FindAsync(id);
     if (resolution is null) return Results.NotFound();
     var submittedReport = await db.ResolutionReports
