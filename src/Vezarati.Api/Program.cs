@@ -1142,8 +1142,10 @@ app.MapGet("/api/attachments/{id:int}", async (int id, HttpContext context, AppD
 
 app.MapPatch("/api/attachments/{id:int}/approval", async (int id, AttachmentApprovalRequest request, HttpContext context, AppDb db) =>
 {
+    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
     var attachment = await db.Attachments.FirstOrDefaultAsync(item => item.Id == id);
     if (attachment is null) return Results.NotFound();
+    if (attachment.ResolutionReportId.HasValue) return Results.Conflict(new { error = "پیوست گزارش اقدام خصوصی است و امکان نمایش آن برای همه وجود ندارد." });
     attachment.ApprovedForAll = request.ApprovedForAll;
     await db.SaveChangesAsync();
     return Results.Ok(new { attachment.Id, attachment.ApprovedForAll });
