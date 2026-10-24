@@ -558,14 +558,13 @@ app.MapDelete("/api/resolutions/{id:int}", async (int id, AppDb db) =>
 app.MapPatch("/api/resolutions/{id:int}/status", async (int id, ResolutionStatusUpdate request, HttpContext context, AppDb db) =>
 {
     var isAdmin = context.User.IsInRole("ادمین");
-    if (!isAdmin) return Results.Forbid();
-    if (!string.IsNullOrWhiteSpace(request.NationalId)) return Results.Json(new { error = "ادمین اجازه تغییر مستقیم وضعیت افراد را ندارد؛ گزارش را با ذکر دلیل رد کنید." }, statusCode: StatusCodes.Status403Forbidden);
+    if (isAdmin && !string.IsNullOrWhiteSpace(request.NationalId)) return Results.Json(new { error = "ادمین اجازه تغییر مستقیم وضعیت افراد را ندارد؛ گزارش را با ذکر دلیل رد کنید." }, statusCode: StatusCodes.Status403Forbidden);
     var nationalId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
     var record = await db.Resolutions.Include(r => r.Progress).FirstOrDefaultAsync(r => r.Id == id);
     if (record is null) return Results.NotFound();
     if (record.Status == "cancelled") return Results.Conflict(new { error = "این مصوبه لغو شده و امکان تغییر وضعیت آن وجود ندارد." });
 
-    var targetNationalId = isAdmin ? request.NationalId?.Trim() : nationalId;
+    var targetNationalId = isAdmin ? null : nationalId;
     if (!isAdmin && !string.IsNullOrWhiteSpace(request.NationalId) && request.NationalId != nationalId)
         return Results.StatusCode(StatusCodes.Status403Forbidden);
     if (!isAdmin && record.Progress.Any(item => item.NationalId == nationalId && item.Status == "rejected")) return Results.Conflict(new { error = "وضعیت شما برای این مصوبه رد شده و امکان اقدام ندارید." });
