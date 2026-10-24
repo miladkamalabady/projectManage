@@ -58,6 +58,8 @@ app.Use(async (context, next) =>
             || (path.StartsWith("/api/users/", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPatch(context.Request.Method) && !path.EndsWith("/mobile", StringComparison.OrdinalIgnoreCase))
             || path.Equals("/api/users/search", StringComparison.OrdinalIgnoreCase)
             || (path.Equals("/api/settings/bale-notifications", StringComparison.OrdinalIgnoreCase) && (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsPut(context.Request.Method)))
+            || path.StartsWith("/api/meetings", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("/api/attendance", StringComparison.OrdinalIgnoreCase)
             || path.Equals("/api/reports/submissions", StringComparison.OrdinalIgnoreCase)
             || path.Equals("/api/reports/bale-messages", StringComparison.OrdinalIgnoreCase)
             || (path.Equals("/api/reports/warnings", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPost(context.Request.Method))
@@ -341,6 +343,94 @@ app.MapGet("/api/dashboard", async (HttpContext context, AppDb db) =>
     return Results.Ok(new { currentUser, groups = isAdmin ? (object)groups : groups.Where(g => g.Members.Any(m => m.NationalId == id)).Select(g => new { g.Id, g.Name, g.Category, Members = g.Members.Where(m => m.NationalId == id).ToList() }), resolutions = mine });
 });
 
+app.MapGet("/api/meetings", async (AppDb db) =>
+{
+    var meetings = await db.Meetings.AsNoTracking().Include(item => item.Attendees).OrderByDescending(item => item.Date).ThenByDescending(item => item.Id).ToListAsync();
+    return Results.Ok(meetings);
+});
+app.MapPost("/api/meetings", async (MeetingRequest request, AppDb db, HttpContext context) =>
+{
+    if (string.IsNullOrWhiteSpace(request.Title) || request.Title.Trim().Length > 300)
+        return Results.BadRequest(new { error = "عنوان جلسه الزامی است و حداکثر ۳۰۰ نویسه باشد." });
+    if ((request.GuestText?.Length ?? 0) > 5000) return Results.BadRequest(new { error = "متن مهمانان حداکثر ۵۰۰۰ نویسه باشد." });
+    var attendeesRequest = (request.Attendees ?? []).GroupBy(item => NormalizeDigits(item.NationalId.Trim())).Select(group => group.First()).ToList();
+    var attendeeIds = attendeesRequest.Select(item => NormalizeDigits(item.NationalId.Trim())).Where(item => item.Length > 0).ToList();
+    var directory = await db.Users.AsNoTracking().Where(user => attendeeIds.Contains(user.NationalId)).ToDictionaryAsync(user => user.NationalId);
+    var missing = attendeeIds.Where(id => !directory.ContainsKey(id)).ToList();
+    if (missing.Count > 0) return Results.BadRequest(new { error = "برخی افراد انتخاب‌شده در فهرست کاربران پیدا نشدند." });
+    var meeting = new Meeting
+    {
+        Date = request.Date,
+        DateJalali = string.IsNullOrWhiteSpace(request.DateJalali) ? JalaliDate.FromGregorian(request.Date) : request.DateJalali.Trim(),
+        Title = request.Title.Trim(),
+        GuestText = request.GuestText?.Trim() ?? "",
+        CreatedAt = DateTimeOffset.UtcNow
+    };
+    foreach (var attendee in attendeesRequest)
+    {
+        var id = NormalizeDigits(attendee.NationalId.Trim());
+        var person = directory[id];
+        meeting.Attendees.Add(new MeetingAttendee { NationalId = id, DisplayName = person.DisplayName, Title = string.IsNullOrWhiteSpace(person.Title) ? person.OrgPositionDesc : person.Title, IsPresent = attendee.IsPresent, AbsenceReason = attendee.IsPresent ? "" : attendee.AbsenceReason?.Trim() ?? "" });
+    }
+    db.Meetings.Add(meeting);
+    await db.SaveChangesAsync(context.RequestAborted);
+    return Results.Created("/api/meetings/" + meeting.Id, meeting);
+});
+app.MapPut("/api/meetings/{id:int}", async (int id, MeetingRequest request, AppDb db, HttpContext context) =>
+{
+    if (string.IsNullOrWhiteSpace(request.Title) || request.Title.Trim().Length > 300)
+        return Results.BadRequest(new { error = "عنوان جلسه الزامی است و حداکثر ۳۰۰ نویسه باشد." });
+    if ((request.GuestText?.Length ?? 0) > 5000) return Results.BadRequest(new { error = "متن مهمانان حداکثر ۵۰۰۰ نویسه باشد." });
+    var meeting = await db.Meetings.Include(item => item.Attendees).FirstOrDefaultAsync(item => item.Id == id, context.RequestAborted);
+    if (meeting is null) return Results.NotFound();
+    var attendeesRequest = (request.Attendees ?? []).GroupBy(item => NormalizeDigits(item.NationalId.Trim())).Select(group => group.First()).ToList();
+    var attendeeIds = attendeesRequest.Select(item => NormalizeDigits(item.NationalId.Trim())).Where(item => item.Length > 0).ToList();
+    var directory = await db.Users.AsNoTracking().Where(user => attendeeIds.Contains(user.NationalId)).ToDictionaryAsync(user => user.NationalId);
+    if (attendeeIds.Any(id => !directory.ContainsKey(id))) return Results.BadRequest(new { error = "برخی افراد انتخاب‌شده در فهرست کاربران پیدا نشدند." });
+    meeting.Date = request.Date;
+    meeting.DateJalali = string.IsNullOrWhiteSpace(request.DateJalali) ? JalaliDate.FromGregorian(request.Date) : request.DateJalali.Trim();
+    meeting.Title = request.Title.Trim();
+    meeting.GuestText = request.GuestText?.Trim() ?? "";
+    db.MeetingAttendees.RemoveRange(meeting.Attendees);
+    meeting.Attendees.Clear();
+    foreach (var attendee in attendeesRequest)
+    {
+        var personId = NormalizeDigits(attendee.NationalId.Trim());
+        var person = directory[personId];
+        meeting.Attendees.Add(new MeetingAttendee { MeetingId = id, NationalId = personId, DisplayName = person.DisplayName, Title = string.IsNullOrWhiteSpace(person.Title) ? person.OrgPositionDesc : person.Title, IsPresent = attendee.IsPresent, AbsenceReason = attendee.IsPresent ? "" : attendee.AbsenceReason?.Trim() ?? "" });
+    }
+    await db.SaveChangesAsync(context.RequestAborted);
+    return Results.Ok(meeting);
+});
+app.MapGet("/api/attendance/reasons", async (AppDb db) =>
+{
+    const string key = "AttendanceAbsenceReasons";
+    var saved = await db.Settings.AsNoTracking().Where(setting => setting.Key == key).Select(setting => setting.Value).FirstOrDefaultAsync();
+    var reasons = string.IsNullOrWhiteSpace(saved) ? new[] { "ماموریت", "بیماری", "سایر" } : JsonSerializer.Deserialize<List<string>>(saved) ?? ["ماموریت", "بیماری", "سایر"];
+    return Results.Ok(reasons);
+});
+app.MapPut("/api/attendance/reasons", async (AbsenceReasonsRequest request, AppDb db) =>
+{
+    var reasons = request.Reasons.Select(reason => reason.Trim()).Where(reason => reason.Length > 0).Distinct().Take(30).ToList();
+    if (reasons.Count == 0) return Results.BadRequest(new { error = "حداقل یک دلیل غیبت تعریف کنید." });
+    var setting = await db.Settings.FirstOrDefaultAsync(item => item.Key == "AttendanceAbsenceReasons");
+    var value = JsonSerializer.Serialize(reasons);
+    if (setting is null) db.Settings.Add(new AppSetting { Key = "AttendanceAbsenceReasons", Value = value });
+    else setting.Value = value;
+    await db.SaveChangesAsync();
+    return Results.Ok(reasons);
+});
+app.MapGet("/api/attendance/report", async (string? from, string? to, AppDb db) =>
+{
+    DateOnly? fromDate = DateOnly.TryParse(from, out var parsedFrom) ? parsedFrom : null;
+    DateOnly? toDate = DateOnly.TryParse(to, out var parsedTo) ? parsedTo : null;
+    var query = db.Meetings.AsNoTracking().Include(item => item.Attendees).AsQueryable();
+    if (fromDate.HasValue) query = query.Where(item => item.Date >= fromDate.Value);
+    if (toDate.HasValue) query = query.Where(item => item.Date <= toDate.Value);
+    var meetings = await query.OrderByDescending(item => item.Date).ToListAsync();
+    return Results.Ok(new { meetings });
+});
+
 app.MapGet("/api/resolutions", async (HttpContext context, AppDb db) =>
 {
     await ResolutionStatusUpdater.RefreshResolutionStatuses(db);
@@ -363,6 +453,7 @@ app.MapGet("/api/resolutions", async (HttpContext context, AppDb db) =>
 });
 app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpContext http) =>
 {
+    if (!request.MeetingId.HasValue || !await db.Meetings.AnyAsync(item => item.Id == request.MeetingId.Value)) return Results.BadRequest(new { error = "جلسهٔ مرتبط را انتخاب کنید." });
     if (string.IsNullOrWhiteSpace(request.Number) || string.IsNullOrWhiteSpace(request.Text)) return Results.BadRequest(new { error = "شماره و متن مصوبه الزامی است." });
     if (request.Status == "cancelled" && string.IsNullOrWhiteSpace(request.CancellationReason)) return Results.BadRequest(new { error = "برای لغو مصوبه، توضیحات لغو الزامی است." });
     if (request.RequiresPeriodicReport && !ResolutionStatuses.Frequencies.Contains(request.ReportFrequency ?? "")) return Results.BadRequest(new { error = "دوره دریافت گزارش را انتخاب کنید." });
@@ -371,7 +462,7 @@ app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpC
     if (request.DueDate.HasValue && request.DueDate.Value <= request.StartDate.Value) return Results.BadRequest(new { error = "زمان سررسید باید بعد از زمان شروع باشد." });
     if (request.GroupId.HasValue && !await db.Groups.AnyAsync(g => g.Id == request.GroupId)) return Results.BadRequest(new { error = "گروه انتخاب‌شده پیدا نشد." });
     if (!ResolutionStatuses.All.Contains(request.Status)) return Results.BadRequest(new { error = "وضعیت نامعتبر است." });
-    var record = new Resolution { PublishToAll = request.PublishToAll, StartDate = request.StartDate, StartDateJalali = request.StartDate is null ? "" : (request.StartDateJalali ?? JalaliDate.FromGregorian(request.StartDate.Value)), DueDate = request.DueDate, DueDateJalali = request.DueDate is null ? "" : (request.DueDateJalali ?? JalaliDate.FromGregorian(request.DueDate.Value)), RequiresPeriodicReport = request.RequiresPeriodicReport, ReportFrequency = request.RequiresPeriodicReport ? request.ReportFrequency ?? "" : "", CancellationReason = request.CancellationReason?.Trim() ?? "", MeetingDate = request.MeetingDate, MeetingDateJalali = string.IsNullOrWhiteSpace(request.MeetingDateJalali) ? JalaliDate.FromGregorian(request.MeetingDate) : request.MeetingDateJalali, Number = request.Number.Trim(), Text = request.Text.Trim(), Notes = request.Notes?.Trim() ?? "", Status = ResolutionStatusUpdater.TimeBasedResolutionStatus(request.MeetingDate, request.StartDate.Value, request.DueDate, DateOnly.FromDateTime(DateTime.Today)), GroupId = request.GroupId, CreatedAt = DateTimeOffset.UtcNow, CreatedBy = http.User.Identity?.Name ?? "کاربر" };
+    var record = new Resolution { PublishToAll = request.PublishToAll, StartDate = request.StartDate, StartDateJalali = request.StartDate is null ? "" : (request.StartDateJalali ?? JalaliDate.FromGregorian(request.StartDate.Value)), DueDate = request.DueDate, DueDateJalali = request.DueDate is null ? "" : (request.DueDateJalali ?? JalaliDate.FromGregorian(request.DueDate.Value)), RequiresPeriodicReport = request.RequiresPeriodicReport, ReportFrequency = request.RequiresPeriodicReport ? request.ReportFrequency ?? "" : "", CancellationReason = request.CancellationReason?.Trim() ?? "", MeetingDate = request.MeetingDate, MeetingDateJalali = string.IsNullOrWhiteSpace(request.MeetingDateJalali) ? JalaliDate.FromGregorian(request.MeetingDate) : request.MeetingDateJalali, Number = request.Number.Trim(), Text = request.Text.Trim(), Notes = request.Notes?.Trim() ?? "", Status = ResolutionStatusUpdater.TimeBasedResolutionStatus(request.MeetingDate, request.StartDate.Value, request.DueDate, DateOnly.FromDateTime(DateTime.Today)), GroupId = request.GroupId, MeetingId = request.MeetingId, CreatedAt = DateTimeOffset.UtcNow, CreatedBy = http.User.Identity?.Name ?? "کاربر" };
     if (request.GroupIds is not null) foreach (var groupId in request.GroupIds.Distinct()) { if (!await db.Groups.AnyAsync(g => g.Id == groupId)) return Results.BadRequest(new { error = "گروه انتخاب‌شده پیدا نشد." }); record.GroupAssignments.Add(new ResolutionGroupAssignment { GroupId = groupId }); }
     foreach (var id in request.People.Distinct()) record.Assignments.Add(new ResolutionAssignment { NationalId = id });
     db.Resolutions.Add(record);
@@ -397,6 +488,7 @@ app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpC
 });
 app.MapPut("/api/resolutions/{id:int}", async (int id, ResolutionCreate request, AppDb db) =>
 {
+    if (!request.MeetingId.HasValue || !await db.Meetings.AnyAsync(item => item.Id == request.MeetingId.Value)) return Results.BadRequest(new { error = "جلسهٔ مرتبط را انتخاب کنید." });
     if (string.IsNullOrWhiteSpace(request.Number) || string.IsNullOrWhiteSpace(request.Text)) return Results.BadRequest(new { error = "شماره و متن مصوبه الزامی است." });
     if (!ResolutionStatuses.All.Contains(request.Status)) return Results.BadRequest(new { error = "وضعیت نامعتبر است." });
     if (request.Status == "cancelled" && string.IsNullOrWhiteSpace(request.CancellationReason)) return Results.BadRequest(new { error = "برای لغو مصوبه، توضیحات لغو الزامی است." });
@@ -433,7 +525,7 @@ app.MapPut("/api/resolutions/{id:int}", async (int id, ResolutionCreate request,
     {
         record.Status = ResolutionStatusUpdater.TimeBasedResolutionStatus(record.MeetingDate, request.StartDate.Value, request.DueDate, DateOnly.FromDateTime(DateTime.Today));
     }
-    record.GroupId = request.GroupId; record.UpdatedAt = DateTimeOffset.UtcNow;
+    record.GroupId = request.GroupId; record.MeetingId = request.MeetingId; record.UpdatedAt = DateTimeOffset.UtcNow;
     db.ResolutionGroups.RemoveRange(record.GroupAssignments);
     foreach (var groupId in groupIds) record.GroupAssignments.Add(new ResolutionGroupAssignment { ResolutionId = id, GroupId = groupId });
     db.Assignments.RemoveRange(record.Assignments);
@@ -1625,7 +1717,10 @@ static string NormalizeStatusEventText(ResolutionEvent entry, IReadOnlyDictionar
 app.MapFallbackToFile("index.html");
 app.Run();
 
-record ResolutionCreate(DateOnly MeetingDate, string? MeetingDateJalali, string Number, string Text, string? Notes, string Status, int? GroupId, List<int>? GroupIds, List<string> People, bool PublishToAll, DateOnly? DueDate, string? DueDateJalali, DateOnly? StartDate, string? StartDateJalali, bool RequiresPeriodicReport, string? ReportFrequency, string? CancellationReason);
+record ResolutionCreate(DateOnly MeetingDate, string? MeetingDateJalali, string Number, string Text, string? Notes, string Status, int? GroupId, List<int>? GroupIds, List<string> People, bool PublishToAll, DateOnly? DueDate, string? DueDateJalali, DateOnly? StartDate, string? StartDateJalali, bool RequiresPeriodicReport, string? ReportFrequency, string? CancellationReason, int? MeetingId);
+record MeetingAttendeeRequest(string NationalId, bool IsPresent, string? AbsenceReason);
+record MeetingRequest(DateOnly Date, string? DateJalali, string Title, string? GuestText, List<MeetingAttendeeRequest>? Attendees);
+record AbsenceReasonsRequest(List<string> Reasons);
 record ResolutionStatusUpdate(string Status, string? Notes, string? NationalId);
 record ResolutionBulkStatusUpdate(string Status, string? Notes);
 record GroupCreate(string Name, string Category = "unit");
