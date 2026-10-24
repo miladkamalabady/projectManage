@@ -453,7 +453,7 @@ app.MapGet("/api/resolutions", async (HttpContext context, AppDb db) =>
 });
 app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpContext http) =>
 {
-    if (!request.MeetingId.HasValue || !await db.Meetings.AnyAsync(item => item.Id == request.MeetingId.Value)) return Results.BadRequest(new { error = "جلسهٔ مرتبط را انتخاب کنید." });
+    if (!request.MeetingId.HasValue || !await db.Meetings.AnyAsync(item => item.Id == request.MeetingId.Value && item.Date == request.MeetingDate)) return Results.BadRequest(new { error = "جلسهٔ مرتبط را انتخاب کنید." });
     if (string.IsNullOrWhiteSpace(request.Number) || string.IsNullOrWhiteSpace(request.Text)) return Results.BadRequest(new { error = "شماره و متن مصوبه الزامی است." });
     if (request.Status == "cancelled" && string.IsNullOrWhiteSpace(request.CancellationReason)) return Results.BadRequest(new { error = "برای لغو مصوبه، توضیحات لغو الزامی است." });
     if (request.RequiresPeriodicReport && !ResolutionStatuses.Frequencies.Contains(request.ReportFrequency ?? "")) return Results.BadRequest(new { error = "دوره دریافت گزارش را انتخاب کنید." });
@@ -488,7 +488,7 @@ app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpC
 });
 app.MapPut("/api/resolutions/{id:int}", async (int id, ResolutionCreate request, AppDb db) =>
 {
-    if (!request.MeetingId.HasValue || !await db.Meetings.AnyAsync(item => item.Id == request.MeetingId.Value)) return Results.BadRequest(new { error = "جلسهٔ مرتبط را انتخاب کنید." });
+    if (!request.MeetingId.HasValue || !await db.Meetings.AnyAsync(item => item.Id == request.MeetingId.Value && item.Date == request.MeetingDate)) return Results.BadRequest(new { error = "جلسهٔ مرتبط را انتخاب کنید." });
     if (string.IsNullOrWhiteSpace(request.Number) || string.IsNullOrWhiteSpace(request.Text)) return Results.BadRequest(new { error = "شماره و متن مصوبه الزامی است." });
     if (!ResolutionStatuses.All.Contains(request.Status)) return Results.BadRequest(new { error = "وضعیت نامعتبر است." });
     if (request.Status == "cancelled" && string.IsNullOrWhiteSpace(request.CancellationReason)) return Results.BadRequest(new { error = "برای لغو مصوبه، توضیحات لغو الزامی است." });
