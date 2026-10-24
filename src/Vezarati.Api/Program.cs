@@ -406,7 +406,7 @@ app.MapGet("/api/attendance/reasons", async (AppDb db) =>
 {
     const string key = "AttendanceAbsenceReasons";
     var saved = await db.Settings.AsNoTracking().Where(setting => setting.Key == key).Select(setting => setting.Value).FirstOrDefaultAsync();
-    var reasons = string.IsNullOrWhiteSpace(saved) ? new[] { "ماموریت", "بیماری", "سایر" } : JsonSerializer.Deserialize<List<string>>(saved) ?? ["ماموریت", "بیماری", "سایر"];
+    List<string> reasons = string.IsNullOrWhiteSpace(saved) ? new List<string> { "ماموریت", "بیماری", "سایر" } : JsonSerializer.Deserialize<List<string>>(saved) ?? new List<string> { "ماموریت", "بیماری", "سایر" };
     return Results.Ok(reasons);
 });
 app.MapPut("/api/attendance/reasons", async (AbsenceReasonsRequest request, AppDb db) =>
