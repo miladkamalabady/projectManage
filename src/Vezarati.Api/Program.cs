@@ -722,7 +722,7 @@ app.MapPost("/api/resolutions/{id:int}/completion-report", async (int id, HttpRe
     var submittedAt = DateTimeOffset.UtcNow;
     var report = new ResolutionReport { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = text, ReportType = "completion", PeriodKey = "completion:" + submittedAt.ToUnixTimeMilliseconds(), ApprovalStatus = "approved", SubmittedAt = submittedAt };
     db.ResolutionReports.Add(report);
-    db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = "گزارش اقدام برای بررسی ادمین ارسال شد.", CreatedAt = submittedAt });
+    db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = nationalId, UserName = personName, Text = "گزارش اقدام ثبت شد.", CreatedAt = submittedAt });
     var notifyKey = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
     var reportSummary = text.Length > 500 ? text[..500] + "…" : text;
     var reportNotificationText = "📥 گزارش اقدام جدید برای مصوبه شماره " + resolution.Number + " ثبت شد.\n"
@@ -935,10 +935,10 @@ app.MapPatch("/api/reports/submissions/{reportId:int}/review", async (int report
     progress.ReportText = report.Text;
     progress.ApprovalStatus = report.ApprovalStatus;
     progress.AdminFeedback = report.AdminFeedback;
-    progress.Status = request.Approved ? "completed" : "in_progress";
+    progress.Status = "in_progress";
     progress.UpdatedAt = DateTimeOffset.UtcNow;
     if (report.Resolution is not null) report.Resolution.UpdatedAt = DateTimeOffset.UtcNow;
-    var actionText = request.Approved ? "گزارش ارسالی تأیید شد." : "گزارش ارسالی رد شد.";
+    var actionText = "گزارش ارسالی رد شد.";
     if (!string.IsNullOrWhiteSpace(report.AdminFeedback)) actionText += " توضیح ادمین: " + report.AdminFeedback;
     db.Events.Add(new ResolutionEvent
     {
@@ -952,9 +952,9 @@ app.MapPatch("/api/reports/submissions/{reportId:int}/review", async (int report
     {
         NationalId = report.NationalId,
         ResolutionId = report.ResolutionId,
-        Type = request.Approved ? "report-approved" : "report-rejected",
+        Type = "report-rejected",
         DateKey = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(),
-        Text = BaleMessageText.ForReportReview(report.Resolution, request.Approved, report.AdminFeedback),
+        Text = BaleMessageText.ForReportReview(report.Resolution, false, report.AdminFeedback),
         CreatedAt = DateTimeOffset.UtcNow
     });
     await db.SaveChangesAsync();
@@ -964,6 +964,7 @@ app.MapPatch("/api/reports/submissions/{reportId:int}/review", async (int report
 
 app.MapPatch("/api/resolutions/{id:int}/completion-review", async (int id, CompletionReviewRequest request, HttpContext context, AppDb db) =>
 {
+    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
     if (request.Approved) return Results.BadRequest(new { error = "ادمین فقط می‌تواند گزارش را با ذکر دلیل رد کند." });
     if (string.IsNullOrWhiteSpace(request.Feedback)) return Results.BadRequest(new { error = "برای رد گزارش، علت را وارد کنید." });
     var progress = await db.Progress.FirstOrDefaultAsync(item => item.ResolutionId == id && item.NationalId == request.AssigneeNationalId);
@@ -977,18 +978,18 @@ app.MapPatch("/api/resolutions/{id:int}/completion-review", async (int id, Compl
         .FirstOrDefaultAsync();
     if (submittedReport is not null)
     {
-        submittedReport.ApprovalStatus = request.Approved ? "approved" : "rejected";
-        submittedReport.AdminFeedback = progress.AdminFeedback;
+        submittedReport.ApprovalStatus = "rejected";
+        submittedReport.AdminFeedback = request.Feedback.Trim();
     }
-    progress.ApprovalStatus = request.Approved ? "approved" : "rejected";
-    progress.AdminFeedback = request.Feedback?.Trim() ?? "";
+    progress.ApprovalStatus = "rejected";
+    progress.AdminFeedback = request.Feedback.Trim();
     progress.UpdatedAt = DateTimeOffset.UtcNow;
-    progress.Status = request.Approved ? "completed" : "in_progress";
+    progress.Status = "in_progress";
     resolution.UpdatedAt = DateTimeOffset.UtcNow;
-    var actionText = request.Approved ? "گزارش اقدام تأیید شد." : "گزارش اقدام برای اصلاح برگشت داده شد.";
+    var actionText = "گزارش اقدام برای اصلاح برگشت داده شد.";
     if (!string.IsNullOrWhiteSpace(progress.AdminFeedback)) actionText += " توضیح ادمین: " + progress.AdminFeedback;
     db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = primaryAdminNationalId, UserName = "مدیر دفتر وزارتی", Text = actionText, CreatedAt = DateTimeOffset.UtcNow });
-    db.Notifications.Add(new UserNotification { NationalId = progress.NationalId, ResolutionId = id, Type = request.Approved ? "report-approved" : "report-rejected", DateKey = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(), Text = BaleMessageText.ForReportReview(resolution, request.Approved, progress.AdminFeedback), CreatedAt = DateTimeOffset.UtcNow });
+    db.Notifications.Add(new UserNotification { NationalId = progress.NationalId, ResolutionId = id, Type = request.Approved ? "report-approved" : "report-rejected", DateKey = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(), Text = BaleMessageText.ForReportReview(resolution, false, progress.AdminFeedback), CreatedAt = DateTimeOffset.UtcNow });
     await db.SaveChangesAsync();
     await ResolutionStatusUpdater.RefreshResolutionStatuses(db);
     return Results.Ok(progress);
