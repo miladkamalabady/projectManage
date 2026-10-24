@@ -392,3 +392,9 @@
 .calendar-wall-empty{font-size:9px}
 @media(max-width:900px){.home-focus-top{align-items:flex-start;flex-direction:column}.home-shortcuts{justify-content:flex-start}.home-focus-list{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:720px){.home-focus{margin:0 0 17px;padding:14px}.home-focus-list{grid-template-columns:1fr 1fr;gap:7px}.home-focus-item{min-height:104px;padding:9px}.calendar-wall{overflow-x:auto}.calendar-week{min-width:690px}.calendar-wall-day{min-height:110px}.calendar-period h3{font-size:11px}.calendar-heading{gap:5px}.calendar-heading>.secondary{padding:7px 8px;font-size:9px}}
+
+/* Meeting-first wall: show only actual meeting days and let those columns use the available width. */
+.calendar-week-days{align-items:stretch}
+.calendar-wall-day{min-height:150px}
+.calendar-wall-empty{color:#8a9699;background:#f8faf9;border-radius:7px;padding:8px}
+@media(max-width:720px){.calendar-week{min-width:0}.calendar-wall-day{min-height:120px;padding:6px}.calendar-week-days{gap:6px}.calendar-wall-date{display:flex;align-items:center;justify-content:space-between}.calendar-wall-date b{font-size:10px}}
