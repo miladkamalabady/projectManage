@@ -614,56 +614,10 @@ app.MapPatch("/api/resolutions/{id:int}/status", async (int id, ResolutionStatus
     await db.SaveChangesAsync();
     return Results.Ok(record);
 });
-app.MapPatch("/api/resolutions/{id:int}/progress/bulk-status", async (int id, ResolutionBulkStatusUpdate request, HttpContext context, AppDb db) =>
+app.MapPatch("/api/resolutions/{id:int}/progress/bulk-status", (HttpContext context) =>
 {
+    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
     return Results.Json(new { error = "تغییر گروهی وضعیت افراد غیرفعال است؛ گزارش هر فرد را با ذکر دلیل رد کنید." }, statusCode: StatusCodes.Status403Forbidden);
-    if (!context.User.IsInRole("ادمین")) return Results.StatusCode(StatusCodes.Status403Forbidden);
-    if (request.Status is not ("completed" or "rejected" or "in_progress"))
-        return Results.BadRequest(new { error = "وضعیت افراد باید اجرا شده، رد شده یا در حال اجرا باشد." });
-    var resolution = await db.Resolutions.Include(item => item.Progress).Include(item => item.Assignments)
-        .Include(item => item.GroupAssignments).FirstOrDefaultAsync(item => item.Id == id && !item.IsArchived);
-    if (resolution is null) return Results.NotFound();
-    if (resolution.Status == "cancelled") return Results.Conflict(new { error = "مصوبه لغو شده و امکان تغییر وضعیت افراد وجود ندارد." });
-
-    var groupIds = resolution.GroupAssignments.Select(assignment => assignment.GroupId).ToHashSet();
-    if (resolution.GroupId.HasValue) groupIds.Add(resolution.GroupId.Value);
-    var nationalIds = resolution.Assignments.Select(assignment => assignment.NationalId).ToHashSet(StringComparer.Ordinal);
-    nationalIds.UnionWith(await db.GroupMembers.Where(member => groupIds.Contains(member.GroupId)).Select(member => member.NationalId).ToListAsync());
-    if (resolution.PublishToAll)
-    {
-        nationalIds.UnionWith(await db.Users.Select(person => person.NationalId).ToListAsync());
-        nationalIds.UnionWith(await db.Users.Select(user => user.NationalId).ToListAsync());
-    }
-    if (nationalIds.Count == 0) return Results.BadRequest(new { error = "برای این مصوبه فرد ارجاع‌شده‌ای پیدا نشد." });
-
-    var names = await db.Users.AsNoTracking().ToDictionaryAsync(person => person.NationalId, person => person.DisplayName);
-    var statusName = request.Status switch { "completed" => "اجرا شده", "rejected" => "رد شده", "in_progress" => "در حال اجرا", _ => request.Status };
-    foreach (var nationalId in nationalIds)
-    {
-        var progress = resolution.Progress.FirstOrDefault(item => item.NationalId == nationalId);
-        if (progress is null)
-        {
-            progress = new ResolutionProgress { ResolutionId = id, NationalId = nationalId };
-            resolution.Progress.Add(progress);
-        }
-        progress.Status = request.Status;
-        if (!string.IsNullOrWhiteSpace(request.Notes)) progress.Notes = request.Notes.Trim();
-        progress.ApprovalStatus = "none";
-        if (request.Status != "completed") progress.AdminFeedback = "";
-        progress.UpdatedAt = DateTimeOffset.UtcNow;
-        db.Events.Add(new ResolutionEvent
-        {
-            ResolutionId = id,
-            NationalId = primaryAdminNationalId,
-            UserName = "مدیر دفتر وزارتی",
-            Text = "وضعیت پیگیری " + names.GetValueOrDefault(nationalId, "عضو مصوبه") + " به «" + statusName + "» تغییر کرد.",
-            CreatedAt = DateTimeOffset.UtcNow
-        });
-    }
-    resolution.UpdatedAt = DateTimeOffset.UtcNow;
-    await db.SaveChangesAsync();
-    await ResolutionStatusUpdater.RefreshResolutionStatuses(db);
-    return Results.Ok(new { updated = nationalIds.Count, status = request.Status });
 });
 
 app.MapPost("/api/resolutions/{id:int}/events", async (int id, ResolutionEventCreate request, HttpContext context, AppDb db) =>
