@@ -353,7 +353,7 @@ app.MapPost("/api/meetings", async (MeetingRequest request, AppDb db, HttpContex
     if (string.IsNullOrWhiteSpace(request.Title) || request.Title.Trim().Length > 300)
         return Results.BadRequest(new { error = "عنوان جلسه الزامی است و حداکثر ۳۰۰ نویسه باشد." });
     if ((request.GuestText?.Length ?? 0) > 5000) return Results.BadRequest(new { error = "متن مهمانان حداکثر ۵۰۰۰ نویسه باشد." });
-    var attendeesRequest = (request.Attendees ?? []).GroupBy(item => NormalizeDigits(item.NationalId.Trim())).Select(group => group.First()).ToList();
+    var attendeesRequest = (request.Attendees ?? []).Where(item => !string.IsNullOrWhiteSpace(item.NationalId)).GroupBy(item => NormalizeDigits(item.NationalId.Trim())).Select(group => group.First()).ToList();
     var attendeeIds = attendeesRequest.Select(item => NormalizeDigits(item.NationalId.Trim())).Where(item => item.Length > 0).ToList();
     var directory = await db.Users.AsNoTracking().Where(user => attendeeIds.Contains(user.NationalId)).ToDictionaryAsync(user => user.NationalId);
     var missing = attendeeIds.Where(id => !directory.ContainsKey(id)).ToList();
@@ -383,7 +383,7 @@ app.MapPut("/api/meetings/{id:int}", async (int id, MeetingRequest request, AppD
     if ((request.GuestText?.Length ?? 0) > 5000) return Results.BadRequest(new { error = "متن مهمانان حداکثر ۵۰۰۰ نویسه باشد." });
     var meeting = await db.Meetings.Include(item => item.Attendees).FirstOrDefaultAsync(item => item.Id == id, context.RequestAborted);
     if (meeting is null) return Results.NotFound();
-    var attendeesRequest = (request.Attendees ?? []).GroupBy(item => NormalizeDigits(item.NationalId.Trim())).Select(group => group.First()).ToList();
+    var attendeesRequest = (request.Attendees ?? []).Where(item => !string.IsNullOrWhiteSpace(item.NationalId)).GroupBy(item => NormalizeDigits(item.NationalId.Trim())).Select(group => group.First()).ToList();
     var attendeeIds = attendeesRequest.Select(item => NormalizeDigits(item.NationalId.Trim())).Where(item => item.Length > 0).ToList();
     var directory = await db.Users.AsNoTracking().Where(user => attendeeIds.Contains(user.NationalId)).ToDictionaryAsync(user => user.NationalId);
     if (attendeeIds.Any(id => !directory.ContainsKey(id))) return Results.BadRequest(new { error = "برخی افراد انتخاب‌شده در فهرست کاربران پیدا نشدند." });
