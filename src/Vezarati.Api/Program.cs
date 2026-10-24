@@ -1214,6 +1214,9 @@ app.MapDelete("/api/groups/{id:int}", async (int id, AppDb db) =>
         .ToListAsync();
     if (references.Count > 0)
         return Results.Conflict(new { error = "این گروه به مصوبه ارجاع شده و قابل حذف نیست.", resolutions = references });
+    var deletedSeedKey = SeedData.DeletedSeedGroupKey(group.Name);
+    if (!await db.Settings.AnyAsync(setting => setting.Key == deletedSeedKey))
+        db.Settings.Add(new AppSetting { Key = deletedSeedKey, Value = DateTimeOffset.UtcNow.ToString("O") });
     db.Groups.Remove(group);
     await db.SaveChangesAsync();
     return Results.NoContent();
@@ -1224,6 +1227,9 @@ app.MapPost("/api/groups", async (GroupCreate request, HttpContext context, AppD
     var name = request.Name.Trim(); if (name.Length == 0) return Results.BadRequest(new { error = "نام گروه الزامی است." });
     if (request.Category is not ("group" or "unit")) return Results.BadRequest(new { error = "دسته‌بندی معتبر نیست." });
     if (await db.Groups.AnyAsync(g => g.Name == name)) return Results.Conflict(new { error = "این گروه قبلاً تعریف شده است." });
+    var deletedSeedKey = SeedData.DeletedSeedGroupKey(name);
+    var deletionMarker = await db.Settings.FindAsync(deletedSeedKey);
+    if (deletionMarker is not null) db.Settings.Remove(deletionMarker);
     var group = new ResolutionGroup { Name = name, Category = request.Category }; db.Groups.Add(group); await db.SaveChangesAsync();
     return Results.Created($"/api/groups/{group.Id}", group);
 });
@@ -1252,6 +1258,9 @@ app.MapPost("/api/groups/{id:int}/members/lookup", async (int id, MemberLookupRe
 {
     var group = await db.Groups.Include(g => g.Members).FirstOrDefaultAsync(g => g.Id == id); if (group is null) return Results.NotFound();
     var person = await lookup.FindAsync(request.NationalId); if (person is null) return Results.NotFound(new { error = "کاربری با این کد ملی در فهرست کاربران پیدا نشد." });
+    var deletedMemberKey = SeedData.DeletedSeedMemberKey(group.Name, person.NationalId);
+    var deletionMarker = await db.Settings.FindAsync(deletedMemberKey);
+    if (deletionMarker is not null) db.Settings.Remove(deletionMarker);
     var existingMember = group.Members.FirstOrDefault(member => member.NationalId == person.NationalId);
     if (existingMember is null) group.Members.Add(new GroupMember { NationalId = person.NationalId });
     await db.SaveChangesAsync(); return Results.Ok(group);
@@ -1259,7 +1268,13 @@ app.MapPost("/api/groups/{id:int}/members/lookup", async (int id, MemberLookupRe
 app.MapDelete("/api/groups/{id:int}/members/{nationalId}", async (int id, string nationalId, AppDb db) =>
 {
     var member = await db.GroupMembers.FirstOrDefaultAsync(m => m.GroupId == id && m.NationalId == nationalId); if (member is null) return Results.NotFound();
-    db.GroupMembers.Remove(member); await db.SaveChangesAsync(); return Results.NoContent();
+    var groupName = await db.Groups.Where(group => group.Id == id).Select(group => group.Name).FirstOrDefaultAsync() ?? "";
+    var deletedMemberKey = SeedData.DeletedSeedMemberKey(groupName, nationalId);
+    if (!await db.Settings.AnyAsync(setting => setting.Key == deletedMemberKey))
+        db.Settings.Add(new AppSetting { Key = deletedMemberKey, Value = DateTimeOffset.UtcNow.ToString("O") });
+    db.GroupMembers.Remove(member);
+    await db.SaveChangesAsync();
+    return Results.NoContent();
 });
 app.MapPost("/api/users", async (CreateDirectoryPerson request, AppDb db) =>
 {
