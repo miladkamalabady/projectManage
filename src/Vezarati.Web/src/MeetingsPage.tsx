@@ -56,6 +56,7 @@ export default function MeetingsPage({ users, groups, resolutions, openCreateReq
   useEffect(()=>{void loadMeetings().catch(error=>setMessage(error.message));void loadReasons();},[]);
   useEffect(()=>{if(openCreateRequest>0){setSection("meetings");openNew();}},[openCreateRequest]);
   useEffect(()=>{if(section==="meetings")void loadMeetings().catch(error=>setMessage(error.message));},[section]);
+  useEffect(()=>{if(!message)return;const timer=window.setTimeout(()=>setMessage(""),6000);return()=>window.clearTimeout(timer);},[message]);
   useEffect(()=>{
     if(section!=="attendance")return;
     const query=new URLSearchParams();if(from)query.set("from",from);if(to)query.set("to",to);
@@ -131,7 +132,7 @@ export default function MeetingsPage({ users, groups, resolutions, openCreateReq
 
   return <div className="meetings-module">
     <div className="meetings-tabs" role="tablist"><button className={section==="meetings"?"active":""} onClick={()=>setSection("meetings")}><CalendarDays size={16}/>جلسات</button><button className={section==="attendance"?"active":""} onClick={()=>setSection("attendance")}><Users size={16}/>گزارش حضور و غیاب</button></div>
-    {message&&<div className="notice">{message}<button type="button" onClick={()=>setMessage("")}>بستن</button></div>}
+    {message&&<div className="api-toast-stack meeting-toast-stack" aria-live="polite"><div className="api-toast api-toast-message" role="status"><span>{message}</span><button type="button" className="api-toast-close" aria-label="بستن پیام" onClick={()=>setMessage("")}>×</button></div></div>}
     {section==="meetings"&&<><div className="section-head"><div><h2>جلسات</h2><p>ابتدا جلسه را ثبت کنید؛ مصوبات و وظایف بعداً به همان جلسه متصل می‌شوند.</p></div><button className="primary" onClick={openNew}><Plus size={16}/>ثبت جلسه</button></div>
       <div className="search meetings-search"><Search size={15}/><input value={meetingQuery} onChange={event=>setMeetingQuery(event.target.value)} placeholder="جستجو در عنوان، تاریخ یا مهمانان جلسه"/></div>
       <div className="meeting-list">{meetingList.map(meeting=>{const tasks=resolutions.filter(item=>item.meetingId===meeting.id);const present=(meeting.attendees||[]).filter(item=>item.isPresent).length;const absent=(meeting.attendees||[]).length-present;return <article className="meeting-card" key={meeting.id}><div className="meeting-card-head"><button className="meeting-title-button" onClick={()=>setExpandedId(expandedId===meeting.id?null:meeting.id)}><span><b>{meeting.title}</b><small>{formatJalali(meeting.date,meeting.dateJalali)} · {tasks.length} مصوبه · {present} حاضر · {absent} غایب</small></span><ChevronDown size={17}/></button><div className="meeting-actions"><button className="secondary" onClick={()=>openEdit(meeting)}><Pencil size={14}/>ویرایش</button><button className="secondary" onClick={()=>printMeeting(meeting)}><Printer size={14}/>چاپ</button><button className="secondary" onClick={()=>onCreateResolution(meeting)}><Plus size={14}/>ثبت مصوبه</button></div></div>
