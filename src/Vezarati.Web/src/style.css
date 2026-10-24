@@ -259,3 +259,79 @@
 .account-menu>button:disabled{opacity:.55;cursor:wait}
 .account-menu>button.account-menu-logout{color:#b84e49}
 @media(max-width:720px){.account-bar{margin:-20px -14px 18px;padding:9px 14px;min-height:58px}.account-bar-label{font-size:11px}.account-menu-trigger{min-width:0;max-width:72vw;gap:7px;padding:5px 7px}.account-menu-summary small{max-width:45vw}.account-menu{left:0}}
+
+/* Sessions and attendance workspace */
+.meetings-module{display:grid;gap:16px;min-width:0}
+.meetings-tabs{display:flex;gap:8px;padding:5px;background:#edf3f1;border-radius:12px;width:max-content;max-width:100%}
+.meetings-tabs button{display:flex;align-items:center;gap:7px;border:0;background:transparent;color:#65767c;border-radius:9px;padding:10px 14px;font-size:12px}
+.meetings-tabs button.active{background:#fff;color:#147d73;font-weight:700;box-shadow:0 2px 8px #173b3712}
+.meetings-search{margin-bottom:14px}
+.meeting-list{display:grid;gap:12px}
+.meeting-card{background:#fff;border:1px solid #e5eaec;border-radius:14px;overflow:hidden}
+.meeting-card-head{display:flex;align-items:center;gap:12px;padding:15px}
+.meeting-title-button{display:flex;align-items:center;gap:12px;flex:1;min-width:200px;border:0;background:transparent;text-align:right;color:#293a40}
+.meeting-title-button>span{display:grid;gap:5px}
+.meeting-title-button b{font-size:14px}
+.meeting-title-button small{font-size:11px;color:#7b898e}
+.meeting-actions{display:flex;gap:6px;flex-wrap:wrap}
+.meeting-actions .secondary{display:flex;align-items:center;gap:5px;font-size:11px;padding:8px 10px}
+.meeting-details{padding:14px 18px 18px;border-top:1px solid #edf1f2;background:#fbfcfc}
+.meeting-details h3,.attendance-chart h3,.attendance-detail h3{font-size:13px;margin:16px 0 10px;color:#34464c}
+.meeting-guests{display:grid;grid-template-columns:110px 1fr;gap:10px;padding:11px 13px;background:#f3f7f6;border-radius:10px;font-size:12px;line-height:1.8}
+.meeting-attendance-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+.meeting-attendance-list>div{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:9px 11px;background:#fff;border:1px solid #edf0f1;border-radius:9px;font-size:11px}
+.meeting-attendance-list>div>span:first-child{display:grid;gap:3px}
+.meeting-attendance-list small,.meeting-picker-head small{display:block;color:#8b979b;font-size:10px;margin-top:3px}
+.attendance-present{color:#34815a!important}
+.attendance-absent{color:#b74f4b!important}
+.meeting-task{display:grid;gap:5px;padding:10px 12px;margin-top:7px;background:#fff;border:1px solid #edf0f1;border-radius:9px;font-size:11px}
+.meeting-task span{line-height:1.8}
+.meeting-task small{color:#7e8b90}
+.meeting-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px}
+.meeting-form-grid label,.attendance-filters label{display:grid;gap:6px;font-size:11px;color:#697a80}
+.meeting-form-grid input,.meeting-form-grid textarea,.attendance-filters input,.absence-reason-row input,.inline-form input{width:100%;border:1px solid #dfe6e8;border-radius:9px;padding:10px;background:#fff;color:#34464c}
+.meeting-form-grid .span2{grid-column:span 2}
+.meeting-people-picker{border:1px solid #e4e9eb;border-radius:12px;padding:12px;margin:12px 0}
+.meeting-picker-head,.meeting-picker-tools{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.meeting-picker-head>div:first-child{font-size:12px}
+.meeting-picker-head>div:last-child,.inline-form{display:flex;gap:7px;flex-wrap:wrap}
+.meeting-picker-head .secondary,.meeting-picker-tools select{font-size:11px;padding:8px 10px}
+.meeting-picker-tools{margin:12px 0}
+.meeting-picker-tools select,.meeting-person-status select,.meeting-person-row select{border:1px solid #dfe6e8;border-radius:8px;background:#fff;padding:8px;color:#47585e}
+.meeting-picker-tools .search{flex:1}
+.meeting-people-list{max-height:310px;overflow:auto;border:1px solid #edf0f1;border-radius:9px}
+.meeting-person-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 11px;border-bottom:1px solid #f0f3f4}
+.meeting-person-row:last-child{border-bottom:0}
+.meeting-person-row>label{display:flex;align-items:center;gap:9px;min-width:0}
+.meeting-person-row>label span{display:grid;gap:3px}
+.meeting-person-row>label b{font-size:11px}
+.meeting-person-row>label small{font-size:10px;color:#869399}
+.meeting-person-status{display:flex;gap:6px}
+.meeting-person-status select{font-size:10px;max-width:150px}
+.meeting-modal{width:min(920px,96vw);max-height:92vh;overflow:auto}
+.meeting-modal .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+.attendance-filters{display:grid;grid-template-columns:1fr 1fr 2fr;gap:12px;align-items:end}
+.attendance-filters .search{min-height:39px}
+.attendance-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.attendance-kpis>div{display:grid;gap:7px;padding:14px;background:#fff;border:1px solid #e7ecee;border-radius:12px}
+.attendance-kpis span{font-size:11px;color:#7c8a90}
+.attendance-kpis b{font-size:21px;color:#314349}
+.attendance-chart,.attendance-detail,.absence-reason-editor{padding:16px}
+.attendance-chart-row{display:grid;grid-template-columns:minmax(150px,1fr) minmax(90px,2fr) 44px;gap:12px;align-items:center;padding:9px 0;border-bottom:1px solid #f0f3f4}
+.attendance-chart-row>span{display:grid;gap:3px;min-width:0}
+.attendance-chart-row b{font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.attendance-chart-row small{font-size:10px;color:#89969b}
+.attendance-chart-row strong{font-size:11px;text-align:left}
+.attendance-chart-track{height:10px;background:#f7e8e6;border-radius:8px;overflow:hidden}
+.attendance-chart-track i{display:block;height:100%;background:#55a278;border-radius:8px}
+.attendance-detail details{border-top:1px solid #edf1f2;padding:10px 2px}
+.attendance-detail summary{cursor:pointer;font-size:12px;font-weight:700;color:#42555b}
+.attendance-detail details>div{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:9px}
+.attendance-detail details p{padding:8px;margin:0;background:#f8faf9;border-radius:8px;font-size:11px}
+.absence-reason-editor{display:grid;gap:9px}
+.absence-reason-row{display:flex;gap:8px}
+.absence-reason-row input{max-width:320px}
+.inline-form{align-items:center}
+.draft-file-list{display:grid;gap:5px;margin-top:8px}
+.draft-file-list>div{display:flex;align-items:center;justify-content:space-between;padding:6px 9px;background:#f3f7f6;border-radius:8px;font-size:11px}
+@media(max-width:760px){.meeting-card-head{align-items:flex-start;flex-direction:column}.meeting-title-button{width:100%}.meeting-actions{width:100%}.meeting-attendance-list{grid-template-columns:1fr}.meeting-form-grid{grid-template-columns:1fr}.meeting-form-grid .span2{grid-column:auto}.meeting-picker-head,.meeting-picker-tools{align-items:stretch;flex-direction:column}.meeting-person-row{align-items:flex-start;flex-direction:column}.meeting-person-status{width:100%}.meeting-person-status select{flex:1;max-width:none}.attendance-filters{grid-template-columns:1fr 1fr}.attendance-filters .search{grid-column:span 2}.attendance-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.attendance-chart-row{grid-template-columns:minmax(110px,1fr) minmax(60px,1.2fr) 34px}.attendance-detail details>div{grid-template-columns:1fr}.meeting-guests{grid-template-columns:1fr}}
