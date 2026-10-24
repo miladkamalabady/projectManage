@@ -425,3 +425,6 @@
 @media(max-width:720px){.quick-report-visuals{grid-template-columns:1fr}.quick-report-donut{width:140px;height:140px}.quick-report-task-panel{max-height:420px}.quick-status-options>div>.compare-add,.quick-status-options>div>.compare-on{padding:5px;font-size:8px}}
 
 .access-denied-card{border-color:#f0d6d2;background:linear-gradient(145deg,#fff 0%,#fff8f7 100%)}.access-denied-card>svg{color:#b75b52}.access-denied-card h1{color:#8e3933}.access-denied-card p{line-height:2}.access-denied-card>button{margin-top:12px}
+
+.resolution-card-fade-out{pointer-events:none;animation:resolution-submit-fade 1.8s ease forwards}@keyframes resolution-submit-fade{0%{opacity:1;transform:translateY(0);max-height:900px;margin-bottom:14px}65%{opacity:.35;transform:translateY(-5px)}100%{opacity:0;transform:translateY(-12px);max-height:0;margin-top:0;margin-bottom:0;padding-top:0;padding-bottom:0;border-width:0;overflow:hidden}}
+@media(prefers-reduced-motion:reduce){.resolution-card-fade-out{animation-duration:.01ms}}
