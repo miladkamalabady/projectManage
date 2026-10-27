@@ -541,3 +541,8 @@
 .overview-drilldown-list>article>p{margin:0;color:#4d5e59;font-size:10px;line-height:1.8;white-space:pre-wrap}
 .overview-drilldown-list>article>small{color:#83908b;font-size:9px}
 .overview-drilldown-list>article>div:not(.overview-drilldown-meta){display:flex;flex-wrap:wrap;gap:8px;color:#788780;font-size:9px}
+
+.report-rejection-backdrop{z-index:120}
+.report-rejection-modal{width:min(560px,100%)}
+.report-rejection-label{display:grid;gap:8px;color:#53676d;font-size:12px;font-weight:700}
+.report-rejection-label textarea{width:100%;min-height:130px;resize:vertical;line-height:1.9}
