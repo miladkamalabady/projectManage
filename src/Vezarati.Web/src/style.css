@@ -589,3 +589,10 @@
 .app-loading-spinner{width:38px;height:38px;border:4px solid #dcebe6;border-top-color:#177d73;border-radius:50%;animation:app-loading-spin .8s linear infinite}
 @keyframes app-loading-spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.app-loading-spinner{animation-duration:2s}}
+
+.reports-page[aria-busy="true"] > :not(.reports-loading-notice),
+.reports-page.has-load-error > :not(.reports-error-notice){display:none!important}
+.reports-loading-notice,.reports-error-notice{display:flex;align-items:center;justify-content:center;gap:14px;min-height:180px;text-align:right}
+.reports-loading-notice>div{display:grid;gap:6px}
+.reports-loading-notice small{color:#71827d}
+.reports-error-notice{justify-content:space-between;color:#9d3b35}
