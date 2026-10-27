@@ -1168,10 +1168,17 @@ export default function App() {
         resolutionMeetingDay(left).localeCompare(resolutionMeetingDay(right));
     })
     .slice(0, 4), [mine, isAdmin, viewerId]);
-  const personalCounts = mine.reduce((counts, item) => { const status = isAdmin ? item.status : item.progress?.find(progress => progress.nationalId === viewerId)?.status ?? item.status; if(status === "completed") counts.completed++; else if(status === "delayed") counts.delayed++; else counts.pending++; return counts; }, { completed: 0, delayed: 0, pending: 0 });
-  const completed = isAdmin ? reports?.completed ?? 0 : personalCounts.completed;
-  const delayed = isAdmin ? reports?.delayed ?? 0 : personalCounts.delayed;
-  const pending = isAdmin ? reports?.pending ?? 0 : personalCounts.pending;
+  const personalCounts = mine.reduce((counts, item) => {
+    const status = isAdmin ? item.status : item.progress?.find(progress => progress.nationalId === viewerId)?.status ?? item.status;
+    if (status === "completed") counts.completed++;
+    else if (status === "delayed") counts.delayed++;
+    else if (status === "before" || status === "in_progress") counts.pending++;
+    return counts;
+  }, { completed: 0, delayed: 0, pending: 0 });
+  // Dashboard metrics must use the already loaded dashboard data; reports are lazy-loaded and may still be null.
+  const completed = personalCounts.completed;
+  const delayed = personalCounts.delayed;
+  const pending = personalCounts.pending;
   const reportDenominator = Math.max(1, completed + delayed + pending);
   const reportShares = { completed: completed * 100 / reportDenominator, delayed: delayed * 100 / reportDenominator, pending: pending * 100 / reportDenominator };
   const completedEnd = reportShares.completed;
