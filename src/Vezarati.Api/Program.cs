@@ -126,29 +126,6 @@ app.MapGet("/api/admin/database/backup", async (HttpContext context, AppDb db, I
             if (connection.State != System.Data.ConnectionState.Open) await connection.OpenAsync(context.RequestAborted);
             await command.ExecuteNonQueryAsync(context.RequestAborted);
         }
-        var uploadsDirectory = Path.Combine(environment.ContentRootPath, "data", "uploads");
-        await using (var archiveStream = new FileStream(archiveFile, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
-        using (var archive = new ZipArchive(archiveStream, ZipArchiveMode.Create, leaveOpen: false))
-        {
-            var databaseEntry = archive.CreateEntry("database.bak", CompressionLevel.NoCompression);
-            await using (var input = System.IO.File.OpenRead(databaseFile))
-            await using (var output = databaseEntry.Open())
-                await input.CopyToAsync(output, context.RequestAborted);
-            var manifest = archive.CreateEntry("manifest.json", CompressionLevel.Optimal);
-            await using (var writer = new StreamWriter(manifest.Open()))
-                await writer.WriteAsync(JsonSerializer.Serialize(new { product = "Vezarati", formatVersion = 1, database = databaseName, createdAt = DateTimeOffset.UtcNow }));
-            if (Directory.Exists(uploadsDirectory))
-            {
-                foreach (var file in Directory.EnumerateFiles(uploadsDirectory, "*", SearchOption.AllDirectories))
-                {
-                    var relative = Path.GetRelativePath(uploadsDirectory, file).Replace('\\', '/');
-                    var entry = archive.CreateEntry($"uploads/{relative}", CompressionLevel.Optimal);
-                    await using var input = System.IO.File.OpenRead(file);
-                    await using var output = entry.Open();
-                    await input.CopyToAsync(output, context.RequestAborted);
-                }
-            }
-        }
         System.IO.File.Delete(databaseFile);
         context.Response.OnCompleted(() =>
         {
@@ -184,13 +161,8 @@ app.MapPost("/api/admin/database/restore", async (HttpContext context, IConfigur
     Directory.CreateDirectory(backupDirectory);
     var tempArchive = Path.Combine(Path.GetTempPath(), $"vezarati-restore-{Guid.NewGuid():N}.zip");
     var databaseFile = Path.Combine(backupDirectory, $"restore-{Guid.NewGuid():N}.bak");
-    var stagingDirectory = Path.Combine(Path.GetTempPath(), $"vezarati-uploads-{Guid.NewGuid():N}");
-    var uploadsDirectory = Path.Combine(environment.ContentRootPath, "data", "uploads");
-    var previousUploads = uploadsDirectory + ".restore-previous-" + Guid.NewGuid().ToString("N");
-    var uploadsSwapped = false;
     try
     {
-        Directory.CreateDirectory(stagingDirectory);
         await using (var output = new FileStream(tempArchive, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             await context.Request.Body.CopyToAsync(output, context.RequestAborted);
         if (new FileInfo(tempArchive).Length > maxBackupBytes) return Results.BadRequest(new { error = "حجم فایل پشتیبان از ۲ گیگابایت بیشتر است." });
@@ -206,26 +178,10 @@ app.MapPost("/api/admin/database/restore", async (HttpContext context, IConfigur
                     return Results.BadRequest(new { error = "قالب نسخه پشتیبان پشتیبانی نمی‌شود." });
             }
             if (databaseEntry.Length <= 0 || databaseEntry.Length > maxBackupBytes) return Results.BadRequest(new { error = "فایل دیتابیس داخل نسخه پشتیبان معتبر نیست." });
-            await using (var input = databaseEntry.Open())
-            await using (var output = new FileStream(databaseFile, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-                await input.CopyToAsync(output, context.RequestAborted);
-            long extractedBytes = 0;
-            foreach (var entry in archive.Entries.Where(entry => entry.FullName.StartsWith("uploads/", StringComparison.Ordinal)))
-            {
-                var relative = entry.FullName["uploads/".Length..];
-                if (string.IsNullOrWhiteSpace(relative) || relative.Contains("..", StringComparison.Ordinal) || Path.IsPathRooted(relative) || relative.Contains('/') || relative.Contains('\\'))
-                    return Results.BadRequest(new { error = "یکی از مسیرهای پیوست در فایل پشتیبان نامعتبر است." });
-                extractedBytes += entry.Length;
-                if (extractedBytes > maxBackupBytes) return Results.BadRequest(new { error = "حجم پیوست‌های پشتیبان از حد مجاز بیشتر است." });
-                var destination = Path.Combine(stagingDirectory, Path.GetFileName(relative));
-                await using var input = entry.Open();
-                await using var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-                await input.CopyToAsync(output, context.RequestAborted);
-            }
+            await using var input = databaseEntry.Open();
+            await using var output = new FileStream(databaseFile, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            await input.CopyToAsync(output, context.RequestAborted);
         }
-        if (Directory.Exists(uploadsDirectory)) Directory.Move(uploadsDirectory, previousUploads);
-        Directory.Move(stagingDirectory, uploadsDirectory);
-        uploadsSwapped = true;
         try
         {
             var masterBuilder = new SqlConnectionStringBuilder(connectionString) { InitialCatalog = "master", ConnectTimeout = 30 };
@@ -253,9 +209,8 @@ app.MapPost("/api/admin/database/restore", async (HttpContext context, IConfigur
             catch { }
             throw;
         }
-        try { if (Directory.Exists(previousUploads)) Directory.Delete(previousUploads, recursive: true); } catch { }
         logger.LogWarning("Database {Database} was restored by admin {AdminId}", databaseName, context.User.FindFirstValue(ClaimTypes.NameIdentifier));
-        return Results.Ok(new { message = "بازیابی اطلاعات انجام شد. برنامه را یک‌بار تازه‌سازی کنید." });
+        return Results.Ok(new { message = "بازیابی دیتابیس انجام شد. پیوست‌ها از نسخه پشتیبان بازیابی نمی‌شوند؛ برنامه را یک‌بار تازه‌سازی کنید." });
     }
     catch (InvalidDataException)
     {
@@ -264,18 +219,12 @@ app.MapPost("/api/admin/database/restore", async (HttpContext context, IConfigur
     catch (Exception exception)
     {
         logger.LogError(exception, "Database restore failed for {Database}", databaseName);
-        if (uploadsSwapped)
-        {
-            try { if (Directory.Exists(uploadsDirectory)) Directory.Delete(uploadsDirectory, recursive: true); } catch { }
-            try { if (Directory.Exists(previousUploads)) Directory.Move(previousUploads, uploadsDirectory); } catch { }
-        }
         return Results.Problem("بازیابی ناموفق بود. دسترسی حساب SQL Server به پوشه پشتیبان و مجوز RESTORE DATABASE را بررسی کنید.", statusCode: StatusCodes.Status500InternalServerError);
     }
     finally
     {
         try { if (System.IO.File.Exists(tempArchive)) System.IO.File.Delete(tempArchive); } catch { }
         try { if (System.IO.File.Exists(databaseFile)) System.IO.File.Delete(databaseFile); } catch { }
-        try { if (Directory.Exists(stagingDirectory)) Directory.Delete(stagingDirectory, recursive: true); } catch { }
     }
 });
 
@@ -1664,10 +1613,21 @@ app.MapPut("/api/settings/bale-notifications", async (BaleNotificationSettingReq
     return Results.Ok(new { enabled = request.Enabled });
 });
 
-app.MapGet("/api/reports", async (HttpContext context, AppDb db) =>
+app.MapGet("/api/reports", async (HttpContext context, AppDb db, string? view) =>
 {
     var id = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
     var isAdmin = context.User.IsInRole("ادمین");
+    if (isAdmin && string.Equals(view, "summary", StringComparison.OrdinalIgnoreCase))
+    {
+        var summary = await db.Resolutions.Where(item => !item.IsArchived).GroupBy(_ => 1).Select(group => new
+        {
+            Total = group.Count(),
+            Completed = group.Count(item => item.Status == "completed"),
+            Delayed = group.Count(item => item.Status == "delayed"),
+            Pending = group.Count(item => item.Status == "before" || item.Status == "in_progress")
+        }).SingleOrDefaultAsync();
+        return Results.Ok(new { total = summary?.Total ?? 0, completed = summary?.Completed ?? 0, delayed = summary?.Delayed ?? 0, pending = summary?.Pending ?? 0, people = Array.Empty<object>() });
+    }
     var records = await db.Resolutions.Where(item => !item.IsArchived).Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Group).ThenInclude(g => g!.Members).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).ThenInclude(g => g!.Members).ToListAsync();
     if (!isAdmin)
     {
