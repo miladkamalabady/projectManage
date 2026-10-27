@@ -49,7 +49,22 @@ public sealed class Meeting
     public string GuestText { get; set; } = "";
     public DateTimeOffset CreatedAt { get; set; }
     public List<MeetingAttendee> Attendees { get; set; } = [];
+    public List<MeetingAttachment> Attachments { get; set; } = [];
     [JsonIgnore] public List<Resolution> Resolutions { get; set; } = [];
+}
+
+public sealed class MeetingAttachment
+{
+    public int Id { get; set; }
+    public int MeetingId { get; set; }
+    [JsonIgnore] public Meeting? Meeting { get; set; }
+    public string OriginalName { get; set; } = "";
+    [JsonIgnore] public string StoredName { get; set; } = "";
+    public string ContentType { get; set; } = "application/octet-stream";
+    public long Size { get; set; }
+    public string ContentHash { get; set; } = "";
+    public string UploadedBy { get; set; } = "";
+    public DateTimeOffset UploadedAt { get; set; }
 }
 
 public sealed class MeetingAttendee
@@ -213,6 +228,7 @@ public sealed class ResolutionAttachment
     public string StoredName { get; set; } = "";
     public string ContentType { get; set; } = "application/octet-stream";
     public long Size { get; set; }
+    public string ContentHash { get; set; } = "";
     public string UploadedBy { get; set; } = "";
     public string UploaderName { get; set; } = "";
     public bool ApprovedForAll { get; set; }
@@ -295,6 +311,7 @@ public sealed class AppDb(DbContextOptions<AppDb> options, ILogger<AppDb> logger
     public DbSet<Resolution> Resolutions => Set<Resolution>();
     public DbSet<Meeting> Meetings => Set<Meeting>();
     public DbSet<MeetingAttendee> MeetingAttendees => Set<MeetingAttendee>();
+    public DbSet<MeetingAttachment> MeetingAttachments => Set<MeetingAttachment>();
     public DbSet<ResolutionReport> ResolutionReports => Set<ResolutionReport>();
     public DbSet<ResolutionGroup> Groups => Set<ResolutionGroup>();
     public DbSet<ResolutionGroupAssignment> ResolutionGroups => Set<ResolutionGroupAssignment>();
@@ -385,6 +402,8 @@ public sealed class AppDb(DbContextOptions<AppDb> options, ILogger<AppDb> logger
         model.Entity<Resolution>().HasIndex(x => x.SourceKey).IsUnique();
         model.Entity<Meeting>().ToTable("Meetings");
         model.Entity<MeetingAttendee>().ToTable("MeetingAttendees");
+        model.Entity<MeetingAttachment>().ToTable("MeetingAttachments");
+        model.Entity<MeetingAttachment>().HasOne(x => x.Meeting).WithMany(x => x.Attachments).HasForeignKey(x => x.MeetingId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<MeetingAttendee>().HasIndex(x => new { x.MeetingId, x.NationalId }).IsUnique();
         model.Entity<MeetingAttendee>().HasOne(x => x.Meeting).WithMany(x => x.Attendees).HasForeignKey(x => x.MeetingId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<Resolution>().HasOne(x => x.Meeting).WithMany(x => x.Resolutions).HasForeignKey(x => x.MeetingId).OnDelete(DeleteBehavior.SetNull);
@@ -617,9 +636,11 @@ public static class SchemaCompatibility
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.ResolutionReports', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.ResolutionReports', N'ApprovalStatus') IS NULL ALTER TABLE dbo.ResolutionReports ADD ApprovalStatus nvarchar(max) NOT NULL CONSTRAINT DF_ResolutionReports_ApprovalStatus DEFAULT N'pending';");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.ResolutionReports', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.ResolutionReports', N'AdminFeedback') IS NULL ALTER TABLE dbo.ResolutionReports ADD AdminFeedback nvarchar(max) NOT NULL CONSTRAINT DF_ResolutionReports_AdminFeedback DEFAULT N'';");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.ResolutionAttachments', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.ResolutionAttachments', N'ResolutionReportId') IS NULL ALTER TABLE dbo.ResolutionAttachments ADD ResolutionReportId int NULL;");
+            await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.ResolutionAttachments', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.ResolutionAttachments', N'ContentHash') IS NULL ALTER TABLE dbo.ResolutionAttachments ADD ContentHash nvarchar(64) NOT NULL CONSTRAINT DF_ResolutionAttachments_ContentHash DEFAULT N'';");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.ResolutionAttachments', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.ResolutionAttachments', N'ResolutionReportId') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_ResolutionAttachments_ResolutionReportId' AND object_id = OBJECT_ID(N'dbo.ResolutionAttachments')) CREATE INDEX IX_ResolutionAttachments_ResolutionReportId ON dbo.ResolutionAttachments (ResolutionReportId);");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.Resolutions', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.Resolutions', N'MeetingId') IS NULL ALTER TABLE dbo.Resolutions ADD MeetingId int NULL;");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.Meetings', N'U') IS NULL CREATE TABLE dbo.Meetings (Id int IDENTITY(1,1) NOT NULL PRIMARY KEY, Date date NOT NULL, DateJalali nvarchar(max) NOT NULL, Title nvarchar(300) NOT NULL, GuestText nvarchar(max) NOT NULL, CreatedAt datetimeoffset NOT NULL);");
+            await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.MeetingAttachments', N'U') IS NULL CREATE TABLE dbo.MeetingAttachments (Id int IDENTITY(1,1) NOT NULL PRIMARY KEY, MeetingId int NOT NULL, OriginalName nvarchar(512) NOT NULL, StoredName nvarchar(128) NOT NULL, ContentType nvarchar(256) NOT NULL, Size bigint NOT NULL, ContentHash nvarchar(64) NOT NULL, UploadedBy nvarchar(11) NOT NULL, UploadedAt datetimeoffset NOT NULL, CONSTRAINT FK_MeetingAttachments_Meetings_MeetingId FOREIGN KEY (MeetingId) REFERENCES dbo.Meetings(Id) ON DELETE CASCADE);");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.MeetingAttendees', N'U') IS NULL CREATE TABLE dbo.MeetingAttendees (Id int IDENTITY(1,1) NOT NULL PRIMARY KEY, MeetingId int NOT NULL, NationalId nvarchar(11) NOT NULL, DisplayName nvarchar(300) NOT NULL, Title nvarchar(max) NOT NULL, IsPresent bit NOT NULL, AbsenceReason nvarchar(200) NOT NULL, CONSTRAINT FK_MeetingAttendees_Meetings_MeetingId FOREIGN KEY (MeetingId) REFERENCES dbo.Meetings(Id) ON DELETE CASCADE);");
             await db.Database.ExecuteSqlRawAsync("IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_MeetingAttendees_MeetingId_NationalId' AND object_id = OBJECT_ID(N'dbo.MeetingAttendees')) CREATE UNIQUE INDEX IX_MeetingAttendees_MeetingId_NationalId ON dbo.MeetingAttendees (MeetingId, NationalId);");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.BrowserPushSubscriptions', N'U') IS NULL CREATE TABLE dbo.BrowserPushSubscriptions (Id bigint IDENTITY(1,1) NOT NULL PRIMARY KEY, NationalId nvarchar(11) NOT NULL, Endpoint nvarchar(max) NOT NULL, P256dh nvarchar(512) NOT NULL, Auth nvarchar(512) NOT NULL, CreatedAt datetimeoffset NOT NULL, LastUsedAt datetimeoffset NULL);");
@@ -630,7 +651,10 @@ public static class SchemaCompatibility
         }
         var resolutionColumns = await ReadColumns(db, "Resolutions");
         if (resolutionColumns.Count > 0 && !resolutionColumns.Contains("MeetingId")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN MeetingId INTEGER NULL;");
+        var attachmentColumns = await ReadColumns(db, "ResolutionAttachments");
+        if (attachmentColumns.Count > 0 && !attachmentColumns.Contains("ContentHash")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE ResolutionAttachments ADD COLUMN ContentHash TEXT NOT NULL DEFAULT '';");
         await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS Meetings (Id INTEGER NOT NULL CONSTRAINT PK_Meetings PRIMARY KEY AUTOINCREMENT, Date TEXT NOT NULL, DateJalali TEXT NOT NULL, Title TEXT NOT NULL, GuestText TEXT NOT NULL, CreatedAt TEXT NOT NULL);");
+        await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS MeetingAttachments (Id INTEGER NOT NULL CONSTRAINT PK_MeetingAttachments PRIMARY KEY AUTOINCREMENT, MeetingId INTEGER NOT NULL, OriginalName TEXT NOT NULL, StoredName TEXT NOT NULL, ContentType TEXT NOT NULL, Size INTEGER NOT NULL, ContentHash TEXT NOT NULL, UploadedBy TEXT NOT NULL, UploadedAt TEXT NOT NULL, CONSTRAINT FK_MeetingAttachments_Meetings_MeetingId FOREIGN KEY (MeetingId) REFERENCES Meetings(Id) ON DELETE CASCADE);");
         await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS MeetingAttendees (Id INTEGER NOT NULL CONSTRAINT PK_MeetingAttendees PRIMARY KEY AUTOINCREMENT, MeetingId INTEGER NOT NULL, NationalId TEXT NOT NULL, DisplayName TEXT NOT NULL, Title TEXT NOT NULL, IsPresent INTEGER NOT NULL, AbsenceReason TEXT NOT NULL, CONSTRAINT FK_MeetingAttendees_Meetings_MeetingId FOREIGN KEY (MeetingId) REFERENCES Meetings(Id) ON DELETE CASCADE);");
         await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_MeetingAttendees_MeetingId_NationalId ON MeetingAttendees (MeetingId, NationalId);");
         await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS BrowserPushSubscriptions (Id INTEGER NOT NULL CONSTRAINT PK_BrowserPushSubscriptions PRIMARY KEY AUTOINCREMENT, NationalId TEXT NOT NULL, Endpoint TEXT NOT NULL, P256dh TEXT NOT NULL, Auth TEXT NOT NULL, CreatedAt TEXT NOT NULL, LastUsedAt TEXT NULL);");
