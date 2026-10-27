@@ -1719,7 +1719,7 @@ app.MapGet("/api/reports", async (HttpContext context, AppDb db, string? view, i
             .Replace("ي", "ی").Replace("ى", "ی").Replace("ك", "ک").Replace("‌", " ").ToLowerInvariant().Contains(normalizedQuery)))
         .ToList();
     var safePage = Math.Max(1, page ?? 1);
-    var safePageSize = Math.Clamp(pageSize ?? 10, 1, 50);
+    var safePageSize = Math.Clamp(pageSize ?? 10, 1, 5000);
     var peopleTotal = filteredPeople.Count;
     var people = filteredPeople.Skip((safePage - 1) * safePageSize).Take(safePageSize)
         .Select(person => new { person.NationalId, person.DisplayName, person.Title, person.Total, person.Completed, person.Delayed, person.Pending })
