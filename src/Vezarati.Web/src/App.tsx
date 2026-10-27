@@ -14,9 +14,11 @@ type UserNotification = { id: number; resolutionId?: number; resolutionNumber?: 
 type BaleMessageReportItem = { id: number; displayName: string; mobile: string; text: string; status: string; attempts: number; createdAt: string; sentAt?: string | null; lastError: string };
 type BaleMessageReport = { total: number; page: number; pageSize: number; items: BaleMessageReportItem[] };
 type ResolutionEvent = { id: number; nationalId: string; userName: string; text: string; createdAt: string };
-type ResolutionAttachment = { id: number; resolutionReportId?: number | null; originalName: string; contentType: string; size: number; uploadedBy: string; uploaderName: string; approvedForAll: boolean; uploadedAt: string };
+type ResolutionAttachment = { id: number; resolutionReportId?: number | null; originalName: string; contentType: string; size: number; contentHash?: string; uploadedBy: string; uploaderName: string; approvedForAll: boolean; uploadedAt: string };
+type MeetingFile = { id: number; originalName: string; contentType: string; size: number; contentHash?: string };
+async function sha256File(file: File): Promise<string> { const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer()); return Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, "0")).join("").toUpperCase(); }
 type MeetingOption = { id: number; date: string; dateJalali: string; title: string; guestText: string; attendees: { nationalId: string; displayName: string; title: string; isPresent: boolean; absenceReason: string }[] };
-type Resolution = { meetingId?: number | null; publishToAll?: boolean; isArchived?: boolean; updatedAt?: string | null; startDate?: string | null; startDateJalali?: string; dueDate?: string | null; dueDateJalali?: string; requiresPeriodicReport?: boolean; reportFrequency?: string; cancellationReason?: string; id: number; meetingDate: string; meetingDateJalali?: string; number: string; text: string; notes: string; status: string; groupId: number | null; groupAssignments?: { groupId: number; group?: { name: string } }[]; assignments: { nationalId: string }[]; progress?: ResolutionProgress[]; attachments?: ResolutionAttachment[]; events?: ResolutionEvent[] };
+type Resolution = { meetingAttachments?: MeetingFile[]; meetingId?: number | null; publishToAll?: boolean; isArchived?: boolean; updatedAt?: string | null; startDate?: string | null; startDateJalali?: string; dueDate?: string | null; dueDateJalali?: string; requiresPeriodicReport?: boolean; reportFrequency?: string; cancellationReason?: string; id: number; meetingDate: string; meetingDateJalali?: string; number: string; text: string; notes: string; status: string; groupId: number | null; groupAssignments?: { groupId: number; group?: { name: string } }[]; assignments: { nationalId: string }[]; progress?: ResolutionProgress[]; attachments?: ResolutionAttachment[]; events?: ResolutionEvent[] };
 type DirectoryUser = { nationalId: string; displayName: string; title?: string; organizationUnit?: string; province?: string | null; role?: string; canChangeRole?: boolean };
 type Dashboard = { currentUser: { nationalId: string; displayName: string; role: string; title?: string; organizationUnit?: string }; groups: Group[]; resolutions: Resolution[] };
 type AuthUser = { nationalId: string; displayName: string; role: string; title?: string; organizationUnit?: string; province?: string | null; mobile?: string };
@@ -212,6 +214,14 @@ export default function App() {
   const eventReportFromPickerRef = useRef<any>(null);
   const eventReportToPickerRef = useRef<any>(null);
   const meetingDatePickerRef = useRef<any>(null);
+  const [meetingPickerQuery, setMeetingPickerQuery] = useState("");
+  const [meetingPickerOpen, setMeetingPickerOpen] = useState(false);
+  const [fontScale, setFontScale] = useState(() => { const saved = Number(localStorage.getItem("vezarati.fontScale")); return Number.isFinite(saved) && saved >= 14 && saved <= 20 ? saved : 16; });
+  const overviewFromPickerRef = useRef<any>(null);
+  const overviewToPickerRef = useRef<any>(null);
+  const [overviewFrom, setOverviewFrom] = useState("");
+  const [overviewTo, setOverviewTo] = useState("");
+  const [editingResolutionHashes, setEditingResolutionHashes] = useState<string[]>([]);
   const startDatePickerRef = useRef<any>(null);
   const dueDatePickerRef = useRef<any>(null);
   const [editingResolutionId, setEditingResolutionId] = useState<number | null>(null);
@@ -220,7 +230,7 @@ export default function App() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [resolutionFormError, setResolutionFormError] = useState("");
-  const [form, setForm] = useState({ meetingId: "", meetingDate: today(), meetingDateJalali: jalaliToday(), number: "", text: "", notes: "", status: "before", groupIds: [] as string[], unitIds: [] as string[], people: [] as string[], publishToAll: false, startDate: tomorrow(), startDateJalali: gregorianToJalali(tomorrow()), dueDate: "", dueDateJalali: "", requiresPeriodicReport: false, reportFrequency: "weekly", cancellationReason: "" });
+  const [form, setForm] = useState({ meetingId: "", meetingDate: today(), meetingDateJalali: jalaliToday(), number: "", text: "", notes: "", groupIds: [] as string[], unitIds: [] as string[], people: [] as string[], publishToAll: false, startDate: tomorrow(), startDateJalali: gregorianToJalali(tomorrow()), dueDate: "", dueDateJalali: "", requiresPeriodicReport: false, reportFrequency: "weekly" });
   const [resolutionFiles, setResolutionFiles] = useState<File[]>([]);
   const [resolutionEventDraft, setResolutionEventDraft] = useState("");
   const [groupName, setGroupName] = useState("");
@@ -598,28 +608,35 @@ export default function App() {
     }
   }
   function openCreateResolution(meeting?: MeetingOption) {
-    setResolutionFormError("");
-    setEditingResolutionId(null); setPeopleQuery(""); setResolutionFiles([]); setResolutionEventDraft("");
+    setResolutionFormError(""); setEditingResolutionId(null); setPeopleQuery(""); setResolutionFiles([]); setEditingResolutionHashes([]); setResolutionEventDraft("");
     const meetingDate=meeting?.date??today();const startDate=meeting&&tomorrow()<meetingDate?meetingDate:tomorrow();
-    setForm({ meetingId: meeting?String(meeting.id):"", meetingDate, meetingDateJalali: meeting?.dateJalali||gregorianToJalali(meetingDate), number: "", text: "", notes: "", status: "before", groupIds: [], unitIds: [], people: [], publishToAll: false, startDate, startDateJalali: startDate===meetingDate?(meeting?.dateJalali||gregorianToJalali(startDate)):gregorianToJalali(startDate), dueDate: "", dueDateJalali: "", requiresPeriodicReport: false, reportFrequency: "weekly", cancellationReason: "" });
+    const meetingId=meeting?String(meeting.id):"";
+    setMeetingPickerQuery(meeting?.title??"");setMeetingPickerOpen(false);
+    setForm({ meetingId, meetingDate, meetingDateJalali: meeting?.dateJalali||gregorianToJalali(meetingDate), number: "", text: "", notes: "", groupIds: [], unitIds: [], people: [], publishToAll: false, startDate, startDateJalali: startDate===meetingDate?(meeting?.dateJalali||gregorianToJalali(startDate)):gregorianToJalali(startDate), dueDate: "", dueDateJalali: "", requiresPeriodicReport: false, reportFrequency: "weekly" });
     setModalOpen(true);
   }
   function openEditResolution(item: Resolution) {
-    setResolutionFormError("");
-    setEditingResolutionId(item.id); setPeopleQuery(""); setResolutionFiles([]); setResolutionEventDraft("");
-    setForm({ meetingId: item.meetingId?String(item.meetingId):"", meetingDate: item.meetingDate, meetingDateJalali: item.meetingDateJalali || gregorianToJalali(item.meetingDate), number: item.number, text: item.text, notes: item.notes, status: item.status, startDate: item.startDate ?? item.meetingDate, startDateJalali: item.startDateJalali || gregorianToJalali(item.startDate ?? item.meetingDate), dueDate: item.dueDate ?? "", dueDateJalali: item.dueDateJalali ?? "", requiresPeriodicReport: item.requiresPeriodicReport ?? false, reportFrequency: item.reportFrequency || "weekly", cancellationReason: item.cancellationReason ?? "", publishToAll: item.publishToAll ?? false, groupIds: Array.from(new Set([...(item.groupAssignments ?? []).map(assignment => assignment.groupId), ...(item.groupId ? [item.groupId] : [])].filter(id => isResolutionGroup(groups.find(group => group.id === id)?.name ?? "", groups.find(group => group.id === id)?.category)).map(String))), unitIds: Array.from(new Set([...(item.groupAssignments ?? []).map(assignment => assignment.groupId), ...(item.groupId ? [item.groupId] : [])].filter(id => { const name = groups.find(group => group.id === id)?.name ?? ""; return !isResolutionGroup(name, groups.find(group => group.id === id)?.category) && !isIndividualRecipientGroup(name); }).map(String))), people: Array.from(new Set(item.assignments?.map(assignment => assignment.nationalId) ?? [])) });
+    setResolutionFormError(""); setEditingResolutionId(item.id); setPeopleQuery(""); setResolutionFiles([]); setEditingResolutionHashes((item.attachments||[]).map(file=>file.contentHash||"").filter(Boolean)); setResolutionEventDraft("");
+    const groupIds=Array.from(new Set([...(item.groupAssignments??[]).map(assignment=>assignment.groupId),...(item.groupId?[item.groupId]:[])].filter(id=>isResolutionGroup(groups.find(group=>group.id===id)?.name??"",groups.find(group=>group.id===id)?.category)).map(String)));
+    const unitIds=Array.from(new Set([...(item.groupAssignments??[]).map(assignment=>assignment.groupId),...(item.groupId?[item.groupId]:[])].filter(id=>{const group=groups.find(group=>group.id===id);return !!group&&!isResolutionGroup(group.name,group.category)&&!isIndividualRecipientGroup(group.name);}).map(String)));
+    const covered=unitCoveredPersonIds(unitIds);
+    const people=Array.from(new Set(item.assignments?.map(assignment=>assignment.nationalId)??[])).filter(id=>!covered.has(id));
+    const meeting=meetings.find(entry=>entry.id===item.meetingId);
+    setMeetingPickerQuery(meeting?.title??"");setMeetingPickerOpen(false);
+    setForm({ meetingId:item.meetingId?String(item.meetingId):"", meetingDate:item.meetingDate, meetingDateJalali:item.meetingDateJalali||gregorianToJalali(item.meetingDate), number:item.number, text:item.text, notes:item.notes, groupIds, unitIds, people, startDate:item.startDate??item.meetingDate, startDateJalali:item.startDateJalali||gregorianToJalali(item.startDate??item.meetingDate), dueDate:item.dueDate??"", dueDateJalali:item.dueDateJalali??"", requiresPeriodicReport:item.requiresPeriodicReport??false, reportFrequency:item.reportFrequency||"weekly", publishToAll:item.publishToAll??false });
     setModalOpen(true);
   }
   const dateValidationError = form.meetingDate && form.startDate && form.meetingDate > form.startDate ? "تاریخ جلسه نباید بعد از زمان شروع باشد." : form.dueDate && form.startDate && form.dueDate <= form.startDate ? "زمان سررسید باید بعد از زمان شروع باشد." : "";
   async function createResolution() {
     if (!form.meetingId) { setResolutionFormError("جلسه مرتبط را انتخاب کنید."); return; }
+    if (form.groupIds.length+form.unitIds.length+form.people.length===0) { setResolutionFormError("حداقل یک گروه، معاونت، اداره‌کل یا فرد را برای ارجاع انتخاب کنید."); return; }
     if (dateValidationError) { setResolutionFormError(dateValidationError); return; }
     setResolutionFormError("");
     setBusy(true); setMessage("");
     const existingId=editingResolutionId;
     const url=existingId?"/api/resolutions/"+existingId:"/api/resolutions";
     try {
-      const response=await fetch(url,{method:existingId?"PUT":"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({...form,meetingId:Number(form.meetingId),groupId:form.groupIds.length?Number(form.groupIds[0]):null,groupIds:[...form.groupIds,...form.unitIds].map(Number),people:form.people,publishToAll:form.publishToAll,dueDate:form.dueDate||null,dueDateJalali:form.dueDateJalali,startDate:form.startDate||null,startDateJalali:form.startDateJalali,requiresPeriodicReport:form.requiresPeriodicReport,reportFrequency:form.reportFrequency,cancellationReason:form.cancellationReason})});
+      const response=await fetch(url,{method:existingId?"PUT":"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({...form,status:"before",cancellationReason:"",meetingId:Number(form.meetingId),meetingDate:form.meetingDate,groupId:form.groupIds.length?Number(form.groupIds[0]):null,groupIds:[...form.groupIds,...form.unitIds].map(Number),people:form.people,publishToAll:form.publishToAll,dueDate:form.dueDate||null,dueDateJalali:form.dueDateJalali,startDate:form.startDate||null,startDateJalali:form.startDateJalali,requiresPeriodicReport:form.requiresPeriodicReport,reportFrequency:form.reportFrequency})});
       const result=response.status===204?null:await response.json();
       if(!response.ok)throw new Error(result?.error||"ذخیره مصوبه انجام نشد.");
       const resolutionId=existingId??result?.id;
@@ -627,7 +644,8 @@ export default function App() {
       setEditingResolutionId(resolutionId);
       for(const file of resolutionFiles){const data=new FormData();data.append("file",file);const attached=await fetch(`/api/resolutions/${resolutionId}/attachments`,{method:"POST",credentials:"include",body:data});const attachmentResult=attached.status===204?null:await attached.json();if(!attached.ok)throw new Error(attachmentResult?.error||"بارگذاری یکی از پیوست‌ها انجام نشد.");}
       if(resolutionEventDraft.trim()){const eventResponse=await fetch(`/api/resolutions/${resolutionId}/events`,{method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({text:resolutionEventDraft.trim(),nationalId:viewerId,userName:authUser?.displayName||""})});const eventResult=await eventResponse.json();if(!eventResponse.ok)throw new Error(eventResult?.error||"ثبت رویداد انجام نشد.");}
-      setModalOpen(false);setEditingResolutionId(null);setResolutionFiles([]);setResolutionEventDraft("");setMessage("مصوبه و موارد پیوست‌شده ذخیره شد.");await load();
+      setModalOpen(false);setEditingResolutionId(null);setResolutionFiles([]);setEditingResolutionHashes([]);setResolutionEventDraft("");setMessage("مصوبه و موارد پیوست‌شده ذخیره شد.");
+      const listResponse=await fetch("/api/resolutions",{credentials:"include",cache:"no-store"});if(listResponse.ok){const fresh=asArray<Resolution>(await listResponse.json());setResolutions(fresh);setDashboard(current=>current?{...current,resolutions:fresh}:current);}
     } catch(cause) { const text=cause instanceof Error?cause.message:"ذخیره مصوبه انجام نشد.";setResolutionFormError(text);setMessage(text); }
     finally { setBusy(false); }
   }
