@@ -461,3 +461,8 @@
 .report-task-item>small{display:block;margin-top:5px}
 .report-task-item>p{margin:6px 0;padding:8px 10px;background:#f7f9fc;border-radius:8px}
 @media(max-width:640px){.font-size-control button{min-width:32px;padding-inline:5px}.overview-date-filters{align-items:stretch}.overview-date-filters label{min-width:calc(50% - 8px)}}
+
+/* Keep dialogs above the account bar and align required markers with their labels. */
+.modal-backdrop{z-index:100}
+.required-field{position:relative;padding-inline-start:1.05em}
+.required-field::before{position:absolute;inset-inline-start:0;top:0;display:inline-block;margin:0;line-height:1.4}
