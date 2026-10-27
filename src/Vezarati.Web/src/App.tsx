@@ -127,6 +127,7 @@ const displayLocation = (value?: string | null) => { const text = String(value ?
 const jalaliParts = (value: string) => toLatinDigits(String(value||"")).replace(/[/-]/g,".").split(".").map(Number);
 const normalizeJalaliDate = (value: string) => { const [year,month,day]=jalaliParts(value); if(Number.isInteger(year)&&year>=1300&&year<=1600&&Number.isInteger(month)&&month>=1&&month<=12&&Number.isInteger(day)&&day>=1&&day<=jalaliMonthDays(`${year}.${String(month).padStart(2,"0")}.01`)) return `${year}.${String(month).padStart(2,"0")}.${String(day).padStart(2,"0")}`; return jalaliToday(); };
 const resolutionMeetingDay = (item: Resolution) => normalizeJalaliDate(item.meetingDateJalali || gregorianToJalali(item.meetingDate));
+const resolutionJalaliMonth = (item: Resolution) => normalizeJalaliDate(item.meetingDateJalali || gregorianToJalali(item.meetingDate)).slice(0,7);
 const normalizeJalaliMonth = (value: string) => { const [year,month]=jalaliParts(value); if(Number.isInteger(year)&&year>=1300&&year<=1600&&Number.isInteger(month)&&month>=1&&month<=12) return `${year}.${String(month).padStart(2,"0")}.01`; const [fallbackYear,fallbackMonth]=jalaliParts(jalaliToday()); return `${fallbackYear}.${String(fallbackMonth).padStart(2,"0")}.01`; };
 const jalaliMonthTitle = (value: string) => { const safeMonth=normalizeJalaliMonth(value); const date=new Date(`${jalaliToGregorian(safeMonth)}T12:00:00`); return new Intl.DateTimeFormat("fa-IR-u-ca-persian", { month: "long", year: "numeric", numberingSystem: "arabext" }).format(Number.isNaN(date.getTime())?new Date():date); };
 const jalaliMonthDays = (value: string) => { const [year,month]=jalaliParts(normalizeJalaliMonth(value)); return month<=6?31:month<=11?30:((year-979)%33===1||(year-979)%33===5||(year-979)%33===9||(year-979)%33===13||(year-979)%33===17||(year-979)%33===22||(year-979)%33===26||(year-979)%33===30?30:29); };
@@ -219,6 +220,9 @@ export default function App() {
   const [adminUserQuery, setAdminUserQuery] = useState("");
   const [resolutionPage, setResolutionPage] = useState(1);
   const [resolutionPageSize, setResolutionPageSize] = useState(10);
+  const [archiveLoading, setArchiveLoading] = useState(false);
+  const [archiveLoaded, setArchiveLoaded] = useState(false);
+  const archiveFetchStarted = useRef(false);
   const [resolutionSort, setResolutionSort] = useState<{ key: "meetingTitle" | "meetingDate" | "number" | "text" | "assignment" | "dueDate" | "status"; direction: "asc" | "desc" }>({ key: "meetingDate", direction: "desc" });
   const [modalOpen, setModalOpen] = useState(false);
   const [reportRejectionTarget, setReportRejectionTarget] = useState<{ kind: "submission"; report: ResolutionReport } | { kind: "completion"; resolutionId: number; assigneeNationalId: string } | null>(null);
@@ -279,14 +283,14 @@ export default function App() {
     setError("");
     try {
       const [dashboardResponse, resolutionsResponse, groupsResponse, reportsResponse, usersResponse, notificationsResponse, submissionsResponse, baleSettingsResponse, meetingsResponse] = await Promise.all([
-        fetch("/api/dashboard"), fetch("/api/resolutions"), fetch("/api/groups"), fetch("/api/reports"), isAdmin ? fetch("/api/users") : Promise.resolve(new Response(JSON.stringify({ total: 0, completed: 0, delayed: 0, pending: 0, people: [] }), { status: 200 })), fetch("/api/notifications"), isAdmin ? fetch("/api/reports/submissions") : Promise.resolve(new Response("[]", { status: 200 })), isAdmin ? fetch("/api/settings/bale-notifications") : Promise.resolve(new Response(JSON.stringify({ enabled: false, configured: false }), { status: 200 })), isAdmin ? fetch("/api/meetings") : Promise.resolve(new Response("[]", { status: 200 }))
+        fetch("/api/dashboard"), Promise.resolve(new Response("[]", { status: 200 })), fetch("/api/groups"), fetch("/api/reports"), isAdmin ? fetch("/api/users") : Promise.resolve(new Response(JSON.stringify({ total: 0, completed: 0, delayed: 0, pending: 0, people: [] }), { status: 200 })), fetch("/api/notifications"), isAdmin ? fetch("/api/reports/submissions") : Promise.resolve(new Response("[]", { status: 200 })), isAdmin ? fetch("/api/settings/bale-notifications") : Promise.resolve(new Response(JSON.stringify({ enabled: false, configured: false }), { status: 200 })), isAdmin ? fetch("/api/meetings") : Promise.resolve(new Response("[]", { status: 200 }))
       ]);
       for (const response of [dashboardResponse, resolutionsResponse, groupsResponse, reportsResponse, usersResponse, notificationsResponse, submissionsResponse, baleSettingsResponse, meetingsResponse]) if (!response.ok) throw new Error(response.status === 401 ? "نشست شما منقضی شده است." : "گرفتن اطلاعات از API ناموفق بود.");
       const baleSettings = await baleSettingsResponse.json();
       setBaleNotificationsEnabled(!!baleSettings.enabled);
       setBaleNotificationsConfigured(!!baleSettings.configured);
       const dashboardData = await dashboardResponse.json();
-      const resolutionData = asArray<Resolution>(await resolutionsResponse.json());
+      const resolutionData = asArray<Resolution>(dashboardData && typeof dashboardData === "object" ? dashboardData.resolutions : []);
       const groupData = asGroups(await groupsResponse.json());
       const reportData = await reportsResponse.json();
       const userData = asArray<{ nationalId: string; displayName: string; title?: string; organizationUnit?: string; mobile?: string; province?: string | null; role?: string; canChangeRole?: boolean }>(await usersResponse.json());
@@ -296,7 +300,7 @@ export default function App() {
       setMeetings(meetingData);
       setDashboard(dashboardData && typeof dashboardData === "object" ? { ...dashboardData, groups: asGroups(dashboardData.groups), resolutions: asArray<Resolution>(dashboardData.resolutions) } : null);
       setDashboardLoaded(true);
-      setResolutions(resolutionData);
+      setResolutions(current => [...resolutionData, ...current.filter(item => item.isArchived)]);
       setGroups(groupData);
       setReports(reportData && typeof reportData === "object" ? { ...reportData, people: asArray(reportData.people) } as Report : { total: 0, completed: 0, delayed: 0, pending: 0, people: [] });
       setUsers(userData);
@@ -378,6 +382,18 @@ export default function App() {
   useEffect(() => { const safe=normalizeJalaliMonth(calendarMonth); if(safe!==calendarMonth) setCalendarMonth(safe); }, [calendarMonth]);
   useEffect(() => { const normalized=normalizeJalaliDate(selectedDay); if(normalized!==selectedDay){setSelectedDay(normalized);setCalendarMonth(normalized.slice(0,7)+".01");} }, [selectedDay]);
   useEffect(() => { if (authUser) void load(); }, [authUser?.nationalId]);
+  useEffect(() => {
+    if (!authUser || !isAdmin || tab !== "archive" || archiveLoaded || archiveFetchStarted.current) return;
+    let active = true;
+    archiveFetchStarted.current = true;
+    setArchiveLoading(true);
+    fetch("/api/resolutions", { credentials: "include", cache: "no-store" })
+      .then(async response => { const body = await response.json(); if (!response.ok) throw new Error(body?.error || "بایگانی مصوبات دریافت نشد."); return asArray<Resolution>(body); })
+      .then(items => { if (active) { setResolutions(items); setArchiveLoaded(true); } })
+      .catch(error => { if (active) { setMessage(error instanceof Error ? error.message : "دریافت بایگانی ناموفق بود."); archiveFetchStarted.current = false; } })
+      .finally(() => { if (active) setArchiveLoading(false); });
+    return () => { active = false; };
+  }, [authUser?.nationalId, isAdmin, tab, archiveLoaded]);
   useEffect(() => { document.documentElement.style.setProperty("--ui-scale", String(fontScale / 16)); try { localStorage.setItem("vezarati.fontScale", String(fontScale)); } catch { /* local storage is optional */ } }, [fontScale]);
   useEffect(() => {
     if (!authUser || !("serviceWorker" in navigator) || !("PushManager" in window)) { setPushEnabled(false); return; }
@@ -1055,15 +1071,18 @@ export default function App() {
   const resolutionReportSubmitted=resolutionReportEntries.filter(entry=>entry.hasReport).length;
   const resolutionReportMissing=resolutionReportEntries.length-resolutionReportSubmitted;
   const resolutionReportPercent=resolutionReportEntries.length?Math.round(resolutionReportSubmitted*100/resolutionReportEntries.length):0;
+  const currentJalaliMonth = normalizeJalaliMonth(jalaliToday());
   const reportMonths = Array.from({ length: 6 }, (_, index) => {
-    const month = new Date(); month.setDate(1); month.setHours(12, 0, 0, 0); month.setMonth(month.getMonth() - 5 + index);
-    const key = `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, "0")}`;
-    const monthItems = overviewResolutions.filter(item => item.meetingDate?.slice(0, 7) === key);
-    return { key, title: new Intl.DateTimeFormat("fa-IR", { month: "short" }).format(month), total: monthItems.length, completed: monthItems.filter(item => item.status === "completed").length, delayed: monthItems.filter(item => item.status === "delayed").length, pending: monthItems.filter(item => item.status === "before" || item.status === "in_progress").length };
+    const jalaliMonth = shiftJalaliMonth(currentJalaliMonth, index - 5);
+    const [year, monthNumber] = jalaliParts(jalaliMonth);
+    const key = `${year}.${String(monthNumber).padStart(2, "0")}`;
+    const monthDate = new Date(`${jalaliToGregorian(jalaliMonth)}T12:00:00`);
+    const monthItems = overviewResolutions.filter(item => resolutionJalaliMonth(item) === key);
+    return { key, title: new Intl.DateTimeFormat("fa-IR", { month: "long" }).format(monthDate), total: monthItems.length, completed: monthItems.filter(item => item.status === "completed").length, delayed: monthItems.filter(item => item.status === "delayed").length, pending: monthItems.filter(item => item.status === "before" || item.status === "in_progress").length };
   });
   const monthMax = Math.max(1, ...reportMonths.map(month => month.total));
   const selectedOverviewItems = !overviewDrilldown ? [] : "monthKey" in overviewDrilldown
-    ? overviewResolutions.filter(item => item.meetingDate?.slice(0, 7) === overviewDrilldown.monthKey)
+    ? overviewResolutions.filter(item => resolutionJalaliMonth(item) === overviewDrilldown.monthKey)
     : overviewResolutions.filter(item => overviewDrilldown.status === "pending" ? item.status === "before" || item.status === "in_progress" : item.status === overviewDrilldown.status);
   const selectedOverviewTitle = !overviewDrilldown ? "" : "monthKey" in overviewDrilldown
     ? reportMonths.find(month => month.key === overviewDrilldown.monthKey)?.title ?? "مصوبات ماه"
