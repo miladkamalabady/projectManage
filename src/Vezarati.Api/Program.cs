@@ -105,16 +105,16 @@ app.MapGet("/api/admin/database/backup", async (HttpContext context, AppDb db, I
     if (!context.User.IsInRole("ادمین")) return Results.Forbid();
     var databaseName = db.Database.GetDbConnection().Database;
     if (string.IsNullOrWhiteSpace(databaseName)) return Results.Problem("نام دیتابیس در اتصال SQL Server مشخص نیست.", statusCode: StatusCodes.Status500InternalServerError);
-    var backupDirectory = configuration["DatabaseBackupDirectory"];
-    backupDirectory = string.IsNullOrWhiteSpace(backupDirectory)
+    var configuredDirectory = configuration["DatabaseBackupDirectory"];
+    var backupDirectory = string.IsNullOrWhiteSpace(configuredDirectory)
         ? Path.Combine(environment.ContentRootPath, "data", "backups")
-        : Path.GetFullPath(backupDirectory, environment.ContentRootPath);
-    Directory.CreateDirectory(backupDirectory);
+        : Path.GetFullPath(configuredDirectory, environment.ContentRootPath);
     var stamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
     var databaseFile = Path.Combine(backupDirectory, $"vezarati-{Guid.NewGuid():N}.bak");
     var archiveFile = Path.Combine(Path.GetTempPath(), $"vezarati-backup-{Guid.NewGuid():N}.zip");
     try
     {
+        Directory.CreateDirectory(backupDirectory);
         var connection = db.Database.GetDbConnection();
         await using (var command = connection.CreateCommand())
         {
@@ -127,6 +127,26 @@ app.MapGet("/api/admin/database/backup", async (HttpContext context, AppDb db, I
             if (connection.State != System.Data.ConnectionState.Open) await connection.OpenAsync(context.RequestAborted);
             await command.ExecuteNonQueryAsync(context.RequestAborted);
         }
+
+        if (!System.IO.File.Exists(databaseFile) || new FileInfo(databaseFile).Length == 0)
+            throw new InvalidOperationException("SQL Server عملیات بکاپ را انجام داد اما فایل خروجی ایجاد نشد.");
+
+        await using (var archiveStream = new FileStream(archiveFile, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
+        using (var archive = new ZipArchive(archiveStream, ZipArchiveMode.Create, leaveOpen: false))
+        {
+            var manifestEntry = archive.CreateEntry("manifest.json", CompressionLevel.Fastest);
+            await using (var manifestStream = manifestEntry.Open())
+                await JsonSerializer.SerializeAsync(manifestStream, new
+                {
+                    formatVersion = 1,
+                    product = "Vezarati",
+                    database = databaseName,
+                    createdAtUtc = DateTime.UtcNow
+                }, cancellationToken: context.RequestAborted);
+
+            archive.CreateEntryFromFile(databaseFile, "database.bak", CompressionLevel.NoCompression);
+        }
+
         System.IO.File.Delete(databaseFile);
         context.Response.OnCompleted(() =>
         {
@@ -137,10 +157,18 @@ app.MapGet("/api/admin/database/backup", async (HttpContext context, AppDb db, I
     }
     catch (Exception exception)
     {
-        logger.LogError(exception, "Database backup failed for {Database}", databaseName);
+        logger.LogError(exception, "Database backup failed for {Database}. Backup directory: {BackupDirectory}", databaseName, backupDirectory);
         try { if (System.IO.File.Exists(databaseFile)) System.IO.File.Delete(databaseFile); } catch { }
         try { if (System.IO.File.Exists(archiveFile)) System.IO.File.Delete(archiveFile); } catch { }
-        return Results.Problem("تهیه نسخه پشتیبان ناموفق بود. دسترسی حساب سرویس SQL Server به پوشه پشتیبان را بررسی کنید.", statusCode: StatusCodes.Status500InternalServerError);
+        var detail = exception switch
+        {
+            SqlException sqlException when sqlException.Number == 3201 => "SQL Server به مسیر پوشه پشتیبان دسترسی ندارد. پوشه باید روی خود سرور SQL Server موجود باشد و حساب سرویس SQL Server مجوز نوشتن داشته باشد.",
+            SqlException sqlException => $"خطای SQL Server در تهیه پشتیبان (کد {sqlException.Number}): {sqlException.Message}",
+            UnauthorizedAccessException => $"برنامه اجازه نوشتن در مسیر «{backupDirectory}» را ندارد. مجوز نوشتن حساب Application Pool را بررسی کنید.",
+            DirectoryNotFoundException => $"مسیر پوشه پشتیبان پیدا نشد: «{backupDirectory}».",
+            _ => $"تهیه نسخه پشتیبان ناموفق بود: {exception.Message}"
+        };
+        return Results.Problem(detail, statusCode: StatusCodes.Status500InternalServerError);
     }
 });
 
