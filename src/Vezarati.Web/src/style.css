@@ -611,3 +611,25 @@
 .backup-selected-file{color:#647670}
 .backup-warning{margin-top:14px;line-height:1.9}
 @media(max-width:720px){.backup-action-grid{grid-template-columns:1fr}.backup-action-grid article{padding:14px}.backup-file-picker{align-items:flex-start;flex-direction:column}.backup-file-picker input{max-width:100%;width:100%}}
+
+.reports-tab-overview .manager-report-grid>.topic-report-panel{display:block;grid-column:1/-1}
+.topic-report-panel{padding:20px}
+.topic-report-layout{display:grid;grid-template-columns:210px minmax(0,1fr);align-items:center;gap:22px;margin-top:14px}
+.topic-donut{display:grid;place-items:center;width:190px;aspect-ratio:1;border-radius:50%;position:relative;margin:auto}
+.topic-donut:before{content:"";position:absolute;inset:23%;border-radius:50%;background:#fff;box-shadow:0 1px 8px #18392a12}
+.topic-donut>div{position:relative;z-index:1;display:grid;gap:2px;text-align:center}
+.topic-donut b{font-size:1.5rem;color:#2b4145}
+.topic-donut small{color:#71817c}
+.topic-distribution{display:grid;gap:7px}
+.topic-distribution>button{display:grid;grid-template-columns:minmax(130px,1.15fr) minmax(80px,2fr) 78px;gap:12px;align-items:center;padding:8px 10px;border:1px solid transparent;border-radius:9px;background:#fff;color:#354a4e;text-align:right}
+.topic-distribution>button:hover,.topic-distribution>button.selected{border-color:#a8c8b8;background:#f4faf6}
+.topic-name{display:flex;align-items:center;gap:8px;min-width:0}
+.topic-name i{width:10px;height:10px;border-radius:50%;flex:0 0 10px}
+.topic-name b{font-size:.86rem}
+.topic-track{height:8px;border-radius:99px;background:#edf1ef;overflow:hidden}
+.topic-track i{display:block;height:100%;border-radius:inherit}
+.topic-distribution strong{text-align:left;font-size:.9rem;white-space:nowrap}
+.topic-distribution strong small{color:#7d8a86;font-weight:500}
+.topic-drilldown{margin-top:16px;border-top:1px solid #e6ece9;padding-top:14px}
+.topic-drilldown .overview-drilldown-list article>div:last-child{display:flex;flex-wrap:wrap;gap:12px}
+@media(max-width:720px){.topic-report-layout{grid-template-columns:1fr;gap:14px}.topic-donut{width:160px}.topic-distribution>button{grid-template-columns:minmax(110px,1fr) minmax(50px,1.2fr) 64px;gap:8px;padding-inline:5px}.topic-name b{font-size:.78rem}.topic-report-panel{padding:14px}}
