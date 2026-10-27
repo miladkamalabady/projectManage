@@ -702,10 +702,6 @@ export default function App() {
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a"); link.href = url; link.download = "resolution-reports.csv"; link.click(); URL.revokeObjectURL(url);
   }
-  async function deleteResolution(item: Resolution) {
-    const confirmed = window.confirm(`مصوبه «${item.number}» با شناسه یکتا ${item.id} حذف شود؟`);
-    if (confirmed) await request(`/api/resolutions/${item.id}`, "DELETE");
-  }
   async function createGroup() { if (await request("/api/groups", "POST", { name: groupName })) setGroupName(""); }
   async function addMember() {
     if (!selectedGroup) { setMessage("ابتدا گروه را انتخاب کنید."); return; }
@@ -864,7 +860,7 @@ export default function App() {
   };
   const isAssignmentOptionSelected = (option: AssignmentOption) => option.kind === "group" ? form.groupIds.includes(String(option.groupId)) : option.kind === "unit" ? form.unitIds.includes(String(option.groupId)) : form.people.includes(option.nationalId || "") && !unitCoveredPersonIds(form.unitIds).has(option.nationalId || "");
   function toggleAssignmentOption(option: AssignmentOption, checked: boolean) {
-    if (option.kind === "person" && checked && unitCoveredPersonIds(form.unitIds).has(option.nationalId || "")) { setResolutionFormError("این فرد در معاونت یا واحد انتخاب‌شده قرار دارد؛ ارجاع به معاونت ملاک است."); return; }
+    if (option.kind === "post" && checked && unitCoveredPersonIds(form.unitIds).has(option.nationalId || "")) { setResolutionFormError("این فرد در معاونت یا واحد انتخاب‌شده قرار دارد؛ ارجاع به معاونت ملاک است."); return; }
     setForm(current => {
       if (option.kind === "group") return { ...current, groupIds: checked ? Array.from(new Set([...current.groupIds, String(option.groupId)])) : current.groupIds.filter(id => id !== String(option.groupId)) };
       if (option.kind === "unit") {
