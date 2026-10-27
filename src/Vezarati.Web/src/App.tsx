@@ -299,13 +299,13 @@ export default function App() {
       const meetingData = asArray<MeetingOption>(await meetingsResponse.json());
       setMeetings(meetingData);
       setDashboard(dashboardData && typeof dashboardData === "object" ? { ...dashboardData, groups: asGroups(dashboardData.groups), resolutions: asArray<Resolution>(dashboardData.resolutions) } : null);
-      setDashboardLoaded(true);
       setResolutions(current => [...resolutionData, ...current.filter(item => item.isArchived)]);
       setGroups(groupData);
       setReports(reportData && typeof reportData === "object" ? { ...reportData, people: asArray(reportData.people) } as Report : { total: 0, completed: 0, delayed: 0, pending: 0, people: [] });
       setUsers(userData);
       setNotifications(notificationData);
       setReportSubmissions(submissionData);
+      setDashboardLoaded(true);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "خطا در دریافت اطلاعات"); }
   }
   function requestNewMeeting() { setTab("sessions"); setOpenMeetingRequest(value => value + 1); }
@@ -1180,7 +1180,8 @@ export default function App() {
 
   if (!authReady) return <div className="auth-screen"><div className="auth-card"><ShieldCheck size={36}/><h1>دفتر وزارتی</h1><p>در حال بررسی نشست ورود…</p></div></div>;
   if (!authUser) return <div className="auth-screen"><div className="auth-card"><ShieldCheck size={36}/><h1>ورود به دفتر وزارتی</h1><p>{error || (new URLSearchParams(window.location.search).has("code") ? "ورود انجام نشد. لطفاً از درگاه سازمانی دوباره وارد شوید." : "برای ورود، از درگاه یکپارچه آموزش‌وپرورش به این صفحه بازگردید.")}</p></div></div>;
-  if (dashboardLoaded && !isAdmin && mine.length === 0) return <div className="auth-screen"><div className="auth-card access-denied-card"><ShieldCheck size={36}/><h1>شما دسترسی به این سامانه ندارید</h1><p>برای حساب کاربری «{authUser.displayName}» هیچ وظیفه‌ای ثبت یا ارجاع نشده است. در صورت نیاز، با دفتر وزارتی تماس بگیرید.</p><button type="button" className="primary" onClick={()=>void logout()}>خروج از حساب</button></div></div>;
+  if (!dashboardLoaded) return <div className="auth-screen app-loading-screen" role="status" aria-live="polite"><div className="auth-card"><div className="app-loading-spinner" aria-hidden="true"/><h1>دفتر وزارتی</h1>{error ? <><p>{error}</p><button type="button" className="primary" onClick={()=>void load()}>تلاش دوباره</button></> : <p>در حال بارگذاری مصوبات و اطلاعات سامانه…</p>}</div></div>;
+  if (!isAdmin && mine.length === 0) return <div className="auth-screen"><div className="auth-card access-denied-card"><ShieldCheck size={36}/><h1>شما دسترسی به این سامانه ندارید</h1><p>برای حساب کاربری «{authUser.displayName}» هیچ وظیفه‌ای ثبت یا ارجاع نشده است. در صورت نیاز، با دفتر وزارتی تماس بگیرید.</p><button type="button" className="primary" onClick={()=>void logout()}>خروج از حساب</button></div></div>;
   return <div className="shell">
     <aside className="sidebar">
       <div className="brand"><span className="brand-icon"><ShieldCheck /></span><div><b>دفتر وزارتی</b><small>پیگیری مصوبات</small></div></div>
