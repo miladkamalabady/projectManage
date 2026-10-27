@@ -417,7 +417,8 @@ app.MapPost("/api/meetings/{id:int}/attachments", async (int id, HttpRequest req
     if (!allowed) return Results.BadRequest(new { error = "فقط فایل PDF یا تصویر قابل بارگذاری است." });
     var meeting = await db.Meetings.Include(item => item.Attachments).FirstOrDefaultAsync(item => item.Id == id, context.RequestAborted);
     if (meeting is null) return Results.NotFound();
-    var hash = Convert.ToHexString(await SHA256.HashDataAsync(file.OpenReadStream(), context.RequestAborted));
+    using var meetingHashStream = file.OpenReadStream();
+    var hash = Convert.ToHexString(await SHA256.HashDataAsync(meetingHashStream, context.RequestAborted));
     if (meeting.Attachments.Any(item => item.ContentHash == hash)) return Results.Conflict(new { error = "این فایل قبلاً برای جلسه بارگذاری شده است." });
     var storedName = Guid.NewGuid().ToString("N") + extension;
     var directory = Path.Combine(environment.ContentRootPath, "data", "uploads");
@@ -1170,7 +1171,8 @@ app.MapPost("/api/resolutions/{id:int}/attachments", async (int id, HttpRequest 
              db.ResolutionGroups.Any(rg => rg.ResolutionId == id && rg.GroupId == m.GroupId)));
         if (!direct && !inGroup && !resolution.PublishToAll) return Results.StatusCode(StatusCodes.Status403Forbidden);
     }
-    var contentHash = Convert.ToHexString(await SHA256.HashDataAsync(file.OpenReadStream(), context.RequestAborted));
+    using var attachmentHashStream = file.OpenReadStream();
+    var contentHash = Convert.ToHexString(await SHA256.HashDataAsync(attachmentHashStream, context.RequestAborted));
     if (await db.Attachments.AnyAsync(existing => existing.ResolutionId == id && existing.ContentHash == contentHash, context.RequestAborted))
         return Results.Conflict(new { error = "این فایل قبلاً به همین مصوبه پیوست شده است." });
     var storedName = $"{Guid.NewGuid():N}{extension}";
