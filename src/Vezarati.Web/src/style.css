@@ -641,7 +641,7 @@
   body.print-quick-status{background:#fff!important}
   body.print-quick-status #root{height:0!important;min-height:0!important;overflow:hidden!important}
   body.print-quick-status #root *{visibility:hidden!important}
-  body.print-quick-status .quick-status-print-sheet,body.print-quick-status .quick-status-print-sheet *{visibility:visible!important}
+  body.print-quick-status #root .quick-status-print-sheet,body.print-quick-status #root .quick-status-print-sheet *{visibility:visible!important}
   body.print-quick-status .quick-status-print-sheet{display:flex!important;position:fixed!important;top:9mm!important;left:9mm!important;width:192mm!important;height:279mm!important;box-sizing:border-box!important;overflow:hidden!important;flex-direction:column!important;gap:3mm!important;padding:0!important;background:#fff!important;color:#263b3e!important;font-family:Vazirmatn,Arial,sans-serif!important}
   .quick-print-header{display:flex;align-items:flex-start;justify-content:space-between;border-bottom:2px solid #356d59;padding:0 0 3mm}
   .quick-print-header span{font-size:8pt;color:#487361}.quick-print-header h1{font-size:17pt;line-height:1.3;margin:1mm 0;color:#244b3b}.quick-print-header p{font-size:8pt;margin:0;color:#71817b}
