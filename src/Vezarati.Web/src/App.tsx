@@ -223,6 +223,7 @@ export default function App() {
   const [resolutionReportFilter, setResolutionReportFilter] = useState("all");
   const [resolutionStatusFilter, setResolutionStatusFilter] = useState("all");
   const [reportQuery, setReportQuery] = useState("");
+  const [reportAppliedQuery, setReportAppliedQuery] = useState("");
   const [reportPage, setReportPage] = useState(1);
   const [reportTaskSelection, setReportTaskSelection] = useState<{person: Report["people"][number]; status: "all" | "completed" | "pending" | "delayed"} | null>(null);
   const [reportTaskDetails, setReportTaskDetails] = useState<Resolution[]>([]);
@@ -463,23 +464,39 @@ export default function App() {
   useEffect(() => { if (authUser) void load(); }, [authUser?.nationalId]);
   useEffect(() => {
     if (!authUser || !isAdmin || tab !== "reports" || reportMainTab !== "people") return;
-    let active = true;
-    setReportsLoading(true);
-    setReportsError("");
-    const params = new URLSearchParams({ view: "people", page: String(reportPage), pageSize: "10", status: reportPersonStatusFilter });
-    if (reportQuery.trim()) params.set("q", reportQuery.trim());
     const timer = window.setTimeout(() => {
-      fetch(`/api/reports?${params.toString()}`, { credentials: "include", cache: "no-store" })
+      const nextQuery = reportQuery.trim();
+      setReportAppliedQuery(current => current === nextQuery ? current : nextQuery);
+      if (nextQuery !== reportAppliedQuery) setReportPage(1);
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [authUser?.nationalId, isAdmin, tab, reportMainTab, reportQuery]);
+
+  useEffect(() => {
+    if (!authUser || !isAdmin || tab !== "reports" || reportMainTab !== "people") return;
+    let active = true;
+    const controller = new AbortController();
+    const params = new URLSearchParams({ view: "people", page: String(reportPage), pageSize: "10", status: reportPersonStatusFilter });
+    if (reportAppliedQuery) params.set("q", reportAppliedQuery);
+    const timer = window.setTimeout(() => {
+      if (!active) return;
+      setReportsLoading(true);
+      setReportsError("");
+      fetch(`/api/reports?${params.toString()}`, { credentials: "include", cache: "no-store", signal: controller.signal })
         .then(async response => {
           const data = await response.json();
           if (!response.ok) throw new Error(data?.error || "گزارش فردی دریافت نشد.");
           if (active) setReports(current => ({ ...(current ?? { total: 0, completed: 0, delayed: 0, pending: 0, people: [] }), ...data, people: asArray(data.people) }) as Report);
         })
-        .catch(cause => { if (active) setReportsError(cause instanceof Error ? cause.message : "گزارش فردی دریافت نشد."); })
+        .catch(cause => { if (active && cause?.name !== "AbortError") setReportsError(cause instanceof Error ? cause.message : "گزارش فردی دریافت نشد."); })
         .finally(() => { if (active) setReportsLoading(false); });
-    }, reportQuery.trim() ? 250 : 0);
-    return () => { active = false; window.clearTimeout(timer); setReportsLoading(false); };
-  }, [authUser?.nationalId, isAdmin, tab, reportMainTab, reportPage, reportQuery, reportPersonStatusFilter, reportsRetryCount]);
+    }, 0);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [authUser?.nationalId, isAdmin, tab, reportMainTab, reportPage, reportPersonStatusFilter, reportAppliedQuery, reportsRetryCount]);
   useEffect(() => {
     if (!authUser || !isAdmin || tab !== "reports" || reportMainTab === "backup") return;
     const requestType = reportMainTab === "overview" ? "summary" : (reportMainTab === "actions" || reportMainTab === "resolution") ? "submissions" : null;
