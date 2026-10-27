@@ -7,6 +7,8 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Security.Cryptography;
+using System.IO.Compression;
+using Microsoft.Data.SqlClient;
 using Microsoft.AspNetCore.StaticFiles;
 using Vezarati.Api.Models;
 
@@ -52,7 +54,8 @@ app.Use(async (context, next) =>
             return;
         }
         var adminOnly =
-            (path.Equals("/api/groups", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPost(context.Request.Method))
+            path.StartsWith("/api/admin/database/", StringComparison.OrdinalIgnoreCase)
+            || (path.Equals("/api/groups", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPost(context.Request.Method))
             || (path.StartsWith("/api/groups/", StringComparison.OrdinalIgnoreCase) && (HttpMethods.IsPost(context.Request.Method) || HttpMethods.IsDelete(context.Request.Method)))
             || (path.Equals("/api/attachments", StringComparison.OrdinalIgnoreCase) == false && path.StartsWith("/api/attachments/", StringComparison.OrdinalIgnoreCase) && path.EndsWith("/approval", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPatch(context.Request.Method))
             || (path.Equals("/api/users", StringComparison.OrdinalIgnoreCase) && (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsPost(context.Request.Method)))
@@ -95,6 +98,185 @@ using (var scope = app.Services.CreateScope())
 }
 
 const string primaryAdminNationalId = "0534921973";
+
+app.MapGet("/api/admin/database/backup", async (HttpContext context, AppDb db, IConfiguration configuration, IWebHostEnvironment environment, ILogger<Program> logger) =>
+{
+    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    var databaseName = db.Database.GetDbConnection().Database;
+    if (string.IsNullOrWhiteSpace(databaseName)) return Results.Problem("نام دیتابیس در اتصال SQL Server مشخص نیست.", statusCode: StatusCodes.Status500InternalServerError);
+    var backupDirectory = configuration["DatabaseBackupDirectory"];
+    backupDirectory = string.IsNullOrWhiteSpace(backupDirectory)
+        ? Path.Combine(environment.ContentRootPath, "data", "backups")
+        : Path.GetFullPath(backupDirectory, environment.ContentRootPath);
+    Directory.CreateDirectory(backupDirectory);
+    var stamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
+    var databaseFile = Path.Combine(backupDirectory, $"vezarati-{stamp}.bak");
+    var archiveFile = Path.Combine(Path.GetTempPath(), $"vezarati-backup-{Guid.NewGuid():N}.zip");
+    try
+    {
+        var connection = db.Database.GetDbConnection();
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = $"BACKUP DATABASE [{databaseName.Replace("]", "]]")}] TO DISK = @backupPath WITH COPY_ONLY, INIT";
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = "@backupPath";
+            parameter.Value = databaseFile;
+            command.Parameters.Add(parameter);
+            if (connection.State != System.Data.ConnectionState.Open) await connection.OpenAsync(context.RequestAborted);
+            await command.ExecuteNonQueryAsync(context.RequestAborted);
+        }
+        var uploadsDirectory = Path.Combine(environment.ContentRootPath, "data", "uploads");
+        await using (var archiveStream = new FileStream(archiveFile, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
+        using (var archive = new ZipArchive(archiveStream, ZipArchiveMode.Create, leaveOpen: false))
+        {
+            var databaseEntry = archive.CreateEntry("database.bak", CompressionLevel.NoCompression);
+            await using (var input = System.IO.File.OpenRead(databaseFile))
+            await using (var output = databaseEntry.Open())
+                await input.CopyToAsync(output, context.RequestAborted);
+            var manifest = archive.CreateEntry("manifest.json", CompressionLevel.Optimal);
+            await using (var writer = new StreamWriter(manifest.Open()))
+                await writer.WriteAsync(JsonSerializer.Serialize(new { product = "Vezarati", formatVersion = 1, database = databaseName, createdAt = DateTimeOffset.UtcNow }));
+            if (Directory.Exists(uploadsDirectory))
+            {
+                foreach (var file in Directory.EnumerateFiles(uploadsDirectory, "*", SearchOption.AllDirectories))
+                {
+                    var relative = Path.GetRelativePath(uploadsDirectory, file).Replace('\\', '/');
+                    var entry = archive.CreateEntry($"uploads/{relative}", CompressionLevel.Optimal);
+                    await using var input = System.IO.File.OpenRead(file);
+                    await using var output = entry.Open();
+                    await input.CopyToAsync(output, context.RequestAborted);
+                }
+            }
+        }
+        System.IO.File.Delete(databaseFile);
+        context.Response.OnCompleted(() =>
+        {
+            try { System.IO.File.Delete(archiveFile); } catch { }
+            return Task.CompletedTask;
+        });
+        return Results.File(archiveFile, "application/zip", $"vezarati-backup-{stamp}.zip", enableRangeProcessing: true);
+    }
+    catch (Exception exception)
+    {
+        logger.LogError(exception, "Database backup failed for {Database}", databaseName);
+        try { if (System.IO.File.Exists(databaseFile)) System.IO.File.Delete(databaseFile); } catch { }
+        try { if (System.IO.File.Exists(archiveFile)) System.IO.File.Delete(archiveFile); } catch { }
+        return Results.Problem("تهیه نسخه پشتیبان ناموفق بود. دسترسی حساب سرویس SQL Server به پوشه پشتیبان را بررسی کنید.", statusCode: StatusCodes.Status500InternalServerError);
+    }
+});
+
+app.MapPost("/api/admin/database/restore", async (HttpContext context, IConfiguration configuration, IWebHostEnvironment environment, ILogger<Program> logger) =>
+{
+    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    const long maxBackupBytes = 2L * 1024 * 1024 * 1024;
+    var sizeFeature = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
+    if (sizeFeature is { IsReadOnly: false }) sizeFeature.MaxRequestBodySize = maxBackupBytes;
+    if (context.Request.ContentLength is > maxBackupBytes) return Results.BadRequest(new { error = "حجم فایل پشتیبان از ۲ گیگابایت بیشتر است." });
+    var connectionString = configuration.GetConnectionString("DefaultConnection");
+    if (string.IsNullOrWhiteSpace(connectionString)) return Results.Problem("رشته اتصال دیتابیس تنظیم نشده است.", statusCode: StatusCodes.Status500InternalServerError);
+    var databaseName = new SqlConnectionStringBuilder(connectionString).InitialCatalog;
+    if (string.IsNullOrWhiteSpace(databaseName)) return Results.Problem("نام دیتابیس در رشته اتصال مشخص نشده است.", statusCode: StatusCodes.Status500InternalServerError);
+    var configuredDirectory = configuration["DatabaseBackupDirectory"];
+    var backupDirectory = string.IsNullOrWhiteSpace(configuredDirectory)
+        ? Path.Combine(environment.ContentRootPath, "data", "backups")
+        : Path.GetFullPath(configuredDirectory, environment.ContentRootPath);
+    Directory.CreateDirectory(backupDirectory);
+    var tempArchive = Path.Combine(Path.GetTempPath(), $"vezarati-restore-{Guid.NewGuid():N}.zip");
+    var databaseFile = Path.Combine(backupDirectory, $"restore-{Guid.NewGuid():N}.bak");
+    var stagingDirectory = Path.Combine(Path.GetTempPath(), $"vezarati-uploads-{Guid.NewGuid():N}");
+    var uploadsDirectory = Path.Combine(environment.ContentRootPath, "data", "uploads");
+    var previousUploads = uploadsDirectory + ".restore-previous-" + Guid.NewGuid().ToString("N");
+    var uploadsSwapped = false;
+    try
+    {
+        Directory.CreateDirectory(stagingDirectory);
+        await using (var output = new FileStream(tempArchive, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            await context.Request.Body.CopyToAsync(output, context.RequestAborted);
+        if (new FileInfo(tempArchive).Length > maxBackupBytes) return Results.BadRequest(new { error = "حجم فایل پشتیبان از ۲ گیگابایت بیشتر است." });
+        using (var archive = ZipFile.OpenRead(tempArchive))
+        {
+            var manifestEntry = archive.GetEntry("manifest.json");
+            var databaseEntry = archive.GetEntry("database.bak");
+            if (manifestEntry is null || databaseEntry is null) return Results.BadRequest(new { error = "فایل انتخاب‌شده نسخه پشتیبان معتبر دفتر وزارتی نیست." });
+            using (var reader = new StreamReader(manifestEntry.Open()))
+            {
+                using var manifest = JsonDocument.Parse(await reader.ReadToEndAsync(context.RequestAborted));
+                if (!manifest.RootElement.TryGetProperty("formatVersion", out var version) || version.GetInt32() != 1 || !manifest.RootElement.TryGetProperty("product", out var product) || product.GetString() != "Vezarati")
+                    return Results.BadRequest(new { error = "قالب نسخه پشتیبان پشتیبانی نمی‌شود." });
+            }
+            if (databaseEntry.Length <= 0 || databaseEntry.Length > maxBackupBytes) return Results.BadRequest(new { error = "فایل دیتابیس داخل نسخه پشتیبان معتبر نیست." });
+            await using (var input = databaseEntry.Open())
+            await using (var output = new FileStream(databaseFile, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                await input.CopyToAsync(output, context.RequestAborted);
+            long extractedBytes = 0;
+            foreach (var entry in archive.Entries.Where(entry => entry.FullName.StartsWith("uploads/", StringComparison.Ordinal)))
+            {
+                var relative = entry.FullName["uploads/".Length..];
+                if (string.IsNullOrWhiteSpace(relative) || relative.Contains("..", StringComparison.Ordinal) || Path.IsPathRooted(relative) || relative.Contains('/') || relative.Contains('\\'))
+                    return Results.BadRequest(new { error = "یکی از مسیرهای پیوست در فایل پشتیبان نامعتبر است." });
+                extractedBytes += entry.Length;
+                if (extractedBytes > maxBackupBytes) return Results.BadRequest(new { error = "حجم پیوست‌های پشتیبان از حد مجاز بیشتر است." });
+                var destination = Path.Combine(stagingDirectory, Path.GetFileName(relative));
+                await using var input = entry.Open();
+                await using var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+                await input.CopyToAsync(output, context.RequestAborted);
+            }
+        }
+        if (Directory.Exists(uploadsDirectory)) Directory.Move(uploadsDirectory, previousUploads);
+        Directory.Move(stagingDirectory, uploadsDirectory);
+        uploadsSwapped = true;
+        try
+        {
+            var masterBuilder = new SqlConnectionStringBuilder(connectionString) { InitialCatalog = "master", ConnectTimeout = 30 };
+            await using var sqlConnection = new SqlConnection(masterBuilder.ConnectionString);
+            await sqlConnection.OpenAsync(context.RequestAborted);
+            var quotedDatabase = $"[{databaseName.Replace("]", "]]")}]";
+            await using var command = sqlConnection.CreateCommand();
+            command.CommandTimeout = 0;
+            command.CommandText = $"ALTER DATABASE {quotedDatabase} SET SINGLE_USER WITH ROLLBACK IMMEDIATE; RESTORE DATABASE {quotedDatabase} FROM DISK = @backupPath WITH REPLACE; ALTER DATABASE {quotedDatabase} SET MULTI_USER;";
+            command.Parameters.Add(new SqlParameter("@backupPath", System.Data.SqlDbType.NVarChar, 4000) { Value = databaseFile });
+            await command.ExecuteNonQueryAsync(context.RequestAborted);
+            SqlConnection.ClearAllPools();
+        }
+        catch
+        {
+            try
+            {
+                var masterBuilder = new SqlConnectionStringBuilder(connectionString) { InitialCatalog = "master", ConnectTimeout = 30 };
+                await using var sqlConnection = new SqlConnection(masterBuilder.ConnectionString);
+                await sqlConnection.OpenAsync(CancellationToken.None);
+                await using var command = sqlConnection.CreateCommand();
+                command.CommandText = $"ALTER DATABASE [{databaseName.Replace("]", "]]")}] SET MULTI_USER";
+                await command.ExecuteNonQueryAsync(CancellationToken.None);
+            }
+            catch { }
+            throw;
+        }
+        try { if (Directory.Exists(previousUploads)) Directory.Delete(previousUploads, recursive: true); } catch { }
+        logger.LogWarning("Database {Database} was restored by admin {AdminId}", databaseName, context.User.FindFirstValue(ClaimTypes.NameIdentifier));
+        return Results.Ok(new { message = "بازیابی اطلاعات انجام شد. برنامه را یک‌بار تازه‌سازی کنید." });
+    }
+    catch (InvalidDataException)
+    {
+        return Results.BadRequest(new { error = "فایل پشتیبان خراب یا غیرقابل‌خواندن است." });
+    }
+    catch (Exception exception)
+    {
+        logger.LogError(exception, "Database restore failed for {Database}", databaseName);
+        if (uploadsSwapped)
+        {
+            try { if (Directory.Exists(uploadsDirectory)) Directory.Delete(uploadsDirectory, recursive: true); } catch { }
+            try { if (Directory.Exists(previousUploads)) Directory.Move(previousUploads, uploadsDirectory); } catch { }
+        }
+        return Results.Problem("بازیابی ناموفق بود. دسترسی حساب SQL Server به پوشه پشتیبان و مجوز RESTORE DATABASE را بررسی کنید.", statusCode: StatusCodes.Status500InternalServerError);
+    }
+    finally
+    {
+        try { if (System.IO.File.Exists(tempArchive)) System.IO.File.Delete(tempArchive); } catch { }
+        try { if (System.IO.File.Exists(databaseFile)) System.IO.File.Delete(databaseFile); } catch { }
+        try { if (Directory.Exists(stagingDirectory)) Directory.Delete(stagingDirectory, recursive: true); } catch { }
+    }
+});
 
 app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context, AppDb db, IHttpClientFactory clients, IConfiguration configuration, ILogger<Program> logger) =>
 {
