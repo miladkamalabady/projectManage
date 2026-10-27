@@ -65,6 +65,7 @@ app.Use(async (context, next) =>
             || path.StartsWith("/api/meetings", StringComparison.OrdinalIgnoreCase)
             || path.StartsWith("/api/attendance", StringComparison.OrdinalIgnoreCase)
             || path.Equals("/api/reports/submissions", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("/api/reports/people/", StringComparison.OrdinalIgnoreCase)
             || path.Equals("/api/reports/bale-messages", StringComparison.OrdinalIgnoreCase)
             || (path.Equals("/api/reports/warnings", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPost(context.Request.Method))
             || (path.StartsWith("/api/reports/warnings/", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPost(context.Request.Method))
@@ -1613,7 +1614,7 @@ app.MapPut("/api/settings/bale-notifications", async (BaleNotificationSettingReq
     return Results.Ok(new { enabled = request.Enabled });
 });
 
-app.MapGet("/api/reports", async (HttpContext context, AppDb db, string? view) =>
+app.MapGet("/api/reports", async (HttpContext context, AppDb db, string? view, int? page, int? pageSize, string? q, string? status) =>
 {
     var id = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
     var isAdmin = context.User.IsInRole("ادمین");
@@ -1644,7 +1645,7 @@ app.MapGet("/api/reports", async (HttpContext context, AppDb db, string? view) =
     }
     var directory = await db.Users.ToDictionaryAsync(u => u.NationalId, u => (DisplayName: u.DisplayName, Title: u.Title));
     var userTitles = await db.Users.ToDictionaryAsync(u => u.NationalId, u => u.OrgPositionDesc);
-    var personRows = new List<(string NationalId, string DisplayName, string Title, int ResolutionId, string Number, string Text, string? DueDateJalali, string Status)>();
+    var personRows = new List<(string NationalId, string DisplayName, string Title, string Status)>();
     foreach (var record in records)
     {
         var participants = (record.Group?.Members.Select(member => (NationalId: member.NationalId, DisplayName: member.DisplayName, Title: userTitles.GetValueOrDefault(member.NationalId, member.Title))) ?? Enumerable.Empty<(string NationalId, string DisplayName, string Title)>())
@@ -1659,7 +1660,7 @@ app.MapGet("/api/reports", async (HttpContext context, AppDb db, string? view) =
         foreach (var person in participants)
         {
             var personStatus = record.Progress.FirstOrDefault(progress => progress.NationalId == person.NationalId)?.Status ?? record.Status;
-            personRows.Add((person.NationalId, person.DisplayName, person.Title, record.Id, record.Number, record.Text, record.DueDateJalali, personStatus));
+            personRows.Add((person.NationalId, person.DisplayName, person.Title, personStatus));
         }
     }
 
@@ -1673,12 +1674,60 @@ app.MapGet("/api/reports", async (HttpContext context, AppDb db, string? view) =
             Total = group.Count(),
             Completed = group.Count(person => person.Status == "completed"),
             Delayed = group.Count(person => person.Status == "delayed"),
-            Pending = group.Count(person => person.Status is "before" or "in_progress"),
-            Tasks = group.Select(person => new { ResolutionId = person.ResolutionId, Number = person.Number, Text = person.Text, DueDateJalali = person.DueDateJalali, Status = person.Status }).ToList()
+            Pending = group.Count(person => person.Status is "before" or "in_progress")
         })
         .OrderByDescending(person => person.Total).ToList();
     if (!isAdmin) rows = rows.Where(row => row.NationalId == id).ToList();
-    return Results.Ok(new { total = records.Count, completed = records.Count(r => r.Status == "completed"), delayed = records.Count(r => r.Status == "delayed"), pending = records.Count(r => r.Status is "before" or "in_progress"), people = rows });
+    var normalizedQuery = NormalizeDigits((q ?? "").Normalize(System.Text.NormalizationForm.FormKC))
+        .Replace("ي", "ی").Replace("ى", "ی").Replace("ك", "ک")
+        .Replace("‌", " ").Trim().ToLowerInvariant();
+    var statusFilter = (status ?? "all").Trim().ToLowerInvariant();
+    var filteredPeople = rows.Where(person =>
+        (statusFilter == "all" ||
+         statusFilter == "completed" && person.Completed > 0 ||
+         statusFilter == "pending" && person.Pending > 0 ||
+         statusFilter == "delayed" && person.Delayed > 0) &&
+        (normalizedQuery.Length == 0 || NormalizeDigits($"{person.DisplayName} {person.NationalId} {person.Title}").Normalize(System.Text.NormalizationForm.FormKC)
+            .Replace("ي", "ی").Replace("ى", "ی").Replace("ك", "ک").Replace("‌", " ").ToLowerInvariant().Contains(normalizedQuery)))
+        .ToList();
+    var safePage = Math.Max(1, page ?? 1);
+    var safePageSize = Math.Clamp(pageSize ?? 10, 1, 50);
+    var peopleTotal = filteredPeople.Count;
+    var people = filteredPeople.Skip((safePage - 1) * safePageSize).Take(safePageSize)
+        .Select(person => new { person.NationalId, person.DisplayName, person.Title, person.Total, person.Completed, person.Delayed, person.Pending })
+        .ToList();
+    return Results.Ok(new { total = records.Count, completed = records.Count(r => r.Status == "completed"), delayed = records.Count(r => r.Status == "delayed"), pending = records.Count(r => r.Status is "before" or "in_progress"), peopleTotal, page = safePage, pageSize = safePageSize, people });
+});
+
+app.MapGet("/api/reports/people/{nationalId}/tasks", async (string nationalId, string? status, HttpContext context, AppDb db) =>
+{
+    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    var groupIds = await db.GroupMembers.AsNoTracking().Where(member => member.NationalId == nationalId).Select(member => member.GroupId).ToListAsync();
+    var records = await db.Resolutions.AsNoTracking()
+        .Where(item => !item.IsArchived &&
+            (item.Assignments.Any(assignment => assignment.NationalId == nationalId) ||
+             item.Progress.Any(progress => progress.NationalId == nationalId) ||
+             (item.GroupId.HasValue && groupIds.Contains(item.GroupId.Value)) ||
+             item.GroupAssignments.Any(assignment => groupIds.Contains(assignment.GroupId))))
+        .Include(item => item.Assignments)
+        .Include(item => item.Progress.Where(progress => progress.NationalId == nationalId))
+        .Include(item => item.GroupAssignments)
+        .Include(item => item.Attachments)
+        .Include(item => item.Events)
+        .Include(item => item.Meeting).ThenInclude(meeting => meeting!.Attachments)
+        .OrderByDescending(item => item.MeetingDate).ThenByDescending(item => item.Id)
+        .ToListAsync();
+    var statusFilter = (status ?? "all").Trim().ToLowerInvariant();
+    var filtered = records.Where(item =>
+    {
+        var personalStatus = item.Progress.FirstOrDefault(progress => progress.NationalId == nationalId)?.Status ?? item.Status;
+        return statusFilter == "all" ||
+            statusFilter == "completed" && personalStatus == "completed" ||
+            statusFilter == "delayed" && personalStatus == "delayed" ||
+            statusFilter == "pending" && (personalStatus is "before" or "in_progress");
+    }).ToList();
+    foreach (var item in filtered) item.MeetingAttachments = item.Meeting?.Attachments ?? [];
+    return Results.Ok(filtered);
 });
 app.MapPost("/api/resolutions/{id:int}/warnings", async (int id, WarningRecipientsRequest request, AppDb db, HttpContext context) =>
 {
