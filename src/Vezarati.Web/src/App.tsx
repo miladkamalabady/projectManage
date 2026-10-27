@@ -78,6 +78,9 @@ function getResolutionRouting(item: Resolution, groups: Group[], directoryUsers:
   ].filter(Boolean);
   return parts.join(" · ") || (item.assignments?.length ? "ارجاع مستقیم به افراد" : "بدون ارجاع");
 }
+const appTabPaths: Record<string, string> = { wall: "/", notifications: "/notifications", resolutions: "/resolutions", sessions: "/sessions", archive: "/archive", groups: "/groups", reports: "/reports" };
+const tabForPath = (pathname: string) => Object.entries(appTabPaths).find(([, path]) => path !== "/" && pathname.replace(/\\/+$/, "") === path)?.[0] ?? "wall";
+const pathForTab = (tab: string) => appTabPaths[tab] ?? "/";
 const localDateKey = (date: Date) => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
 const oneMonthAgoDateKey = () => {
   const date = new Date();
@@ -136,7 +139,8 @@ const shiftJalaliMonth = (value: string, delta: number) => { let [year,month]=ja
 const jalaliDateAt = (monthValue: string, day: number) => { const [year,month]=jalaliParts(monthValue); return `${year}.${String(month).padStart(2,"0")}.${String(day).padStart(2,"0")}`; };
 
 export default function App() {
-  const [tab, setTab] = useState("wall");
+  const [tab, setTab] = useState(() => tabForPath(window.location.pathname));
+  const skipRoutePush = useRef(false);
   const [openMeetingRequest, setOpenMeetingRequest] = useState(0);
   const [wallStatusFilter, setWallStatusFilter] = useState("all");
   const [eventDrafts, setEventDrafts] = useState<Record<number, string>>({});
@@ -344,7 +348,23 @@ export default function App() {
         .finally(() => { if (active) setAuthReady(true); });
     }
     return () => { active = false; };
-  }, []);  useEffect(() => { const safe=normalizeJalaliMonth(calendarMonth); if(safe!==calendarMonth) setCalendarMonth(safe); }, [calendarMonth]);
+  }, []);  useEffect(() => {
+    const handlePopState = () => {
+      const nextTab = tabForPath(window.location.pathname);
+      if (nextTab !== tab) { skipRoutePush.current = true; setTab(nextTab); }
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [tab]);
+  useEffect(() => {
+    if (skipRoutePush.current) { skipRoutePush.current = false; return; }
+    const nextPath = pathForTab(tab);
+    if (window.location.pathname !== nextPath) window.history.pushState({ tab }, "", nextPath);
+  }, [tab]);
+  useEffect(() => {
+    if (authReady && authUser && !isAdmin && ["sessions", "archive", "groups", "reports"].includes(tab)) setTab("wall");
+  }, [authReady, authUser?.nationalId, isAdmin, tab]);
+  useEffect(() => { const safe=normalizeJalaliMonth(calendarMonth); if(safe!==calendarMonth) setCalendarMonth(safe); }, [calendarMonth]);
   useEffect(() => { const normalized=normalizeJalaliDate(selectedDay); if(normalized!==selectedDay){setSelectedDay(normalized);setCalendarMonth(normalized.slice(0,7)+".01");} }, [selectedDay]);
   useEffect(() => { if (authUser) void load(); }, [authUser?.nationalId]);
   useEffect(() => { document.documentElement.style.setProperty("--ui-scale", String(fontScale / 16)); try { localStorage.setItem("vezarati.fontScale", String(fontScale)); } catch { /* local storage is optional */ } }, [fontScale]);
@@ -1118,7 +1138,7 @@ export default function App() {
   return <div className="shell">
     <aside className="sidebar">
       <div className="brand"><span className="brand-icon"><ShieldCheck /></span><div><b>دفتر وزارتی</b><small>پیگیری مصوبات</small></div></div>
-      <nav>{[["wall", LayoutDashboard, "دیواره من"], ["notifications", Bell, `اعلان‌ها ${notifications.filter(item=>!item.isRead).length ? "(" + notifications.filter(item=>!item.isRead).length + ")" : ""}`], ["resolutions", ClipboardList, "مصوبات"], ...(isAdmin ? [["sessions", CalendarDays, "جلسات و حضور و غیاب"], ["archive", Archive, "بایگانی"], ["groups", Users, "گروه‌ها و اعضا"], ["reports", FileText, "گزارش‌ها"]] : [])].map(([key, Icon, title]: any) => <button key={key} className={`nav ${tab === key ? "active" : ""}`} onClick={() => setTab(key)}><Icon size={18} />{title}</button>)}</nav>
+      <nav>{[["wall", LayoutDashboard, "دیواره من"], ["notifications", Bell, `اعلان‌ها ${notifications.filter(item=>!item.isRead).length ? "(" + notifications.filter(item=>!item.isRead).length + ")" : ""}`], ["resolutions", ClipboardList, "مصوبات"], ...(isAdmin ? [["sessions", CalendarDays, "جلسات و حضور و غیاب"], ["archive", Archive, "بایگانی"], ["groups", Users, "گروه‌ها و اعضا"], ["reports", FileText, "گزارش‌ها"]] : [])].map(([key, Icon, title]: any) => <a key={key} href={pathForTab(key)} className={"nav " + (tab === key ? "active" : "")} aria-current={tab === key ? "page" : undefined} onClick={event => { event.preventDefault(); if (tab !== key) setTab(key); }}><Icon size={18} />{title}</a>)}</nav>
       <div className="sidebar-foot">محیط پیگیری اجرایی<br /><span>دفتر وزارتی</span></div>
     </aside>
 
