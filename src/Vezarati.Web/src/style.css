@@ -639,9 +639,6 @@
 @media print{
   @page{size:A4 portrait;margin:9mm}
   body.print-quick-status{background:#fff!important}
-  body.print-quick-status #root{height:0!important;min-height:0!important;overflow:hidden!important}
-  body.print-quick-status #root *{visibility:hidden!important}
-  body.print-quick-status #root .quick-status-print-sheet,body.print-quick-status #root .quick-status-print-sheet *{visibility:visible!important}
   body.print-quick-status .quick-status-report{display:block!important;position:static!important;width:192mm!important;margin:0!important;padding:0!important;border:0!important;box-shadow:none!important;background:#fff!important}
   body.print-quick-status .quick-status-print-sheet{display:block!important;position:static!important;width:192mm!important;height:auto!important;min-height:279mm!important;box-sizing:border-box!important;overflow:visible!important;padding:0!important;background:#fff!important;color:#263b3e!important;font-family:Vazirmatn,Arial,sans-serif!important}
   body.print-quick-status .quick-print-status-page{display:flex!important;position:relative!important;box-sizing:border-box!important;flex-direction:column!important;min-height:279mm!important;padding-top:1mm!important;break-before:page!important;page-break-before:always!important;color:#263b3e!important;font-family:Vazirmatn,Arial,sans-serif!important}
