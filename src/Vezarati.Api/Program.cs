@@ -503,7 +503,13 @@ app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpC
     var existingGroupIds = await db.Groups.Where(group => requestedGroupIds.Contains(group.Id)).Select(group => group.Id).ToListAsync();
     if (existingGroupIds.Count != requestedGroupIds.Count) return Results.BadRequest(new { error = "گروه انتخاب‌شده پیدا نشد." });
     var unitIds = await db.Groups.Where(group => requestedGroupIds.Contains(group.Id) && group.Category == "unit").Select(group => group.Id).ToListAsync();
+    var selectedUnitNames = await db.Groups.Where(group => unitIds.Contains(group.Id)).Select(group => group.Name).ToListAsync();
     var coveredPeople = unitIds.Count == 0 ? new HashSet<string>() : (await db.GroupMembers.Where(member => unitIds.Contains(member.GroupId)).Select(member => member.NationalId).ToListAsync()).ToHashSet();
+    if (selectedUnitNames.Count > 0)
+    {
+        var unitUsers = await db.Users.AsNoTracking().Where(user => selectedUnitNames.Contains(user.OrganizationUnit)).Select(user => user.NationalId).ToListAsync();
+        coveredPeople.UnionWith(unitUsers);
+    }
     var requestedPeople = request.People.Distinct().Where(personId => !coveredPeople.Contains(personId)).ToList();
 
     var record = new Resolution { PublishToAll = request.PublishToAll, StartDate = request.StartDate, StartDateJalali = request.StartDate is null ? "" : (request.StartDateJalali ?? JalaliDate.FromGregorian(request.StartDate.GetValueOrDefault())), DueDate = request.DueDate, DueDateJalali = request.DueDate is null ? "" : (request.DueDateJalali ?? JalaliDate.FromGregorian(request.DueDate.GetValueOrDefault())), RequiresPeriodicReport = request.RequiresPeriodicReport, ReportFrequency = request.RequiresPeriodicReport ? request.ReportFrequency ?? "" : "", CancellationReason = request.CancellationReason?.Trim() ?? "", MeetingDate = request.MeetingDate, MeetingDateJalali = string.IsNullOrWhiteSpace(request.MeetingDateJalali) ? JalaliDate.FromGregorian(request.MeetingDate) : request.MeetingDateJalali, Number = request.Number.Trim(), Text = request.Text.Trim(), Notes = request.Notes?.Trim() ?? "", Status = ResolutionStatusUpdater.TimeBasedResolutionStatus(request.MeetingDate, request.StartDate.GetValueOrDefault(), request.DueDate, DateOnly.FromDateTime(DateTime.Today)), GroupId = request.GroupId, MeetingId = request.MeetingId, CreatedAt = DateTimeOffset.UtcNow, CreatedBy = http.User.Identity?.Name ?? "کاربر" };
@@ -545,7 +551,13 @@ app.MapPut("/api/resolutions/{id:int}", async (int id, ResolutionCreate request,
     var validGroupIds = await db.Groups.Where(group => groupIds.Contains(group.Id)).Select(group => group.Id).ToListAsync();
     if (validGroupIds.Count != groupIds.Count) return Results.BadRequest(new { error = "گروه انتخاب‌شده پیدا نشد." });
     var unitIds = await db.Groups.Where(group => groupIds.Contains(group.Id) && group.Category == "unit").Select(group => group.Id).ToListAsync();
+    var selectedUnitNames = await db.Groups.Where(group => unitIds.Contains(group.Id)).Select(group => group.Name).ToListAsync();
     var coveredPeople = unitIds.Count == 0 ? new HashSet<string>() : (await db.GroupMembers.Where(member => unitIds.Contains(member.GroupId)).Select(member => member.NationalId).ToListAsync()).ToHashSet();
+    if (selectedUnitNames.Count > 0)
+    {
+        var unitUsers = await db.Users.AsNoTracking().Where(user => selectedUnitNames.Contains(user.OrganizationUnit)).Select(user => user.NationalId).ToListAsync();
+        coveredPeople.UnionWith(unitUsers);
+    }
     var requestedPeople = request.People.Distinct().Where(personId => !coveredPeople.Contains(personId)).ToList();
     var priorRecipients = record.Assignments.Select(assignment => assignment.NationalId).ToHashSet();
     var priorGroupIds = record.GroupAssignments.Select(assignment => assignment.GroupId).ToList();
@@ -597,8 +609,9 @@ app.MapPut("/api/resolutions/{id:int}", async (int id, ResolutionCreate request,
     await ResolutionStatusUpdater.RefreshResolutionStatuses(db);
     return Results.Ok(record);
 });
-app.MapDelete("/api/resolutions/{id:int}", async (int id, AppDb db) =>
+app.MapDelete("/api/resolutions/{id:int}", async (int id, HttpContext context, AppDb db) =>
 {
+    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
     var record = await db.Resolutions.Include(item => item.Assignments).Include(item => item.Progress).Include(item => item.GroupAssignments).Include(item => item.Attachments).Include(item => item.Events).FirstOrDefaultAsync(item => item.Id == id);
     if (record is null) return Results.NotFound();
     var hasReports = await db.ResolutionReports.AnyAsync(report => report.ResolutionId == id) || record.Progress.Any(progress => !string.IsNullOrWhiteSpace(progress.ReportText));
@@ -1156,6 +1169,9 @@ app.MapPost("/api/resolutions/{id:int}/attachments", async (int id, HttpRequest 
              db.ResolutionGroups.Any(rg => rg.ResolutionId == id && rg.GroupId == m.GroupId)));
         if (!direct && !inGroup && !resolution.PublishToAll) return Results.StatusCode(StatusCodes.Status403Forbidden);
     }
+    var contentHash = Convert.ToHexString(await SHA256.HashDataAsync(file.OpenReadStream(), context.RequestAborted));
+    if (await db.Attachments.AnyAsync(existing => existing.ResolutionId == id && existing.ContentHash == contentHash, context.RequestAborted))
+        return Results.Conflict(new { error = "این فایل قبلاً به همین مصوبه پیوست شده است." });
     var storedName = $"{Guid.NewGuid():N}{extension}";
     var uploadDirectory = Path.Combine(environment.ContentRootPath, "data", "uploads");
     Directory.CreateDirectory(uploadDirectory);
