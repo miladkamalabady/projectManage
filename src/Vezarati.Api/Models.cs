@@ -680,7 +680,6 @@ public static class SchemaCompatibility
         var reportColumns = await ReadColumns(db, "ResolutionReports");
         if (reportColumns.Count > 0 && !reportColumns.Contains("ApprovalStatus")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE ResolutionReports ADD COLUMN ApprovalStatus TEXT NOT NULL DEFAULT 'pending';");
         if (reportColumns.Count > 0 && !reportColumns.Contains("AdminFeedback")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE ResolutionReports ADD COLUMN AdminFeedback TEXT NOT NULL DEFAULT '';");
-        var attachmentColumns = await ReadColumns(db, "ResolutionAttachments");
         if (attachmentColumns.Count > 0 && !attachmentColumns.Contains("ResolutionReportId")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE ResolutionAttachments ADD COLUMN ResolutionReportId INTEGER NULL;");
         await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS IX_ResolutionAttachments_ResolutionReportId ON ResolutionAttachments (ResolutionReportId);");
         var userColumns = await ReadColumns(db, "Users");
