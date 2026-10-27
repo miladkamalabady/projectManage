@@ -581,3 +581,11 @@
 .report-task-events>div>small{text-align:left;color:#8b9690;font-size:8px}
 .report-task-events>div>p{grid-column:1/-1;margin:0;color:#57685f;font-size:9px;line-height:1.7;white-space:pre-wrap}
 @media(max-width:600px){.report-task-item-expanded{padding:10px}.report-task-meta-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.report-task-meta-grid>.report-task-referral{grid-column:1/-1}.report-task-person-state>b{width:100%;margin:0}}
+
+.app-loading-screen{z-index:10000}
+.app-loading-screen .auth-card{display:grid;justify-items:center;gap:13px;min-width:min(360px,calc(100vw - 36px))}
+.app-loading-screen .auth-card h1{margin:0}
+.app-loading-screen .auth-card p{margin:0;line-height:1.9}
+.app-loading-spinner{width:38px;height:38px;border:4px solid #dcebe6;border-top-color:#177d73;border-radius:50%;animation:app-loading-spin .8s linear infinite}
+@keyframes app-loading-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.app-loading-spinner{animation-duration:2s}}
