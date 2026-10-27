@@ -35,6 +35,7 @@ public sealed class Resolution
     public List<ResolutionProgress> Progress { get; set; } = [];
     public List<ResolutionAttachment> Attachments { get; set; } = [];
     public List<ResolutionEvent> Events { get; set; } = [];
+    [NotMapped] public List<MeetingAttachment> MeetingAttachments { get; set; } = [];
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? UpdatedAt { get; set; }
     public string CreatedBy { get; set; } = "";
@@ -400,6 +401,7 @@ public sealed class AppDb(DbContextOptions<AppDb> options, ILogger<AppDb> logger
         model.Entity<ResolutionGroup>().HasIndex(x => x.Name).IsUnique();
         model.Entity<GroupMember>().HasIndex(x => new { x.GroupId, x.NationalId }).IsUnique();
         model.Entity<Resolution>().HasIndex(x => x.SourceKey).IsUnique();
+        model.Entity<Resolution>().Ignore(x => x.MeetingAttachments);
         model.Entity<Meeting>().ToTable("Meetings");
         model.Entity<MeetingAttendee>().ToTable("MeetingAttendees");
         model.Entity<MeetingAttachment>().ToTable("MeetingAttachments");
