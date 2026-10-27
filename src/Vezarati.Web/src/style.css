@@ -506,3 +506,20 @@
 @media(max-width:560px){.meeting-resolution-meta>span{flex:1 1 calc(50% - 7px);min-width:0}.meeting-resolution-progress article{grid-template-columns:1fr auto}}
 
 .sidebar nav>a.nav{text-decoration:none}
+
+.meeting-resolution-list-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
+.meeting-resolution-list-head>h3{flex:none;margin:0}
+.meeting-resolution-search{width:min(330px,60%);min-width:190px}
+.meeting-resolution-search input{height:34px}
+.meeting-resolutions-table{border-radius:9px}
+.meeting-resolutions-table table{min-width:650px;font-size:10px}
+.meeting-resolutions-table th,.meeting-resolutions-table td{padding:8px 10px}
+.meeting-resolutions-table td{line-height:1.55;vertical-align:middle}
+.meeting-resolutions-table td small{font-size:9px}
+.meeting-resolution-summary-cell{max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#40565b}
+.meeting-resolution-routing-cell{max-width:185px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#60716e}
+.meeting-row-detail-button{padding:6px 9px;border:1px solid #d9e8e1;border-radius:7px;background:#f5faf7;color:#287657;font:inherit;font-size:10px;font-weight:700;white-space:nowrap}
+.meeting-row-detail-button:hover{border-color:#9bcbb6;background:#eaf6ef}
+.meeting-resolution-expanded-row>td{padding:7px!important;background:#f7faf8}
+.meeting-resolution-expanded-row .meeting-resolution-detail{margin:0;background:#fff}
+@media(max-width:640px){.meeting-resolution-list-head{align-items:stretch;flex-direction:column}.meeting-resolution-search{width:100%;min-width:0}.meeting-resolutions-table table{min-width:590px}}
