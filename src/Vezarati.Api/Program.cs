@@ -6,6 +6,7 @@ using System.Security.Claims;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Security.Cryptography;
 using Microsoft.AspNetCore.StaticFiles;
 using Vezarati.Api.Models;
 
@@ -316,7 +317,8 @@ app.MapGet("/api/dashboard", async (HttpContext context, AppDb db) =>
     var id = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
     var isAdmin = context.User.IsInRole("ادمین");
     var groups = await db.Groups.Include(g => g.Members).ToListAsync();
-    var records = await db.Resolutions.AsNoTracking().Where(item => !item.IsArchived).Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Attachments.Where(attachment => isAdmin || (!attachment.ResolutionReportId.HasValue && attachment.ApprovedForAll))).Include(r => r.Events).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).OrderByDescending(r => r.MeetingDate).ToListAsync();
+    var records = await db.Resolutions.AsNoTracking().Where(item => !item.IsArchived).Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Attachments.Where(attachment => isAdmin || (!attachment.ResolutionReportId.HasValue && attachment.ApprovedForAll))) .Include(r => r.Events).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).Include(r => r.Meeting).ThenInclude(meeting => meeting!.Attachments).OrderByDescending(r => r.MeetingDate).ToListAsync();
+    foreach (var resolution in records) resolution.MeetingAttachments = resolution.Meeting?.Attachments ?? [];
     var eventNames = await LoadPersonDisplayNames(db);
     foreach (var entry in records.SelectMany(resolution => resolution.Events)) entry.Text = NormalizeStatusEventText(entry, eventNames);
     if (!isAdmin) foreach (var resolution in records)
@@ -455,14 +457,14 @@ app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpC
 {
     if (!request.MeetingId.HasValue || !await db.Meetings.AnyAsync(item => item.Id == request.MeetingId.Value && item.Date == request.MeetingDate)) return Results.BadRequest(new { error = "جلسهٔ مرتبط را انتخاب کنید." });
     if (string.IsNullOrWhiteSpace(request.Number) || string.IsNullOrWhiteSpace(request.Text)) return Results.BadRequest(new { error = "شماره و متن مصوبه الزامی است." });
-    if (request.Status == "cancelled" && string.IsNullOrWhiteSpace(request.CancellationReason)) return Results.BadRequest(new { error = "برای لغو مصوبه، توضیحات لغو الزامی است." });
+    var requestedGroupIds = (request.GroupIds ?? (request.GroupId.HasValue ? [request.GroupId.Value] : [])).Distinct().ToList();
+    if (requestedGroupIds.Count == 0 && request.People.Distinct().Count() == 0) return Results.BadRequest(new { error = "حداقل یک گروه، معاونت، اداره‌کل یا فرد را برای ارجاع انتخاب کنید." });
     if (request.RequiresPeriodicReport && !ResolutionStatuses.Frequencies.Contains(request.ReportFrequency ?? "")) return Results.BadRequest(new { error = "دوره دریافت گزارش را انتخاب کنید." });
     if (request.StartDate is null) return Results.BadRequest(new { error = "زمان شروع مصوبه الزامی است." });
     if (request.MeetingDate > request.StartDate.GetValueOrDefault()) return Results.BadRequest(new { error = "تاریخ جلسه نباید بعد از زمان شروع باشد." });
     if (request.DueDate.HasValue && request.DueDate.GetValueOrDefault() <= request.StartDate.GetValueOrDefault()) return Results.BadRequest(new { error = "زمان سررسید باید بعد از زمان شروع باشد." });
-    if (request.GroupId.HasValue && !await db.Groups.AnyAsync(g => g.Id == request.GroupId)) return Results.BadRequest(new { error = "گروه انتخاب‌شده پیدا نشد." });
-    if (!ResolutionStatuses.All.Contains(request.Status)) return Results.BadRequest(new { error = "وضعیت نامعتبر است." });
-    var record = new Resolution { PublishToAll = request.PublishToAll, StartDate = request.StartDate, StartDateJalali = request.StartDate is null ? "" : (request.StartDateJalali ?? JalaliDate.FromGregorian(request.StartDate.GetValueOrDefault())), DueDate = request.DueDate, DueDateJalali = request.DueDate is null ? "" : (request.DueDateJalali ?? JalaliDate.FromGregorian(request.DueDate.GetValueOrDefault())), RequiresPeriodicReport = request.RequiresPeriodicReport, ReportFrequency = request.RequiresPeriodicReport ? request.ReportFrequency ?? "" : "", CancellationReason = request.CancellationReason?.Trim() ?? "", MeetingDate = request.MeetingDate, MeetingDateJalali = string.IsNullOrWhiteSpace(request.MeetingDateJalali) ? JalaliDate.FromGregorian(request.MeetingDate) : request.MeetingDateJalali, Number = request.Number.Trim(), Text = request.Text.Trim(), Notes = request.Notes?.Trim() ?? "", Status = ResolutionStatusUpdater.TimeBasedResolutionStatus(request.MeetingDate, request.StartDate.GetValueOrDefault(), request.DueDate, DateOnly.FromDateTime(DateTime.Today)), GroupId = request.GroupId, MeetingId = request.MeetingId, CreatedAt = DateTimeOffset.UtcNow, CreatedBy = http.User.Identity?.Name ?? "کاربر" };
+    if (requestedGroupIds.Any(groupId => !await db.Groups.AnyAsync(g => g.Id == groupId))) return Results.BadRequest(new { error = "گروه انتخاب‌شده پیدا نشد." });
+    var record = new Resolution { Status = "before", PublishToAll = request.PublishToAll, StartDate = request.StartDate, StartDateJalali = request.StartDate is null ? "" : (request.StartDateJalali ?? JalaliDate.FromGregorian(request.StartDate.GetValueOrDefault())), DueDate = request.DueDate, DueDateJalali = request.DueDate is null ? "" : (request.DueDateJalali ?? JalaliDate.FromGregorian(request.DueDate.GetValueOrDefault())), RequiresPeriodicReport = request.RequiresPeriodicReport, ReportFrequency = request.RequiresPeriodicReport ? request.ReportFrequency ?? "" : "", CancellationReason = request.CancellationReason?.Trim() ?? "", MeetingDate = request.MeetingDate, MeetingDateJalali = string.IsNullOrWhiteSpace(request.MeetingDateJalali) ? JalaliDate.FromGregorian(request.MeetingDate) : request.MeetingDateJalali, Number = request.Number.Trim(), Text = request.Text.Trim(), Notes = request.Notes?.Trim() ?? "", Status = ResolutionStatusUpdater.TimeBasedResolutionStatus(request.MeetingDate, request.StartDate.GetValueOrDefault(), request.DueDate, DateOnly.FromDateTime(DateTime.Today)), GroupId = request.GroupId, MeetingId = request.MeetingId, CreatedAt = DateTimeOffset.UtcNow, CreatedBy = http.User.Identity?.Name ?? "کاربر" };
     if (request.GroupIds is not null) foreach (var groupId in request.GroupIds.Distinct()) { if (!await db.Groups.AnyAsync(g => g.Id == groupId)) return Results.BadRequest(new { error = "گروه انتخاب‌شده پیدا نشد." }); record.GroupAssignments.Add(new ResolutionGroupAssignment { GroupId = groupId }); }
     foreach (var id in request.People.Distinct()) record.Assignments.Add(new ResolutionAssignment { NationalId = id });
     db.Resolutions.Add(record);
@@ -490,15 +492,14 @@ app.MapPut("/api/resolutions/{id:int}", async (int id, ResolutionCreate request,
 {
     if (!request.MeetingId.HasValue || !await db.Meetings.AnyAsync(item => item.Id == request.MeetingId.Value && item.Date == request.MeetingDate)) return Results.BadRequest(new { error = "جلسهٔ مرتبط را انتخاب کنید." });
     if (string.IsNullOrWhiteSpace(request.Number) || string.IsNullOrWhiteSpace(request.Text)) return Results.BadRequest(new { error = "شماره و متن مصوبه الزامی است." });
-    if (!ResolutionStatuses.All.Contains(request.Status)) return Results.BadRequest(new { error = "وضعیت نامعتبر است." });
-    if (request.Status == "cancelled" && string.IsNullOrWhiteSpace(request.CancellationReason)) return Results.BadRequest(new { error = "برای لغو مصوبه، توضیحات لغو الزامی است." });
+    var groupIds = (request.GroupIds ?? (request.GroupId.HasValue ? [request.GroupId.Value] : [])).Distinct().ToList();
+    if (groupIds.Count == 0 && request.People.Distinct().Count() == 0) return Results.BadRequest(new { error = "حداقل یک گروه، معاونت، اداره‌کل یا فرد را برای ارجاع انتخاب کنید." });
     if (request.RequiresPeriodicReport && !ResolutionStatuses.Frequencies.Contains(request.ReportFrequency ?? "")) return Results.BadRequest(new { error = "دوره دریافت گزارش را انتخاب کنید." });
     if (request.StartDate is null) return Results.BadRequest(new { error = "زمان شروع مصوبه الزامی است." });
     if (request.MeetingDate > request.StartDate.GetValueOrDefault()) return Results.BadRequest(new { error = "تاریخ جلسه نباید بعد از زمان شروع باشد." });
     if (request.DueDate.HasValue && request.DueDate.GetValueOrDefault() <= request.StartDate.GetValueOrDefault()) return Results.BadRequest(new { error = "زمان سررسید باید بعد از زمان شروع باشد." });
     var record = await db.Resolutions.Include(r => r.Assignments).Include(r => r.GroupAssignments).FirstOrDefaultAsync(r => r.Id == id);
     if (record is null) return Results.NotFound();
-    var groupIds = (request.GroupIds ?? (request.GroupId.HasValue ? [request.GroupId.Value] : [])).Distinct().ToList();
     if (groupIds.Any(groupId => !db.Groups.Any(g => g.Id == groupId))) return Results.BadRequest(new { error = "گروه انتخاب‌شده پیدا نشد." });
     var priorRecipients = record.Assignments.Select(assignment => assignment.NationalId).ToHashSet();
     var priorGroupIds = record.GroupAssignments.Select(assignment => assignment.GroupId).ToList();
@@ -552,7 +553,10 @@ app.MapPut("/api/resolutions/{id:int}", async (int id, ResolutionCreate request,
 });
 app.MapDelete("/api/resolutions/{id:int}", async (int id, AppDb db) =>
 {
-    var record = await db.Resolutions.FindAsync(id); if (record is null) return Results.NotFound();
+    var record = await db.Resolutions.Include(item => item.Assignments).Include(item => item.Progress).Include(item => item.GroupAssignments).Include(item => item.Attachments).Include(item => item.Events).FirstOrDefaultAsync(item => item.Id == id);
+    if (record is null) return Results.NotFound();
+    var hasReports = await db.ResolutionReports.AnyAsync(report => report.ResolutionId == id) || record.Progress.Any(progress => !string.IsNullOrWhiteSpace(progress.ReportText));
+    if (hasReports) return Results.Conflict(new { error = "برای این مصوبه گزارش اقدام یا گزارش دوره‌ای ثبت شده است؛ ابتدا گزارش‌ها را بررسی کنید." });
     db.Resolutions.Remove(record); await db.SaveChangesAsync(); return Results.NoContent();
 });
 app.MapPatch("/api/resolutions/{id:int}/status", async (int id, ResolutionStatusUpdate request, HttpContext context, AppDb db) =>
@@ -605,8 +609,6 @@ app.MapPatch("/api/resolutions/{id:int}/status", async (int id, ResolutionStatus
     if (!isAdmin) return Results.StatusCode(StatusCodes.Status403Forbidden);
     if (request.Status is not ("completed" or "cancelled")) return Results.BadRequest(new { error = "ادمین فقط می‌تواند وضعیت کلی را اجرا شده یا لغو شده کند." });
     if (request.Status == "cancelled" && string.IsNullOrWhiteSpace(request.Notes)) return Results.BadRequest(new { error = "برای لغو مصوبه، توضیحات لغو الزامی است." });
-    record.Status = request.Status;
-    if (request.Status == "cancelled") record.CancellationReason = request.Notes!.Trim();
     record.Notes = request.Notes ?? record.Notes;
     record.UpdatedAt = DateTimeOffset.UtcNow;
     db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = primaryAdminNationalId, UserName = "مدیر دفتر وزارتی", Text = "وضعیت کلی مصوبه به «" + ResolutionStatusLabel(request.Status) + "» تغییر کرد.", CreatedAt = DateTimeOffset.UtcNow });
