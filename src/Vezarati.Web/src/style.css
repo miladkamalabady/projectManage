@@ -468,3 +468,12 @@
 .required-field::before{position:absolute;inset-inline-start:0;top:0;display:inline-block;margin:0;line-height:1.4}
 
 .sortable-header{display:inline-flex;align-items:center;gap:4px;border:0;background:transparent;padding:0;color:inherit;font:inherit;font-weight:inherit;text-align:right;white-space:nowrap;cursor:pointer}.sortable-header:hover{color:#177d73}
+
+.meeting-detail-tabs{display:flex;gap:6px;overflow:auto;padding:4px;margin:0 0 14px;border-bottom:1px solid #e8edef}
+.meeting-detail-tabs button{display:inline-flex;align-items:center;gap:7px;flex:none;padding:9px 12px;border:0;border-bottom:2px solid transparent;background:transparent;color:#718087;font:inherit;font-size:11px;cursor:pointer;white-space:nowrap}
+.meeting-detail-tabs button.active{border-bottom-color:#177d73;color:#126e65;font-weight:800}
+.meeting-detail-tabs button span{display:grid;place-items:center;min-width:19px;height:19px;padding:0 5px;border-radius:12px;background:#edf3f1;color:#58756e;font-size:9px}
+.meeting-detail-section>h3{margin:4px 0 10px;font-size:13px;color:#41565d}
+.meeting-description-tab{display:grid;gap:10px}
+.meeting-show-more{display:inline-flex;align-items:center;justify-content:center;margin-top:9px;padding:7px 11px;border:1px solid #dce8e4;border-radius:8px;background:#f5faf8;color:#217866;font:inherit;font-size:10px;font-weight:700;cursor:pointer}
+.meeting-show-more:hover{border-color:#9dcbbd;background:#edf7f3}
