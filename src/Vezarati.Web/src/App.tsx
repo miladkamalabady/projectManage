@@ -713,14 +713,14 @@ export default function App() {
     const hiddenSiblings: { element: HTMLElement; display: string }[] = [];
     let node: HTMLElement | null = sheet;
     while (node && node !== document.body) {
-      const parent = node.parentElement;
-      if (parent) for (const child of Array.from(parent.children)) {
+      const parentElement: HTMLElement | null = node.parentElement;
+      if (parentElement) for (const child of Array.from(parentElement.children)) {
         if (child !== node && child instanceof HTMLElement) {
           hiddenSiblings.push({ element: child, display: child.style.display });
           child.style.display = "none";
         }
       }
-      node = parent;
+      node = parentElement;
     }
     document.body.classList.add("print-quick-status");
     const cleanup = () => {
