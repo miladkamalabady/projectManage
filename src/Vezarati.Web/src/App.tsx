@@ -224,6 +224,7 @@ export default function App() {
   const [resolutionStatusFilter, setResolutionStatusFilter] = useState("all");
   const [reportQuery, setReportQuery] = useState("");
   const [peopleReportLoaded, setPeopleReportLoaded] = useState(false);
+  const peopleReportFetchStarted = useRef(false);
   const [reportPage, setReportPage] = useState(1);
   const [reportTaskSelection, setReportTaskSelection] = useState<{person: Report["people"][number]; status: "all" | "completed" | "pending" | "delayed"} | null>(null);
   const [reportTaskDetails, setReportTaskDetails] = useState<Resolution[]>([]);
@@ -463,22 +464,22 @@ export default function App() {
   useEffect(() => { const normalized=normalizeJalaliDate(selectedDay); if(normalized!==selectedDay){setSelectedDay(normalized);setCalendarMonth(normalized.slice(0,7)+".01");} }, [selectedDay]);
   useEffect(() => { if (authUser) void load(); }, [authUser?.nationalId]);
   useEffect(() => {
-    if (!authUser || !isAdmin || tab !== "reports" || reportMainTab !== "people" || peopleReportLoaded) return;
-    let active = true;
+    if (!authUser || !isAdmin || tab !== "reports" || reportMainTab !== "people" || peopleReportLoaded || peopleReportFetchStarted.current) return;
+    peopleReportFetchStarted.current = true;
     setReportsLoading(true);
     setReportsError("");
     fetch("/api/reports?view=people&page=1&pageSize=5000&status=all", { credentials: "include", cache: "no-store" })
       .then(async response => {
         const data = await response.json();
         if (!response.ok) throw new Error(data?.error || "گزارش فردی دریافت نشد.");
-        if (active) {
-          setReports(current => ({ ...(current ?? { total: 0, completed: 0, delayed: 0, pending: 0, people: [] }), ...data, people: asArray(data.people) }) as Report);
-          setPeopleReportLoaded(true);
-        }
+        setReports(current => ({ ...(current ?? { total: 0, completed: 0, delayed: 0, pending: 0, people: [] }), ...data, people: asArray(data.people) }) as Report);
+        setPeopleReportLoaded(true);
       })
-      .catch(cause => { if (active) setReportsError(cause instanceof Error ? cause.message : "گزارش فردی دریافت نشد."); })
-      .finally(() => { if (active) setReportsLoading(false); });
-    return () => { active = false; };
+      .catch(cause => {
+        peopleReportFetchStarted.current = false;
+        setReportsError(cause instanceof Error ? cause.message : "گزارش فردی دریافت نشد.");
+      })
+      .finally(() => setReportsLoading(false));
   }, [authUser?.nationalId, isAdmin, tab, reportMainTab, peopleReportLoaded, reportsRetryCount]);
   useEffect(() => {
     if (!authUser || !isAdmin || tab !== "reports" || reportMainTab === "backup") return;
