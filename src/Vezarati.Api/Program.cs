@@ -110,7 +110,7 @@ app.MapGet("/api/admin/database/backup", async (HttpContext context, AppDb db, I
         : Path.GetFullPath(backupDirectory, environment.ContentRootPath);
     Directory.CreateDirectory(backupDirectory);
     var stamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
-    var databaseFile = Path.Combine(backupDirectory, $"vezarati-{stamp}.bak");
+    var databaseFile = Path.Combine(backupDirectory, $"vezarati-{Guid.NewGuid():N}.bak");
     var archiveFile = Path.Combine(Path.GetTempPath(), $"vezarati-backup-{Guid.NewGuid():N}.zip");
     try
     {
@@ -118,6 +118,7 @@ app.MapGet("/api/admin/database/backup", async (HttpContext context, AppDb db, I
         await using (var command = connection.CreateCommand())
         {
             command.CommandText = $"BACKUP DATABASE [{databaseName.Replace("]", "]]")}] TO DISK = @backupPath WITH COPY_ONLY, INIT";
+            command.CommandTimeout = 0;
             var parameter = command.CreateParameter();
             parameter.ParameterName = "@backupPath";
             parameter.Value = databaseFile;
