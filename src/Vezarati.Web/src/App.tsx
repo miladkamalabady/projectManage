@@ -79,7 +79,7 @@ function getResolutionRouting(item: Resolution, groups: Group[], directoryUsers:
   return parts.join(" · ") || (item.assignments?.length ? "ارجاع مستقیم به افراد" : "بدون ارجاع");
 }
 const appTabPaths: Record<string, string> = { wall: "/", notifications: "/notifications", resolutions: "/resolutions", sessions: "/sessions", archive: "/archive", groups: "/groups", reports: "/reports" };
-const tabForPath = (pathname: string) => Object.entries(appTabPaths).find(([, path]) => path !== "/" && pathname.replace(/\\/+$/, "") === path)?.[0] ?? "wall";
+const tabForPath = (pathname: string) => { const normalized = pathname.endsWith("/") && pathname !== "/" ? pathname.slice(0, -1) : pathname; return Object.entries(appTabPaths).find(([, path]) => path !== "/" && normalized === path)?.[0] ?? "wall"; };
 const pathForTab = (tab: string) => appTabPaths[tab] ?? "/";
 const localDateKey = (date: Date) => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
 const oneMonthAgoDateKey = () => {
