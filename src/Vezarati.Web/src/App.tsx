@@ -69,6 +69,7 @@ function getResolutionRouting(item: Resolution, groups: Group[], directoryUsers:
   const directoryNames = directoryUsers.filter(person => directIds.has(person.nationalId)).map(person => person.displayName);
   const people = Array.from(new Set([...selected.filter(group => isIndividualRecipientGroup(group.name)).flatMap(group => group.members.map(member => member.displayName)), ...groupMembers, ...directoryNames]));
   return { core, departments, people };
+}
 function getFallbackPersonTitle(nationalId: string, groups: Group[], users: DirectoryUser[]) {
   const directoryTitle = users.find(person => person.nationalId === nationalId)?.title?.trim();
   if (directoryTitle) return directoryTitle;
@@ -76,7 +77,7 @@ function getFallbackPersonTitle(nationalId: string, groups: Group[], users: Dire
   const unit = memberships.find(group => group.category === "unit" || (!isResolutionGroup(group.name, group.category) && !isRegionalGroup(group.name)));
   return unit?.name || memberships.find(group => !isResolutionGroup(group.name, group.category))?.name || "";
 }
-}function resolutionRoutingLabel(item: Resolution, groups: Group[], directoryUsers: { nationalId: string; displayName: string }[] = []) {
+function resolutionRoutingLabel(item: Resolution, groups: Group[], directoryUsers: { nationalId: string; displayName: string }[] = []) {
   const routing = getResolutionRouting(item, groups, directoryUsers);
   const parts = [
     routing.core.length ? "گروه: " + routing.core.join("، ") : "",
