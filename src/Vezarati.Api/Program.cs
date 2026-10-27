@@ -404,6 +404,42 @@ app.MapPut("/api/meetings/{id:int}", async (int id, MeetingRequest request, AppD
     await db.SaveChangesAsync(context.RequestAborted);
     return Results.Ok(meeting);
 });
+
+app.MapPost("/api/meetings/{id:int}/attachments", async (int id, HttpRequest request, AppDb db, HttpContext context, IWebHostEnvironment environment) =>
+{
+    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    var form = await request.ReadFormAsync(context.RequestAborted);
+    var file = form.Files.GetFile("file");
+    if (file is null || file.Length == 0) return Results.BadRequest(new { error = "فایل صورت‌جلسه را انتخاب کنید." });
+    if (file.Length > maxAttachmentSize) return Results.BadRequest(new { error = "حداکثر حجم فایل ۵۰ مگابایت است." });
+    var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+    var allowed = extension == ".pdf" || new[] { ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp" }.Contains(extension);
+    if (!allowed) return Results.BadRequest(new { error = "فقط فایل PDF یا تصویر قابل بارگذاری است." });
+    var meeting = await db.Meetings.Include(item => item.Attachments).FirstOrDefaultAsync(item => item.Id == id, context.RequestAborted);
+    if (meeting is null) return Results.NotFound();
+    var hash = Convert.ToHexString(await SHA256.HashDataAsync(file.OpenReadStream(), context.RequestAborted));
+    if (meeting.Attachments.Any(item => item.ContentHash == hash)) return Results.Conflict(new { error = "این فایل قبلاً برای جلسه بارگذاری شده است." });
+    var storedName = Guid.NewGuid().ToString("N") + extension;
+    var directory = Path.Combine(environment.ContentRootPath, "data", "uploads");
+    Directory.CreateDirectory(directory);
+    var destination = Path.Combine(directory, storedName);
+    await using (var output = System.IO.File.Create(destination)) await file.CopyToAsync(output, context.RequestAborted);
+    var provider = new FileExtensionContentTypeProvider();
+    if (!provider.TryGetContentType(file.FileName, out var contentType)) contentType = extension == ".pdf" ? "application/pdf" : "application/octet-stream";
+    var attachment = new MeetingAttachment { MeetingId = id, OriginalName = Path.GetFileName(file.FileName), StoredName = storedName, ContentType = contentType, Size = file.Length, ContentHash = hash, UploadedBy = context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "", UploadedAt = DateTimeOffset.UtcNow };
+    db.MeetingAttachments.Add(attachment);
+    try { await db.SaveChangesAsync(context.RequestAborted); }
+    catch { System.IO.File.Delete(destination); throw; }
+    return Results.Created("/api/meeting-attachments/" + attachment.Id, new { attachment.Id, attachment.MeetingId, attachment.OriginalName, attachment.ContentType, attachment.Size, attachment.UploadedAt });
+});
+app.MapGet("/api/meeting-attachments/{id:int}", async (int id, AppDb db, IWebHostEnvironment environment) =>
+{
+    var attachment = await db.MeetingAttachments.AsNoTracking().FirstOrDefaultAsync(item => item.Id == id);
+    if (attachment is null) return Results.NotFound();
+    var path = Path.Combine(environment.ContentRootPath, "data", "uploads", attachment.StoredName);
+    if (!System.IO.File.Exists(path)) return Results.NotFound();
+    return Results.File(path, attachment.ContentType, attachment.OriginalName);
+});
 app.MapGet("/api/attendance/reasons", async (AppDb db) =>
 {
     const string key = "AttendanceAbsenceReasons";
@@ -750,7 +786,10 @@ app.MapPost("/api/resolutions/{id:int}/completion-report", async (int id, HttpRe
     foreach (var file in files)
     {
         var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
-        var storedName = $"{Guid.NewGuid():N}{extension}";
+        var contentHash = Convert.ToHexString(await SHA256.HashDataAsync(file.OpenReadStream(), context.RequestAborted));
+    if (await db.Attachments.AnyAsync(existing => existing.ResolutionId == id && existing.ContentHash == contentHash, context.RequestAborted))
+        return Results.Conflict(new { error = "این فایل قبلاً به همین مصوبه پیوست شده است." });
+    var storedName = $"{Guid.NewGuid():N}{extension}";
         var destination = Path.Combine(uploadDirectory, storedName);
         await using (var output = System.IO.File.Create(destination)) await file.CopyToAsync(output);
         writtenPaths.Add(destination);
@@ -1131,7 +1170,7 @@ app.MapPost("/api/resolutions/{id:int}/attachments", async (int id, HttpRequest 
     var attachment = new ResolutionAttachment
     {
         ResolutionId = id, OriginalName = Path.GetFileName(file.FileName), StoredName = storedName,
-        ContentType = contentType, Size = file.Length, UploadedBy = nationalId, UploaderName = string.IsNullOrWhiteSpace(resolvedUploaderName) ? nationalId : resolvedUploaderName, UploadedAt = DateTimeOffset.UtcNow
+        ContentType = contentType, Size = file.Length, ContentHash = contentHash, UploadedBy = nationalId, UploaderName = string.IsNullOrWhiteSpace(resolvedUploaderName) ? nationalId : resolvedUploaderName, UploadedAt = DateTimeOffset.UtcNow
     };
     db.Attachments.Add(attachment);
     try { await db.SaveChangesAsync(); }
