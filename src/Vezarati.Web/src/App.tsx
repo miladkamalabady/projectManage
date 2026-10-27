@@ -345,7 +345,7 @@ export default function App() {
   }, []);  useEffect(() => { const safe=normalizeJalaliMonth(calendarMonth); if(safe!==calendarMonth) setCalendarMonth(safe); }, [calendarMonth]);
   useEffect(() => { const normalized=normalizeJalaliDate(selectedDay); if(normalized!==selectedDay){setSelectedDay(normalized);setCalendarMonth(normalized.slice(0,7)+".01");} }, [selectedDay]);
   useEffect(() => { if (authUser) void load(); }, [authUser?.nationalId]);
-  useEffect(() => { document.documentElement.style.fontSize = `${fontScale}px`; try { localStorage.setItem("vezarati.fontScale", String(fontScale)); } catch { /* local storage is optional */ } }, [fontScale]);
+  useEffect(() => { document.documentElement.style.setProperty("--ui-scale", String(fontScale / 16)); try { localStorage.setItem("vezarati.fontScale", String(fontScale)); } catch { /* local storage is optional */ } }, [fontScale]);
   useEffect(() => {
     if (!authUser || !("serviceWorker" in navigator) || !("PushManager" in window)) { setPushEnabled(false); return; }
     let active = true;
