@@ -466,3 +466,5 @@
 .modal-backdrop{z-index:100}
 .required-field{position:relative;padding-inline-start:1.05em}
 .required-field::before{position:absolute;inset-inline-start:0;top:0;display:inline-block;margin:0;line-height:1.4}
+
+.sortable-header{display:inline-flex;align-items:center;gap:4px;border:0;background:transparent;padding:0;color:inherit;font:inherit;font-weight:inherit;text-align:right;white-space:nowrap;cursor:pointer}.sortable-header:hover{color:#177d73}
