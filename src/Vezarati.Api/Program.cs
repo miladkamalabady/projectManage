@@ -799,7 +799,8 @@ app.MapPost("/api/resolutions/{id:int}/completion-report", async (int id, HttpRe
     foreach (var file in files)
     {
         var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
-        var contentHash = Convert.ToHexString(await SHA256.HashDataAsync(file.OpenReadStream(), context.RequestAborted));
+        using var hashStream = file.OpenReadStream();
+        var contentHash = Convert.ToHexString(await SHA256.HashDataAsync(hashStream, context.RequestAborted));
     if (await db.Attachments.AnyAsync(existing => existing.ResolutionId == id && existing.ContentHash == contentHash, context.RequestAborted))
         return Results.Conflict(new { error = "این فایل قبلاً به همین مصوبه پیوست شده است." });
     var storedName = $"{Guid.NewGuid():N}{extension}";
