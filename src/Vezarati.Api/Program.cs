@@ -559,7 +559,7 @@ app.MapPut("/api/resolutions/{id:int}", async (int id, ResolutionCreate request,
     record.DueDateJalali = request.DueDate is null ? "" : (request.DueDateJalali ?? JalaliDate.FromGregorian(request.DueDate.GetValueOrDefault()));
     record.RequiresPeriodicReport = request.RequiresPeriodicReport;
     record.ReportFrequency = request.RequiresPeriodicReport ? request.ReportFrequency ?? "" : "";
-    record.CancellationReason = request.CancellationReason?.Trim() ?? "";
+    
     record.PublishToAll = request.PublishToAll;
     record.MeetingDateJalali = string.IsNullOrWhiteSpace(request.MeetingDateJalali) ? JalaliDate.FromGregorian(request.MeetingDate) : request.MeetingDateJalali;
     record.Number = request.Number.Trim(); record.Text = request.Text.Trim(); record.Notes = request.Notes?.Trim() ?? "";
