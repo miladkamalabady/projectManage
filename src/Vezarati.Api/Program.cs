@@ -514,7 +514,7 @@ app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpC
     var requestedPeople = request.People.Distinct().Where(personId => !coveredPeople.Contains(personId)).ToList();
 
     var record = new Resolution { PublishToAll = request.PublishToAll, StartDate = request.StartDate, StartDateJalali = request.StartDate is null ? "" : (request.StartDateJalali ?? JalaliDate.FromGregorian(request.StartDate.GetValueOrDefault())), DueDate = request.DueDate, DueDateJalali = request.DueDate is null ? "" : (request.DueDateJalali ?? JalaliDate.FromGregorian(request.DueDate.GetValueOrDefault())), RequiresPeriodicReport = request.RequiresPeriodicReport, ReportFrequency = request.RequiresPeriodicReport ? request.ReportFrequency ?? "" : "", CancellationReason = request.CancellationReason?.Trim() ?? "", MeetingDate = request.MeetingDate, MeetingDateJalali = string.IsNullOrWhiteSpace(request.MeetingDateJalali) ? JalaliDate.FromGregorian(request.MeetingDate) : request.MeetingDateJalali, Number = request.Number.Trim(), Text = request.Text.Trim(), Notes = request.Notes?.Trim() ?? "", Status = ResolutionStatusUpdater.TimeBasedResolutionStatus(request.MeetingDate, request.StartDate.GetValueOrDefault(), request.DueDate, DateOnly.FromDateTime(DateTime.Today)), GroupId = request.GroupId, MeetingId = request.MeetingId, CreatedAt = DateTimeOffset.UtcNow, CreatedBy = http.User.Identity?.Name ?? "کاربر" };
-    if (request.GroupIds is not null) foreach (var groupId in request.GroupIds.Distinct()) { if (!await db.Groups.AnyAsync(g => g.Id == groupId)) return Results.BadRequest(new { error = "گروه انتخاب‌شده پیدا نشد." }); record.GroupAssignments.Add(new ResolutionGroupAssignment { GroupId = groupId }); }
+    foreach (var groupId in requestedGroupIds) record.GroupAssignments.Add(new ResolutionGroupAssignment { GroupId = groupId });
     foreach (var id in requestedPeople) record.Assignments.Add(new ResolutionAssignment { NationalId = id });
     db.Resolutions.Add(record);
     await db.SaveChangesAsync();
@@ -523,14 +523,15 @@ app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpC
     recipientIds.UnionWith(await db.GroupMembers.Where(member => groupIdsToNotify.Contains(member.GroupId)).Select(member => member.NationalId).ToListAsync());
     if (record.PublishToAll) recipientIds.UnionWith(await db.Users.Select(person => person.NationalId).ToListAsync());
     var recipientIdList = recipientIds.ToList();
-    var recipientProfiles = await db.Users.AsNoTracking().Where(person => recipientIdList.Contains(person.NationalId)).ToListAsync();
-    var recipientAccounts = await db.Users.AsNoTracking().Where(user => recipientIdList.Contains(user.NationalId)).ToListAsync();
+    var recipientProfiles = await db.Users.AsNoTracking()
+        .Where(person => recipientIdList.Contains(person.NationalId))
+        .Select(person => new { person.NationalId, person.DisplayName, person.Title, person.OrgPositionDesc })
+        .ToDictionaryAsync(person => person.NationalId);
     foreach (var recipient in recipientIds)
     {
-        var profile = recipientProfiles.FirstOrDefault(person => person.NationalId == recipient);
-        var account = recipientAccounts.FirstOrDefault(user => user.NationalId == recipient);
-        var displayName = profile?.DisplayName ?? account?.DisplayName ?? "کاربر";
-        var title = string.IsNullOrWhiteSpace(profile?.Title) ? account?.OrgPositionDesc : profile.Title;
+        recipientProfiles.TryGetValue(recipient, out var profile);
+        var displayName = profile?.DisplayName ?? "کاربر";
+        var title = string.IsNullOrWhiteSpace(profile?.Title) ? profile?.OrgPositionDesc : profile.Title;
         db.Notifications.Add(new UserNotification { NationalId = recipient, ResolutionId = record.Id, Type = "assigned", DateKey = record.Id.ToString(), Text = BaleMessageText.ForAssignment(record, displayName, title), CreatedAt = DateTimeOffset.UtcNow });
     }
     db.Events.Add(new ResolutionEvent { ResolutionId = record.Id, NationalId = primaryAdminNationalId, UserName = record.CreatedBy, Text = "مصوبه ثبت و برای پیگیری ارجاع شد.", CreatedAt = DateTimeOffset.UtcNow });
