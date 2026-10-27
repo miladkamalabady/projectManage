@@ -69,6 +69,13 @@ function getResolutionRouting(item: Resolution, groups: Group[], directoryUsers:
   const directoryNames = directoryUsers.filter(person => directIds.has(person.nationalId)).map(person => person.displayName);
   const people = Array.from(new Set([...selected.filter(group => isIndividualRecipientGroup(group.name)).flatMap(group => group.members.map(member => member.displayName)), ...groupMembers, ...directoryNames]));
   return { core, departments, people };
+function getFallbackPersonTitle(nationalId: string, groups: Group[], users: DirectoryUser[]) {
+  const directoryTitle = users.find(person => person.nationalId === nationalId)?.title?.trim();
+  if (directoryTitle) return directoryTitle;
+  const memberships = groups.filter(group => group.members?.some(member => member.nationalId === nationalId));
+  const unit = memberships.find(group => group.category === "unit" || (!isResolutionGroup(group.name, group.category) && !isRegionalGroup(group.name)));
+  return unit?.name || memberships.find(group => !isResolutionGroup(group.name, group.category))?.name || "";
+}
 }function resolutionRoutingLabel(item: Resolution, groups: Group[], directoryUsers: { nationalId: string; displayName: string }[] = []) {
   const routing = getResolutionRouting(item, groups, directoryUsers);
   const parts = [
@@ -938,12 +945,15 @@ export default function App() {
   useEffect(() => { if (resolutionPage > pageCount) setResolutionPage(pageCount); }, [resolutionPage, pageCount]);
   const reportPeople = useMemo(() => {
     const term = normalizeSearchText(reportQuery);
-    return (reports?.people ?? []).filter(person => {
-      const matchesTerm = !term || normalizeSearchText(`${person.displayName} ${person.nationalId}`).includes(term);
+    return (reports?.people ?? []).map(person => ({
+      ...person,
+      title: person.title?.trim() || getFallbackPersonTitle(person.nationalId, groups, users)
+    })).filter(person => {
+      const matchesTerm = !term || normalizeSearchText(`${person.displayName} ${person.nationalId} ${person.title}`).includes(term);
       const matchesStatus = reportPersonStatusFilter === "all" || person[reportPersonStatusFilter as "completed" | "pending" | "delayed"] > 0;
       return matchesTerm && matchesStatus;
     }).sort((a,b) => b.total - a.total || a.displayName.localeCompare(b.displayName, "fa"));
-  }, [reports, reportQuery, reportPersonStatusFilter]);
+  }, [reports, reportQuery, reportPersonStatusFilter, groups, users]);
   const filteredReportSubmissions = useMemo(() => { const term = normalizeSearchText(reportSubmissionQuery); return reportSubmissions.filter(report => !term || normalizeSearchText(`${report.userName} ${report.resolutionId} ${report.resolutionNumber} ${report.resolutionText} ${report.text} ${report.periodKey}`).includes(term)); }, [reportSubmissions, reportSubmissionQuery]);
   const eventReportItems = useMemo(() => {
     const term = normalizeSearchText(eventReportQuery);
