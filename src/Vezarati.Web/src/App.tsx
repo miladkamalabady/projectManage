@@ -3,13 +3,14 @@ import DatePicker from "react-multi-date-picker";
 import MeetingsPage from "./MeetingsPage";
 import persian from "react-date-object/calendars/persian";
 import persian_fa from "react-date-object/locales/persian_fa";
-import { Archive, Bell, CalendarDays, CheckCheck, ChevronDown, CircleAlert, ClipboardList, FileText, LayoutDashboard, Paperclip, Plus, Search, ShieldCheck, Trash2, Upload, Users, X } from "lucide-react";
+import { Archive, Bell, CalendarDays, CheckCheck, ChevronDown, CircleAlert, ClipboardList, FileText, LayoutDashboard, MessageCircle, Paperclip, Plus, Search, Send, ShieldCheck, Trash2, Upload, Users, X } from "lucide-react";
 
 type Member = { id: number; nationalId: string; displayName: string; title: string; organizationUnit?: string; mobile?: string };
 type Group = { id: number; name: string; category?: string; members: Member[] };
 type AssignmentOption = { key: string; kind: "group" | "unit" | "post"; label: string; detail: string; groupId?: number; nationalId?: string };
 type ResolutionReport = { id: number; resolutionId: number; resolutionNumber: string; resolutionText: string; nationalId: string; userName: string; text: string; reportType: string; periodKey: string; submittedAt: string; userTitle?: string; dueDate?: string | null; approvalStatus?: string; adminFeedback?: string; attachments?: { id: number; resolutionReportId?: number | null; originalName: string; contentType: string; size: number; uploaderName: string; approvedForAll: boolean; uploadedAt: string }[] };
 type ResolutionProgress = { nationalId: string; status: string; notes: string; reportText?: string; approvalStatus?: string; adminFeedback?: string; updatedAt: string };
+type ChatTurn = { role: "user" | "assistant"; content: string };
 type UserNotification = { id: number; resolutionId?: number; resolutionNumber?: string; type: string; text: string; isRead: boolean; createdAt: string };
 type BaleMessageReportItem = { id: number; displayName: string; mobile: string; text: string; status: string; attempts: number; createdAt: string; sentAt?: string | null; lastError: string };
 type BaleMessageReport = { total: number; page: number; pageSize: number; items: BaleMessageReportItem[] };
@@ -86,7 +87,7 @@ function resolutionRoutingLabel(item: Resolution, groups: Group[], directoryUser
   ].filter(Boolean);
   return parts.join(" · ") || (item.assignments?.length ? "ارجاع مستقیم به افراد" : "بدون ارجاع");
 }
-const appTabPaths: Record<string, string> = { wall: "/", notifications: "/notifications", resolutions: "/resolutions", sessions: "/sessions", archive: "/archive", groups: "/groups", reports: "/reports" };
+const appTabPaths: Record<string, string> = { wall: "/", assistant: "/assistant", notifications: "/notifications", resolutions: "/resolutions", sessions: "/sessions", archive: "/archive", groups: "/groups", reports: "/reports" };
 const tabForPath = (pathname: string) => { const normalized = pathname.endsWith("/") && pathname !== "/" ? pathname.slice(0, -1) : pathname; return Object.entries(appTabPaths).find(([, path]) => path !== "/" && normalized === path)?.[0] ?? "wall"; };
 const pathForTab = (tab: string) => appTabPaths[tab] ?? "/";
 const localDateKey = (date: Date) => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
@@ -149,6 +150,11 @@ const jalaliDateAt = (monthValue: string, day: number) => { const [year,month]=j
 
 export default function App() {
   const [tab, setTab] = useState(() => tabForPath(window.location.pathname));
+  const [assistantMessages, setAssistantMessages] = useState<ChatTurn[]>([]);
+  const [assistantInput, setAssistantInput] = useState("");
+  const [assistantSending, setAssistantSending] = useState(false);
+  const [assistantError, setAssistantError] = useState("");
+  const assistantEndRef = useRef<HTMLDivElement | null>(null);
   const skipRoutePush = useRef(false);
   const [openMeetingRequest, setOpenMeetingRequest] = useState(0);
   const [wallStatusFilter, setWallStatusFilter] = useState("all");
@@ -760,6 +766,30 @@ export default function App() {
       await load();
     } catch (cause) { setGroupDeleteError(cause instanceof Error ? cause.message : "تغییر دسته‌بندی انجام نشد."); }
     finally { setBusy(false); }
+  }
+  async function sendAssistantMessage(value = assistantInput) {
+    const message = value.trim();
+    if (!message || assistantSending) return;
+    const history = assistantMessages.slice(-8);
+    setAssistantMessages(current => [...current, { role: "user", content: message }]);
+    setAssistantInput("");
+    setAssistantError("");
+    setAssistantSending(true);
+    try {
+      const response = await fetch("/api/assistant/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, history })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result?.detail || result?.error || "پاسخ دستیار دریافت نشد.");
+      setAssistantMessages(current => [...current, { role: "assistant", content: result.reply || "پاسخی دریافت نشد." }]);
+    } catch (cause) {
+      setAssistantError(cause instanceof Error ? cause.message : "ارتباط با دستیار برقرار نشد.");
+    } finally {
+      setAssistantSending(false);
+      window.setTimeout(() => assistantEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }), 50);
+    }
   }
   async function request(url: string, method: string, body?: unknown) {
     setBusy(true); setMessage("");
@@ -1416,7 +1446,7 @@ export default function App() {
   return <div className="shell">
     <aside className="sidebar">
       <div className="brand"><span className="brand-icon"><ShieldCheck /></span><div><b>دفتر وزارتی</b><small>پیگیری مصوبات</small></div></div>
-      <nav>{[["wall", LayoutDashboard, "دیواره من"], ["notifications", Bell, `اعلان‌ها ${notifications.filter(item=>!item.isRead).length ? "(" + notifications.filter(item=>!item.isRead).length + ")" : ""}`], ["resolutions", ClipboardList, "مصوبات"], ...(isAdmin ? [["sessions", CalendarDays, "جلسات و حضور و غیاب"], ["archive", Archive, "بایگانی"], ["groups", Users, "گروه‌ها و اعضا"], ["reports", FileText, "گزارش‌ها"]] : [])].map(([key, Icon, title]: any) => <a key={key} href={pathForTab(key)} className={"nav " + (tab === key ? "active" : "")} aria-current={tab === key ? "page" : undefined} onClick={event => { event.preventDefault(); if (tab !== key) setTab(key); }}><Icon size={18} />{title}</a>)}</nav>
+      <nav>{[["wall", LayoutDashboard, "دیواره من"], ["assistant", MessageCircle, "دستیار وظایف"], ["notifications", Bell, `اعلان‌ها ${notifications.filter(item=>!item.isRead).length ? "(" + notifications.filter(item=>!item.isRead).length + ")" : ""}`], ["resolutions", ClipboardList, "مصوبات"], ...(isAdmin ? [["sessions", CalendarDays, "جلسات و حضور و غیاب"], ["archive", Archive, "بایگانی"], ["groups", Users, "گروه‌ها و اعضا"], ["reports", FileText, "گزارش‌ها"]] : [])].map(([key, Icon, title]: any) => <a key={key} href={pathForTab(key)} className={"nav " + (tab === key ? "active" : "")} aria-current={tab === key ? "page" : undefined} onClick={event => { event.preventDefault(); if (tab !== key) setTab(key); }}><Icon size={18} />{title}</a>)}</nav>
       <div className="sidebar-foot">محیط پیگیری اجرایی<br /><span>دفتر وزارتی</span></div>
     </aside>
 
@@ -1439,7 +1469,15 @@ export default function App() {
           </div></>}
         </div>
       </div>
-      <header className="top"><div><div className="eyebrow">پیگیری مصوبات</div><h1>{tab === "wall" ? "دیواره پیگیری من" : tab === "resolutions" ? "مصوبات و جلسات" : tab === "groups" ? "گروه‌های اصلی و مسئولان معاونت‌ها" : tab === "sessions" ? "مدیریت جلسات و حضور و غیاب" : tab === "archive" ? "بایگانی مصوبات" : tab === "notifications" ? "اعلان‌های من" : "گزارش‌های اجرایی"}</h1><p>مصوبات، مسئولیت‌ها و روند اجرای اقدامات</p></div><div className="top-actions"><div className="font-size-control" aria-label="اندازه نوشته‌ها"><button type="button" className="secondary" aria-label="کوچک کردن نوشته‌ها" disabled={fontScale<=14} onClick={()=>setFontScale(size=>Math.max(14,size-1))}>A−</button><button type="button" className="secondary" aria-label="بزرگ کردن نوشته‌ها" disabled={fontScale>=20} onClick={()=>setFontScale(size=>Math.min(20,size+1))}>A+</button></div><span className="today"><CalendarDays size={16} />{formatDate(today(), gregorianToJalali(today()).replace(/\./g, "/"))}</span>{isAdmin && tab !== "groups" && tab !== "sessions" && tab !== "archive" && tab !== "notifications" && tab !== "reports" && <button className="primary" onClick={() => openCreateResolution()}><Plus size={17} />ثبت مصوبه</button>}</div></header>
+      <header className="top"><div><div className="eyebrow">پیگیری مصوبات</div><h1>{tab === "wall" ? "دیواره پیگیری من" : tab === "assistant" ? "دستیار وظایف" : tab === "resolutions" ? "مصوبات و جلسات" : tab === "groups" ? "گروه‌های اصلی و مسئولان معاونت‌ها" : tab === "sessions" ? "مدیریت جلسات و حضور و غیاب" : tab === "archive" ? "بایگانی مصوبات" : tab === "notifications" ? "اعلان‌های من" : "گزارش‌های اجرایی"}</h1><p>مصوبات، مسئولیت‌ها و روند اجرای اقدامات</p></div><div className="top-actions"><div className="font-size-control" aria-label="اندازه نوشته‌ها"><button type="button" className="secondary" aria-label="کوچک کردن نوشته‌ها" disabled={fontScale<=14} onClick={()=>setFontScale(size=>Math.max(14,size-1))}>A−</button><button type="button" className="secondary" aria-label="بزرگ کردن نوشته‌ها" disabled={fontScale>=20} onClick={()=>setFontScale(size=>Math.min(20,size+1))}>A+</button></div><span className="today"><CalendarDays size={16} />{formatDate(today(), gregorianToJalali(today()).replace(/\./g, "/"))}</span>{isAdmin && tab !== "groups" && tab !== "sessions" && tab !== "archive" && tab !== "notifications" && tab !== "reports" && <button className="primary" onClick={() => openCreateResolution()}><Plus size={17} />ثبت مصوبه</button>}</div></header>
+      {tab === "assistant" && <section className="panel assistant-chat-panel">
+        <div className="assistant-chat-heading"><span className="assistant-chat-icon"><MessageCircle size={20}/></span><div><h2>دستیار پیگیری وظایف</h2><p>پرسش دربارهٔ مصوبه‌ها، سررسیدها و وضعیت پیگیری‌های در دسترس شما</p></div></div>
+        <div className="assistant-chat-notice">دستیار فقط اطلاعاتی را می‌بیند که در کارتابل شما مجاز است. می‌تواند پاسخ و پیش‌نویس تهیه کند؛ ثبت گزارش یا تغییر وضعیت را از بخش مربوطه انجام دهید.</div>
+        <div className="assistant-chat-prompts">{["کدام وظایف من سررسید نزدیک دارند؟","مصوبه‌های در حال پیگیری را خلاصه کن","برای گزارش وضعیت این وظیفه یک پیش‌نویس بنویس"].map(prompt=><button key={prompt} type="button" className="assistant-prompt" disabled={assistantSending} onClick={()=>void sendAssistantMessage(prompt)}>{prompt}</button>)}</div>
+        <div className="assistant-chat-messages" aria-live="polite">{assistantMessages.length===0&&<div className="assistant-chat-empty">سؤالتان را دربارهٔ وظایف و مصوبات بنویسید.</div>}{assistantMessages.map((turn,index)=><article key={index} className={"assistant-chat-bubble "+turn.role}><b>{turn.role==="user"?"شما":"دستیار"}</b><p>{turn.content}</p></article>)}{assistantSending&&<div className="assistant-chat-thinking">در حال بررسی وظایف شما…</div>}<div ref={assistantEndRef}/></div>
+        {assistantError&&<div className="assistant-chat-error" role="alert">{assistantError}</div>}
+        <form className="assistant-chat-form" onSubmit={event=>{event.preventDefault();void sendAssistantMessage();}}><textarea value={assistantInput} onChange={event=>setAssistantInput(event.target.value)} onKeyDown={event=>{if(event.key==="Enter"&&!event.shiftKey){event.preventDefault();void sendAssistantMessage();}}} placeholder="مثلاً: برای مصوبه ۱۲ چه اقدامی از من مانده؟" maxLength={2000} rows={2}/><button className="primary" type="submit" disabled={!assistantInput.trim()||assistantSending}><Send size={16}/>{assistantSending?"در حال پاسخ":"ارسال"}</button></form>
+      </section>}
       {(error || message) && <div className="api-toast-stack" aria-live="polite">{error && <div className="api-toast api-toast-error" role="alert"><span>{error}</span><div><button type="button" className="secondary" onClick={() => void load()}>تلاش دوباره</button><button type="button" className="api-toast-close" aria-label="بستن پیام" onClick={() => setError("")}>×</button></div></div>}{message && <div className="api-toast api-toast-message" role="status"><span>{message}</span><button type="button" className="api-toast-close" aria-label="بستن پیام" onClick={() => setMessage("")}>×</button></div>}</div>}
       <section className="metrics"><Metric icon={<ClipboardList />} label="کل مصوبات" value={isAdmin ? reports?.total ?? resolutions.length : mine.length} color="blue" active={wallStatusFilter === "all" && tab === "wall"} onClick={() => { setTab("wall"); setWallStatusFilter("all"); }} /><Metric icon={<CheckCheck />} label="اجراشده" value={completed} color="green" active={tab === "wall" && wallStatusFilter === "completed"} onClick={() => { setTab("wall"); setWallStatusFilter("completed"); }} /><Metric icon={<CircleAlert />} label="نیازمند پیگیری" value={pending} color="amber" active={tab === "wall" && wallStatusFilter === "pending"} onClick={() => { setTab("wall"); setWallStatusFilter("pending"); }} />{isAdmin && <Metric icon={<CalendarDays />} label="انجام نشده" value={delayed} color="red" active={tab === "wall" && wallStatusFilter === "delayed"} onClick={() => { setTab("wall"); setWallStatusFilter("delayed"); }} />}</section>
 
