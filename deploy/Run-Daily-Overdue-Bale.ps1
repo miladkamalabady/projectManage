@@ -5,7 +5,7 @@ $ErrorActionPreference = "Stop"
 
 $configPath = Join-Path $PSScriptRoot "OverdueBaleJob.json"
 if (-not (Test-Path -LiteralPath $configPath)) {
-    throw "فایل تنظیمات پیدا نشد: $configPath (از فایل نمونه یک کپی با نام OverdueBaleJob.json بسازید)"
+    throw "Config file not found: $configPath. Copy OverdueBaleJob.example.json to OverdueBaleJob.json."
 }
 $config = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $apiUrl = [string]$config.ApiUrl
@@ -13,9 +13,9 @@ $apiKey = [string]$config.ApiKey
 $runHour = [int]$config.RunHour
 $retryMinutes = [int]$config.RetryMinutes
 
-if ([string]::IsNullOrWhiteSpace($apiUrl)) { throw "ApiUrl در OverdueBaleJob.json خالی است." }
-if ([string]::IsNullOrWhiteSpace($apiKey) -or $apiKey.Length -lt 32 -or $apiKey -match "REPLACE|CHANGE_ME") { throw "ApiKey را در OverdueBaleJob.json تنظیم کنید." }
-if ($runHour -lt 0 -or $runHour -gt 23) { throw "RunHour باید بین 0 و 23 باشد." }
+if ([string]::IsNullOrWhiteSpace($apiUrl)) { throw "ApiUrl is empty in OverdueBaleJob.json." }
+if ([string]::IsNullOrWhiteSpace($apiKey) -or $apiKey.Length -lt 32 -or $apiKey -match "REPLACE|CHANGE_ME") { throw "Set a strong ApiKey in OverdueBaleJob.json." }
+if ($runHour -lt 0 -or $runHour -gt 23) { throw "RunHour must be between 0 and 23." }
 if ($retryMinutes -lt 1) { $retryMinutes = 5 }
 
 $logDirectory = Join-Path $env:ProgramData "Vezarati\Logs"
@@ -28,11 +28,11 @@ function Write-JobLog([string]$message) {
 }
 
 function Invoke-OverdueJob([bool]$dryRun = $false) {
-    Write-JobLog "درخواست بررسی روزانهٔ وظایف عقب‌افتاده ارسال شد. حالت آزمایشی: $dryRun"
+    Write-JobLog "Daily overdue check request sent. Dry run: $dryRun"
     $requestBody = @{ dryRun = $dryRun } | ConvertTo-Json -Compress
     $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Headers @{ "X-Job-Key" = $apiKey } -ContentType "application/json" -Body $requestBody -TimeoutSec 180
     $summary = $response | ConvertTo-Json -Depth 5 -Compress
-    Write-JobLog "نتیجه: $summary"
+    Write-JobLog "Result: $summary"
 }
 
 if ($RunOnce) {
@@ -40,7 +40,7 @@ if ($RunOnce) {
     exit 0
 }
 
-Write-JobLog "سرویس زمان‌بندی شروع شد؛ ساعت اجرا: $($runHour.ToString('00')):00."
+Write-JobLog "Scheduler started. Daily run hour: $($runHour.ToString('00')):00."
 $lastSuccessfulDate = ""
 while ($true) {
     $now = Get-Date
@@ -51,7 +51,7 @@ while ($true) {
             $lastSuccessfulDate = $today
         }
         catch {
-            Write-JobLog "خطا در اجرای کار روزانه: $($_.Exception.Message)؛ تلاش مجدد تا $retryMinutes دقیقهٔ دیگر."
+            Write-JobLog "Daily job failed: $($_.Exception.Message). Retrying in $retryMinutes minute(s)."
             Start-Sleep -Seconds ($retryMinutes * 60)
             continue
         }
