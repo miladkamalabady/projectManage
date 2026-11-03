@@ -69,6 +69,7 @@ app.Use(async (context, next) =>
             || path.Equals("/api/reports/submissions", StringComparison.OrdinalIgnoreCase)
             || path.StartsWith("/api/reports/people/", StringComparison.OrdinalIgnoreCase)
             || path.Equals("/api/reports/bale-messages", StringComparison.OrdinalIgnoreCase)
+            || (path.Equals("/api/reports/data-quality", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsGet(context.Request.Method))
             || (path.Equals("/api/reports/warnings", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPost(context.Request.Method))
             || (path.StartsWith("/api/reports/warnings/", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPost(context.Request.Method))
             || (path.StartsWith("/api/resolutions/", StringComparison.OrdinalIgnoreCase) && path.EndsWith("/warnings", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPost(context.Request.Method))
@@ -1860,6 +1861,59 @@ app.MapPut("/api/settings/bale-notifications", async (BaleNotificationSettingReq
         setting.Value = request.Enabled ? "true" : "false";
     await db.SaveChangesAsync();
     return Results.Ok(new { enabled = request.Enabled });
+});
+
+app.MapGet("/api/reports/data-quality", async (HttpContext context, AppDb db) =>
+{
+    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+
+    var users = await db.Users.AsNoTracking()
+        .OrderBy(user => user.DisplayName)
+        .ToListAsync(context.RequestAborted);
+    var resolutions = await db.Resolutions.AsNoTracking()
+        .Where(item => !item.IsArchived && item.Status != "cancelled")
+        .Include(item => item.Assignments)
+        .Include(item => item.Progress)
+        .Include(item => item.Group).ThenInclude(group => group!.Members)
+        .Include(item => item.GroupAssignments).ThenInclude(assignment => assignment.Group).ThenInclude(group => group!.Members)
+        .ToListAsync(context.RequestAborted);
+
+    var assignedNationalIds = new HashSet<string>(StringComparer.Ordinal);
+    var withoutDueDate = new List<Resolution>();
+    var withoutSpecificAssignees = new List<Resolution>();
+    foreach (var item in resolutions)
+    {
+        var directIds = item.Assignments.Select(assignment => assignment.NationalId)
+            .Concat(item.Group?.Members.Select(member => member.NationalId) ?? Enumerable.Empty<string>())
+            .Concat(item.GroupAssignments.SelectMany(assignment => assignment.Group?.Members.Select(member => member.NationalId) ?? Enumerable.Empty<string>()))
+            .Concat(item.Progress.Select(progress => progress.NationalId))
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        assignedNationalIds.UnionWith(directIds);
+        if (item.PublishToAll) assignedNationalIds.UnionWith(users.Select(user => user.NationalId));
+        if (!item.DueDate.HasValue) withoutDueDate.Add(item);
+        if (directIds.Count == 0) withoutSpecificAssignees.Add(item);
+    }
+
+    var missingMobiles = users.Where(user => string.IsNullOrWhiteSpace(user.Mobile)).ToList();
+    var usersWithoutTasks = users.Where(user => !assignedNationalIds.Contains(user.NationalId)).ToList();
+    static object UserSummary(AppUser user) => new { displayName = user.DisplayName, title = string.IsNullOrWhiteSpace(user.Title) ? user.OrgPositionDesc : user.Title, organizationUnit = user.OrganizationUnit };
+    static object ResolutionSummary(Resolution item) => new { id = item.Id, number = item.Number, text = item.Text, dueDate = item.DueDate, meetingDate = item.MeetingDate };
+    return Results.Ok(new
+    {
+        checkedAt = DateTimeOffset.UtcNow,
+        usersTotal = users.Count,
+        usersWithoutMobileCount = missingMobiles.Count,
+        usersWithoutMobile = missingMobiles.Take(40).Select(UserSummary),
+        usersWithoutTasksCount = usersWithoutTasks.Count,
+        usersWithoutTasks = usersWithoutTasks.Take(40).Select(UserSummary),
+        resolutionsTotal = resolutions.Count,
+        resolutionsWithoutDueDateCount = withoutDueDate.Count,
+        resolutionsWithoutDueDate = withoutDueDate.OrderByDescending(item => item.Id).Take(40).Select(ResolutionSummary),
+        resolutionsWithoutSpecificAssigneesCount = withoutSpecificAssignees.Count,
+        resolutionsWithoutSpecificAssignees = withoutSpecificAssignees.OrderByDescending(item => item.Id).Take(40).Select(ResolutionSummary)
+    });
 });
 
 app.MapGet("/api/reports", async (HttpContext context, AppDb db, string? view, int? page, int? pageSize, string? q, string? status) =>
