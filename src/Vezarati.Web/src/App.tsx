@@ -158,6 +158,7 @@ export default function App() {
   const skipRoutePush = useRef(false);
   const [openMeetingRequest, setOpenMeetingRequest] = useState(0);
   const [wallStatusFilter, setWallStatusFilter] = useState("all");
+  const [radarFilter, setRadarFilter] = useState("all");
   const [eventDrafts, setEventDrafts] = useState<Record<number, string>>({});
   const [reportDrafts, setReportDrafts] = useState<Record<number, string>>({});
   const [fadingReportedResolutionIds, setFadingReportedResolutionIds] = useState<number[]>([]);
@@ -1217,7 +1218,7 @@ export default function App() {
     .slice(0, 4), [mine, isAdmin, viewerId]);
   const radarTasks = useMemo(() => {
     const todayAtNoon = Date.parse(`${today()}T12:00:00`);
-    const urgent = mine.flatMap(item => {
+    const all = mine.flatMap(item => {
       const status = wallStatusOf(item);
       const due = item.dueDate?.slice(0, 10);
       if (!due || ["completed", "cancelled", "rejected"].includes(status)) return [];
@@ -1225,36 +1226,36 @@ export default function App() {
       if (!Number.isFinite(dueAtNoon)) return [];
       const days = Math.ceil((dueAtNoon - todayAtNoon) / 86400000);
       if (days > 30) return [];
-      const radius = days < 0 ? Math.max(12, 25 - Math.min(13, Math.abs(days) * 1.2))
-        : days === 0 ? 36 : days <= 3 ? 48 + days * 4 : days <= 7 ? 64 + (days - 4) * 5 : 84 + ((days - 8) / 22) * 38;
-      return [{ item, status, days, radius }];
+      return [{ item, status, days }];
     }).sort((left, right) => left.days - right.days || left.item.id - right.item.id);
-    // Keep deadline urgency as the target radius, then nudge nearby markers apart
-    // so several urgent tasks don't collapse into a single unreadable center dot.
-    const placed: { x: number; y: number }[] = [];
-    const positioned = urgent.map(entry => {
-      let best = { x: 160, y: 160 };
-      let bestScore = Number.POSITIVE_INFINITY;
-      const baseAngle = (entry.item.id * 137.508) % 360;
-      const offsets = [0, 8, -8, 16, -16, 24, -24, 32, -32];
-      for (let angleStep = 0; angleStep < 360; angleStep += 10) {
-        const angle = (baseAngle + angleStep) * Math.PI / 180;
-        for (const offset of offsets) {
-          const radius = Math.max(18, Math.min(132, entry.radius + offset));
-          const x = 160 + Math.cos(angle) * radius;
-          const y = 160 + Math.sin(angle) * radius;
-          const closest = placed.length ? Math.min(...placed.map(point => Math.hypot(point.x - x, point.y - y))) : 40;
-          const overlapPenalty = Math.max(0, 25 - closest) * 14;
-          const radiusPenalty = Math.abs(radius - entry.radius) * 0.55;
-          const score = overlapPenalty + radiusPenalty;
-          if (score < bestScore) { bestScore = score; best = { x, y }; }
-        }
-      }
-      placed.push(best);
-      return { ...entry, ...best };
-    });
-    return { total: positioned.length, items: positioned.slice(0, 12) };
+    const matches = (days: number, band: string) =>
+      band === "overdue" ? days < 0 :
+      band === "soon" ? days >= 0 && days <= 3 :
+      band === "week" ? days >= 4 && days <= 7 :
+      band === "month" ? days >= 8 && days <= 30 : true;
+    const counts = {
+      overdue: all.filter(entry => matches(entry.days, "overdue")).length,
+      soon: all.filter(entry => matches(entry.days, "soon")).length,
+      week: all.filter(entry => matches(entry.days, "week")).length,
+      month: all.filter(entry => matches(entry.days, "month")).length
+    };
+    const items = ["overdue", "soon", "week", "month"].flatMap(band => all.filter(entry => matches(entry.days, band)).slice(0, 6))
+      .sort((left, right) => left.days - right.days || left.item.id - right.item.id);
+    return { total: all.length, items, counts };
   }, [mine, isAdmin, viewerId]);
+  const radarBands = [
+    { key: "overdue", label: "مهلت گذشته", count: radarTasks.counts.overdue },
+    { key: "soon", label: "تا ۳ روز", count: radarTasks.counts.soon },
+    { key: "week", label: "۴ تا ۷ روز", count: radarTasks.counts.week },
+    { key: "month", label: "۸ تا ۳۰ روز", count: radarTasks.counts.month }
+  ];
+  const radarVisibleItems = radarFilter === "all" ? radarTasks.items : radarTasks.items.filter(entry =>
+    radarFilter === "overdue" ? entry.days < 0 :
+    radarFilter === "soon" ? entry.days >= 0 && entry.days <= 3 :
+    radarFilter === "week" ? entry.days >= 4 && entry.days <= 7 :
+    entry.days >= 8 && entry.days <= 30
+  );
+  const radarFilterTitle = radarFilter === "all" ? "نزدیک‌ترین وظایف" : radarBands.find(band => band.key === radarFilter)?.label ?? "نزدیک‌ترین وظایف";
   const personalCounts = mine.reduce((counts, item) => {
     const status = isAdmin ? item.status : item.progress?.find(progress => progress.nationalId === viewerId)?.status ?? item.status;
     if (status === "completed") counts.completed++;
@@ -1522,22 +1523,23 @@ export default function App() {
         </div>
         {homeFocusItems.length > 0 ? <div className="home-focus-list">{homeFocusItems.map(item => { const status=wallStatusOf(item); return <button type="button" className="home-focus-item" key={item.id} onClick={() => openWallTask(item)}><span className="home-focus-item-top"><b>مصوبه {item.number} · شناسه {item.id}</b><span className={`status ${status}`}>{labels[status]||status}</span></span><strong>{item.text}</strong><small>{item.dueDateJalali ? "سررسید: "+item.dueDateJalali : "بدون سررسید"}</small></button>;})}</div> : <div className="home-focus-empty">{isAdmin ? "در حال حاضر وظیفهٔ باز و نیازمند پیگیری ندارید." : "وظیفهٔ بازی برای پیگیری ندارید."}</div>}
         <section className="deadline-radar" aria-labelledby="deadline-radar-title">
-          <div className="deadline-radar-heading"><div><span className="home-focus-kicker">هشدار سررسید</span><h3 id="deadline-radar-title">رادار پیگیری</h3><p>هرچه نقطه به مرکز نزدیک‌تر باشد، سررسید فوری‌تر است. رادار موارد باز تا ۳۰ روز آینده و سررسیدهای گذشته را نشان می‌دهد.</p></div><span className="deadline-radar-count">{new Intl.NumberFormat("fa-IR").format(radarTasks.total)} مورد نزدیک</span></div>
-          {radarTasks.items.length ? <div className="deadline-radar-content">
+          <div className="deadline-radar-heading"><div><span className="home-focus-kicker">اولویت اقدام</span><h3 id="deadline-radar-title">رادار پیگیری</h3><p>روی هر حلقه یا بازه بزنید تا فقط همان وظایف را ببینید؛ حلقهٔ نزدیک‌تر یعنی مهلت فوری‌تر.</p></div><span className="deadline-radar-count">{new Intl.NumberFormat("fa-IR").format(radarTasks.total)} وظیفه در ۳۰ روز</span></div>
+          {radarTasks.total ? <div className="deadline-radar-content">
             <div className="deadline-radar-plot">
-              <svg viewBox="0 0 320 320" role="img" aria-label="رادار سررسید وظایف؛ نزدیک‌تر به مرکز یعنی فوری‌تر">
-                <circle className="radar-ring" cx="160" cy="160" r="132"/><circle className="radar-ring" cx="160" cy="160" r="96"/><circle className="radar-ring" cx="160" cy="160" r="62"/><circle className="radar-ring" cx="160" cy="160" r="32"/>
-                <path className="radar-axis" d="M28 160H292M160 28V292M67 67L253 253M253 67L67 253"/>
-                <text className="radar-ring-label" x="168" y="24">۳۰ روز</text><text className="radar-ring-label" x="168" y="92">۷ روز</text><text className="radar-ring-label" x="168" y="127">امروز</text><circle className="radar-center" cx="160" cy="160" r="5"/>
-                {radarTasks.items.map((entry,index)=><g key={entry.item.id} className={`radar-point ${entry.days<0?"overdue":entry.days<=3?"urgent":entry.days<=7?"soon":"upcoming"}`} role="button" tabIndex={0} aria-label={`مصوبه ${entry.item.number}، ${entry.days<0?Math.abs(entry.days)+" روز از سررسید گذشته":entry.days===0?"سررسید امروز":"سررسید تا "+entry.days+" روز دیگر"}`} onClick={()=>openWallTask(entry.item)} onKeyDown={event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();openWallTask(entry.item);}}}>
-                  <circle cx={entry.x} cy={entry.y} r="8"/><text x={entry.x} y={entry.y+3.5}>{index+1}</text><title>{`مصوبه ${entry.item.number} · ${entry.days<0?Math.abs(entry.days)+" روز تأخیر":entry.days===0?"امروز":entry.days+" روز دیگر"}`}</title>
-                </g>)}
+              <svg viewBox="0 0 320 320" role="img" aria-label="بازه‌های سررسید؛ برای فیلتر وظایف هر حلقه را انتخاب کنید">
+                <g className={`radar-zone radar-zone-month ${radarFilter==="month"?"active":""}`} role="button" tabIndex={0} aria-pressed={radarFilter==="month"} aria-label={`مهلت ۸ تا ۳۰ روز، ${radarTasks.counts.month} وظیفه`} onClick={event=>{event.stopPropagation();setRadarFilter("month");}} onKeyDown={event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();setRadarFilter("month");}}}><circle cx="160" cy="160" r="132"/><text x="160" y="38">۸ تا ۳۰ روز · {new Intl.NumberFormat("fa-IR").format(radarTasks.counts.month)}</text></g>
+                <g className={`radar-zone radar-zone-week ${radarFilter==="week"?"active":""}`} role="button" tabIndex={0} aria-pressed={radarFilter==="week"} aria-label={`مهلت ۴ تا ۷ روز، ${radarTasks.counts.week} وظیفه`} onClick={event=>{event.stopPropagation();setRadarFilter("week");}} onKeyDown={event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();setRadarFilter("week");}}}><circle cx="160" cy="160" r="96"/><text x="160" y="72">۴ تا ۷ روز · {new Intl.NumberFormat("fa-IR").format(radarTasks.counts.week)}</text></g>
+                <g className={`radar-zone radar-zone-soon ${radarFilter==="soon"?"active":""}`} role="button" tabIndex={0} aria-pressed={radarFilter==="soon"} aria-label={`مهلت تا ۳ روز، ${radarTasks.counts.soon} وظیفه`} onClick={event=>{event.stopPropagation();setRadarFilter("soon");}} onKeyDown={event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();setRadarFilter("soon");}}}><circle cx="160" cy="160" r="62"/><text x="160" y="106">تا ۳ روز · {new Intl.NumberFormat("fa-IR").format(radarTasks.counts.soon)}</text></g>
+                <g className={`radar-zone radar-zone-overdue ${radarFilter==="overdue"?"active":""}`} role="button" tabIndex={0} aria-pressed={radarFilter==="overdue"} aria-label={`مهلت گذشته، ${radarTasks.counts.overdue} وظیفه`} onClick={event=>{event.stopPropagation();setRadarFilter("overdue");}} onKeyDown={event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();setRadarFilter("overdue");}}}><circle cx="160" cy="160" r="32"/><text x="160" y="156">گذشته</text><text className="radar-zone-count" x="160" y="170">{new Intl.NumberFormat("fa-IR").format(radarTasks.counts.overdue)}</text></g>
               </svg>
-              
             </div>
-            <div className="deadline-radar-list">{radarTasks.items.map((entry,index)=><button type="button" className={`deadline-radar-item ${entry.days<0?"overdue":entry.days<=3?"urgent":entry.days<=7?"soon":"upcoming"}`} key={entry.item.id} onClick={()=>openWallTask(entry.item)}><span className="radar-item-index">{new Intl.NumberFormat("fa-IR").format(index+1)}</span><span className="radar-item-copy"><b>مصوبه {entry.item.number} · شناسه یکتا: {entry.item.id}</b><small>{entry.days<0?`${new Intl.NumberFormat("fa-IR").format(Math.abs(entry.days))} روز از سررسید گذشته`:entry.days===0?"سررسید امروز":`سررسید تا ${new Intl.NumberFormat("fa-IR").format(entry.days)} روز دیگر`}</small><em>{entry.item.text}</em></span><span className={`status ${entry.status}`}>{labels[entry.status]||entry.status}</span></button>)}</div>
-          </div> : <div className="deadline-radar-empty"><CircleAlert size={18}/><span>در ۳۰ روز آینده سررسید بازی ثبت نشده است.</span></div>}
-          {radarTasks.total>radarTasks.items.length&&<small className="deadline-radar-more">{radarTasks.items.length} مورد فوری‌تر از مجموع {new Intl.NumberFormat("fa-IR").format(radarTasks.total)} مورد نمایش داده شده است.</small>}
+            <div className="deadline-radar-results">
+              <div className="radar-filter-bar"><button type="button" className={radarFilter==="all"?"active":""} onClick={()=>setRadarFilter("all")}>همه <span>{new Intl.NumberFormat("fa-IR").format(radarTasks.total)}</span></button>{radarBands.map(band=><button type="button" key={band.key} className={radarFilter===band.key?"active":""} onClick={()=>setRadarFilter(band.key)}>{band.label}<span>{new Intl.NumberFormat("fa-IR").format(band.count)}</span></button>)}</div>
+              <div className="radar-results-heading"><b>{radarFilterTitle}</b><small>{new Intl.NumberFormat("fa-IR").format(radarVisibleItems.length)} مورد نمایش داده شده</small></div>
+              {radarVisibleItems.length ? <div className="deadline-radar-list">{radarVisibleItems.map((entry,index)=><button type="button" className={`deadline-radar-item ${entry.days<0?"overdue":entry.days<=3?"urgent":entry.days<=7?"soon":"upcoming"}`} key={entry.item.id} onClick={()=>openWallTask(entry.item)} title={entry.item.text}><span className="radar-item-index">{new Intl.NumberFormat("fa-IR").format(index+1)}</span><span className="radar-item-copy"><b>مصوبه {entry.item.number} · شناسه یکتا: {entry.item.id}</b><small>{entry.days<0?`${new Intl.NumberFormat("fa-IR").format(Math.abs(entry.days))} روز از سررسید گذشته`:entry.days===0?"سررسید امروز":`سررسید تا ${new Intl.NumberFormat("fa-IR").format(entry.days)} روز دیگر`}</small><em>{entry.item.text}</em></span><span className={`status ${entry.status}`}>{labels[entry.status]||entry.status}</span></button>)}</div> : <div className="deadline-radar-empty"><CircleAlert size={18}/><span>در این بازه وظیفه‌ای با سررسید نزدیک وجود ندارد.</span></div>}
+              {radarTasks.total>radarTasks.items.length&&<small className="deadline-radar-more">در هر بازه ۶ وظیفهٔ نزدیک‌تر نمایش داده می‌شود؛ عدد حلقه تعداد کامل وظایف را نشان می‌دهد.</small>}
+            </div>
+          </div> : <div className="deadline-radar-empty"><CircleAlert size={18}/><span>در ۳۰ روز آینده وظیفهٔ بازی با سررسید ثبت نشده است.</span></div>}
         </section>
       </section>}
 
