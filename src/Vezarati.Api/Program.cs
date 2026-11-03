@@ -106,9 +106,11 @@ app.MapPost("/api/jobs/daily-overdue-bale", async (HttpContext context, JsonElem
 {
     var configuredKey = configuration["ScheduledJobs:OverdueBaleApiKey"] ?? "";
     var suppliedKey = context.Request.Headers["X-Job-Key"].ToString();
-    if (configuredKey.Length < 32 || string.IsNullOrWhiteSpace(suppliedKey)
+    if (configuredKey.Length < 32)
+        return Results.Problem("کلید زمان‌بندی در تنظیمات API تعریف نشده یا کمتر از ۳۲ نویسه است.", statusCode: StatusCodes.Status503ServiceUnavailable);
+    if (string.IsNullOrWhiteSpace(suppliedKey)
         || !CryptographicOperations.FixedTimeEquals(System.Text.Encoding.UTF8.GetBytes(configuredKey), System.Text.Encoding.UTF8.GetBytes(suppliedKey)))
-        return Results.Unauthorized();
+        return Results.Json(new { error = "کلید X-Job-Key با ScheduledJobs:OverdueBaleApiKey در تنظیمات API مطابقت ندارد." }, statusCode: StatusCodes.Status401Unauthorized);
 
     var setting = await db.Settings.AsNoTracking().FirstOrDefaultAsync(item => item.Key == "BaleNotificationsEnabled", context.RequestAborted);
     if (setting?.Value != "true") return Results.Ok(new { enabled = false, message = "ارسال بله غیرفعال است.", recipients = 0, queued = 0 });
