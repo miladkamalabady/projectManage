@@ -157,7 +157,7 @@ app.MapPost("/api/jobs/daily-overdue-bale", async (HttpContext context, AppDb db
     var duplicate = 0;
     foreach (var (nationalId, tasks) in overdueByPerson)
     {
-        var dateKey = keyPrefix + tasks.Min(item => item.Id).ToString() + ":" + nationalId;
+        var dateKey = keyPrefix + nationalId;
         if (existingKeys.Contains(dateKey)) { duplicate++; continue; }
         users.TryGetValue(nationalId, out var user);
         var displayName = user?.DisplayName ?? "کاربر";
