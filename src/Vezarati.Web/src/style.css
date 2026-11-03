@@ -693,3 +693,29 @@
 .assistant-chat-error{color:#a43d3d;background:#fff0ef;border-radius:10px;padding:10px 13px;font-size:12px}
 .assistant-chat-form{display:flex;align-items:flex-end;gap:10px}.assistant-chat-form textarea{flex:1;resize:vertical;min-height:48px;max-height:140px;border:1px solid #dce4e7;border-radius:12px;padding:11px 13px;outline:none}.assistant-chat-form textarea:focus{border-color:#24877d;box-shadow:0 0 0 3px #24877d1a}.assistant-chat-form button{min-height:46px;display:flex;align-items:center;gap:7px}
 @media(max-width:640px){.assistant-chat-panel{padding:16px;margin:0 0 20px}.assistant-chat-messages{min-height:240px;max-height:52vh;padding:10px}.assistant-chat-bubble{max-width:94%}.assistant-chat-form{align-items:stretch}.assistant-chat-form button{padding:0 12px}}
+
+
+/* Actionable deadline radar */
+.deadline-radar-content{grid-template-columns:minmax(240px,.75fr) minmax(0,1.5fr);align-items:start;gap:20px}
+.deadline-radar-plot{width:min(100%,320px);max-width:320px}
+.radar-zone{cursor:pointer;outline:none}
+.radar-zone circle{stroke-width:1.5;transition:stroke-width .15s,filter .15s}
+.radar-zone-month circle{fill:#f0f6f1;stroke:#b9d0be}
+.radar-zone-week circle{fill:#fff7e3;stroke:#e5d29b}
+.radar-zone-soon circle{fill:#fff0e7;stroke:#e5b299}
+.radar-zone-overdue circle{fill:#fce5e3;stroke:#d77870}
+.radar-zone.active circle,.radar-zone:hover circle,.radar-zone:focus circle{stroke-width:3;filter:drop-shadow(0 2px 4px #526b5940)}
+.radar-zone text{font-family:inherit;font-size:9px;font-weight:700;fill:#536a5b;text-anchor:middle;pointer-events:none}
+.radar-zone-overdue text{fill:#9a413d}
+.radar-zone .radar-zone-count{font-size:11px;font-weight:900}
+.deadline-radar-results{display:flex;flex-direction:column;gap:10px;min-width:0;width:100%}
+.radar-filter-bar{display:flex;flex-wrap:wrap;gap:6px}
+.radar-filter-bar button{display:flex;align-items:center;gap:7px;border:1px solid #e1e9e3;border-radius:18px;background:#fff;color:#5a6d61;padding:6px 9px;font-size:10px;cursor:pointer}
+.radar-filter-bar button.active{border-color:#47816a;background:#e9f3ed;color:#285c43;font-weight:800}
+.radar-filter-bar button span{display:grid;place-items:center;min-width:19px;height:19px;border-radius:50%;background:#f1f4f1;font-size:9px}
+.radar-filter-bar button.active span{background:#d1e5d7}
+.radar-results-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;color:#405d4a}
+.radar-results-heading b{font-size:12px}.radar-results-heading small{font-size:9px;color:#89968e}
+.deadline-radar-list{max-height:300px}
+.radar-item-copy em{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;white-space:normal;line-height:1.7}
+@media(max-width:720px){.deadline-radar-content{grid-template-columns:1fr;gap:12px}.deadline-radar-plot{width:min(100%,270px)}.radar-filter-bar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.radar-filter-bar button{justify-content:space-between}.deadline-radar-list{max-height:280px}}
