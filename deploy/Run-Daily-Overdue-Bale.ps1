@@ -30,7 +30,21 @@ function Write-JobLog([string]$message) {
 function Invoke-OverdueJob([bool]$dryRun = $false) {
     Write-JobLog "Daily overdue check request sent. Dry run: $dryRun"
     $requestBody = @{ dryRun = $dryRun } | ConvertTo-Json -Compress
-    $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Headers @{ "X-Job-Key" = $apiKey } -ContentType "application/json" -Body $requestBody -TimeoutSec 180
+    try {
+        $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Headers @{ "X-Job-Key" = $apiKey } -ContentType "application/json" -Body $requestBody -TimeoutSec 180
+    }
+    catch {
+        $httpResponse = $_.Exception.Response
+        if ($null -ne $httpResponse -and $httpResponse.GetResponseStream()) {
+            $reader = New-Object System.IO.StreamReader($httpResponse.GetResponseStream())
+            try {
+                $responseText = $reader.ReadToEnd()
+                throw "API returned HTTP $([int]$httpResponse.StatusCode): $responseText"
+            }
+            finally { $reader.Dispose() }
+        }
+        throw
+    }
     $summary = $response | ConvertTo-Json -Depth 5 -Compress
     Write-JobLog "Result: $summary"
 }
