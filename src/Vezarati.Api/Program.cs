@@ -102,11 +102,11 @@ using (var scope = app.Services.CreateScope())
 
 const string primaryAdminNationalId = "0534921973";
 
-app.MapPost("/api/jobs/daily-overdue-bale", async (HttpContext context, AppDb db, IConfiguration configuration) =>
+app.MapPost("/api/jobs/daily-overdue-bale", async (HttpContext context, JsonElement request, AppDb db, IConfiguration configuration) =>
 {
     var configuredKey = configuration["ScheduledJobs:OverdueBaleApiKey"] ?? "";
     var suppliedKey = context.Request.Headers["X-Job-Key"].ToString();
-    if (string.IsNullOrWhiteSpace(configuredKey) || string.IsNullOrWhiteSpace(suppliedKey)
+    if (configuredKey.Length < 32 || string.IsNullOrWhiteSpace(suppliedKey)
         || !CryptographicOperations.FixedTimeEquals(System.Text.Encoding.UTF8.GetBytes(configuredKey), System.Text.Encoding.UTF8.GetBytes(suppliedKey)))
         return Results.Unauthorized();
 
@@ -150,6 +150,23 @@ app.MapPost("/api/jobs/daily-overdue-bale", async (HttpContext context, AppDb db
     var nationalIds = overdueByPerson.Keys.ToList();
     var users = await db.Users.AsNoTracking().Where(user => nationalIds.Contains(user.NationalId))
         .ToDictionaryAsync(user => user.NationalId, context.RequestAborted);
+    var dryRun = request.ValueKind == JsonValueKind.Object
+        && request.TryGetProperty("dryRun", out var dryRunElement)
+        && dryRunElement.ValueKind == JsonValueKind.True;
+    if (dryRun)
+    {
+        var notYetNotified = overdueByPerson.Where(pair => !existingKeys.Contains(keyPrefix + pair.Key)).ToList();
+        return Results.Ok(new
+        {
+            enabled = true,
+            dryRun = true,
+            date = today.ToString("yyyy-MM-dd"),
+            overdueTasks = notYetNotified.Sum(pair => pair.Value.Count),
+            recipients = notYetNotified.Count,
+            queued = notYetNotified.Count(pair => users.TryGetValue(pair.Key, out var account) && !string.IsNullOrWhiteSpace(account.Mobile)),
+            duplicate = overdueByPerson.Count - notYetNotified.Count
+        });
+    }
 
     var now = DateTimeOffset.UtcNow;
     var queued = 0;
