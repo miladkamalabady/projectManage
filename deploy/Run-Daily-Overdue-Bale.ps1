@@ -1,4 +1,4 @@
-param([switch]$RunOnce)
+param([switch]$RunOnce, [switch]$DryRun)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -27,15 +27,16 @@ function Write-JobLog([string]$message) {
     Add-Content -LiteralPath $script:logPath -Value $line -Encoding UTF8
 }
 
-function Invoke-OverdueJob {
-    Write-JobLog "درخواست بررسی روزانهٔ وظایف عقب‌افتاده ارسال شد."
-    $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Headers @{ "X-Job-Key" = $apiKey } -ContentType "application/json" -Body "{}" -TimeoutSec 180
+function Invoke-OverdueJob([bool]$dryRun = $false) {
+    Write-JobLog "درخواست بررسی روزانهٔ وظایف عقب‌افتاده ارسال شد. حالت آزمایشی: $dryRun"
+    $requestBody = @{ dryRun = $dryRun } | ConvertTo-Json -Compress
+    $response = Invoke-RestMethod -Uri $apiUrl -Method Post -Headers @{ "X-Job-Key" = $apiKey } -ContentType "application/json" -Body $requestBody -TimeoutSec 180
     $summary = $response | ConvertTo-Json -Depth 5 -Compress
     Write-JobLog "نتیجه: $summary"
 }
 
 if ($RunOnce) {
-    Invoke-OverdueJob
+    Invoke-OverdueJob -dryRun ([bool]$DryRun)
     exit 0
 }
 
