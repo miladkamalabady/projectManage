@@ -49,7 +49,8 @@ app.Use(async (context, next) =>
         var isSso = path.Equals("/api/auth/sso", StringComparison.OrdinalIgnoreCase);
         var isMe = path.Equals("/api/auth/me", StringComparison.OrdinalIgnoreCase);
         var isLogout = path.Equals("/api/auth/logout", StringComparison.OrdinalIgnoreCase);
-        if (!isSso && !isMe && !isLogout && context.User.Identity?.IsAuthenticated != true)
+        var isScheduledOverdueJob = path.Equals("/api/jobs/daily-overdue-bale", StringComparison.OrdinalIgnoreCase) && HttpMethods.IsPost(context.Request.Method);
+        if (!isSso && !isMe && !isLogout && !isScheduledOverdueJob && context.User.Identity?.IsAuthenticated != true)
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             return;
@@ -100,6 +101,96 @@ using (var scope = app.Services.CreateScope())
 }
 
 const string primaryAdminNationalId = "0534921973";
+
+app.MapPost("/api/jobs/daily-overdue-bale", async (HttpContext context, AppDb db, IConfiguration configuration) =>
+{
+    var configuredKey = configuration["ScheduledJobs:OverdueBaleApiKey"] ?? "";
+    var suppliedKey = context.Request.Headers["X-Job-Key"].ToString();
+    if (string.IsNullOrWhiteSpace(configuredKey) || string.IsNullOrWhiteSpace(suppliedKey)
+        || !CryptographicOperations.FixedTimeEquals(System.Text.Encoding.UTF8.GetBytes(configuredKey), System.Text.Encoding.UTF8.GetBytes(suppliedKey)))
+        return Results.Unauthorized();
+
+    var setting = await db.Settings.AsNoTracking().FirstOrDefaultAsync(item => item.Key == "BaleNotificationsEnabled", context.RequestAborted);
+    if (setting?.Value != "true") return Results.Ok(new { enabled = false, message = "ارسال بله غیرفعال است.", recipients = 0, queued = 0 });
+
+    var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3.5));
+    var dayKey = today.ToString("yyyyMMdd");
+    var keyPrefix = "daily-overdue:" + dayKey + ":";
+    var existingKeys = (await db.Notifications.AsNoTracking()
+        .Where(item => item.Type == "bale-warning" && item.DateKey.StartsWith(keyPrefix))
+        .Select(item => item.DateKey).ToListAsync(context.RequestAborted))
+        .ToHashSet(StringComparer.Ordinal);
+
+    var resolutions = await db.Resolutions.AsNoTracking()
+        .Where(item => !item.IsArchived && item.Status != "cancelled")
+        .Include(item => item.Assignments).Include(item => item.Progress)
+        .Include(item => item.Group).ThenInclude(group => group!.Members)
+        .Include(item => item.GroupAssignments).ThenInclude(assignment => assignment.Group).ThenInclude(group => group!.Members)
+        .ToListAsync(context.RequestAborted);
+
+    var overdueByPerson = new Dictionary<string, List<Resolution>>(StringComparer.Ordinal);
+    foreach (var resolution in resolutions)
+    {
+        var assignedIds = resolution.Assignments.Select(assignment => assignment.NationalId)
+            .Concat(resolution.Group?.Members.Select(member => member.NationalId) ?? Enumerable.Empty<string>())
+            .Concat(resolution.GroupAssignments.SelectMany(assignment => assignment.Group?.Members.Select(member => member.NationalId) ?? Enumerable.Empty<string>()))
+            .Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal);
+        foreach (var nationalId in assignedIds)
+        {
+            var personalStatus = resolution.Progress.FirstOrDefault(progress => progress.NationalId == nationalId)?.Status ?? resolution.Status;
+            if (personalStatus is "completed" or "cancelled" or "rejected") continue;
+            var isOverdue = personalStatus == "delayed" || (resolution.DueDate.HasValue && resolution.DueDate.Value < today);
+            if (!isOverdue) continue;
+            if (!overdueByPerson.TryGetValue(nationalId, out var list)) overdueByPerson[nationalId] = list = [];
+            list.Add(resolution);
+        }
+    }
+
+    if (overdueByPerson.Count == 0) return Results.Ok(new { enabled = true, date = today.ToString("yyyy-MM-dd"), recipients = 0, queued = 0, duplicate = 0 });
+    var nationalIds = overdueByPerson.Keys.ToList();
+    var users = await db.Users.AsNoTracking().Where(user => nationalIds.Contains(user.NationalId))
+        .ToDictionaryAsync(user => user.NationalId, context.RequestAborted);
+
+    var now = DateTimeOffset.UtcNow;
+    var queued = 0;
+    var notificationsCreated = 0;
+    var duplicate = 0;
+    foreach (var (nationalId, tasks) in overdueByPerson)
+    {
+        var dateKey = keyPrefix + tasks.Min(item => item.Id).ToString() + ":" + nationalId;
+        if (existingKeys.Contains(dateKey)) { duplicate++; continue; }
+        users.TryGetValue(nationalId, out var user);
+        var displayName = user?.DisplayName ?? "کاربر";
+        var title = string.IsNullOrWhiteSpace(user?.Title) ? user?.OrgPositionDesc : user.Title;
+        var message = BaleMessageText.ForOverdueWarnings(displayName, tasks.OrderBy(item => item.DueDate).ThenBy(item => item.Id), nationalId, title);
+        var firstTask = tasks.OrderBy(item => item.DueDate).ThenBy(item => item.Id).First();
+        db.Notifications.Add(new UserNotification
+        {
+            NationalId = nationalId, ResolutionId = firstTask.Id, Type = "bale-warning",
+            DateKey = dateKey, Text = message, CreatedAt = now
+        });
+        notificationsCreated++;
+        if (!string.IsNullOrWhiteSpace(user?.Mobile))
+        {
+            db.BaleMessageQueue.Add(new BaleQueuedMessage
+            {
+                NationalId = nationalId, Mobile = user.Mobile, Text = message, Status = "pending",
+                CreatedAtUnixMs = now.ToUnixTimeMilliseconds(), NextAttemptAtUnixMs = now.ToUnixTimeMilliseconds()
+            });
+            db.BrowserPushQueue.Add(new BrowserPushQueueItem
+            {
+                NationalId = nationalId, Title = "⏰ یادآوری وظایف عقب‌افتاده",
+                Text = message, Url = "/?resolution=" + firstTask.Id, Status = "pending",
+                CreatedAtUnixMs = now.ToUnixTimeMilliseconds(), NextAttemptAtUnixMs = now.ToUnixTimeMilliseconds()
+            });
+            queued++;
+        }
+        existingKeys.Add(dateKey);
+    }
+
+    await db.SaveChangesAsync(context.RequestAborted);
+    return Results.Ok(new { enabled = true, date = today.ToString("yyyy-MM-dd"), recipients = overdueByPerson.Count, queued, notificationsCreated, duplicate });
+});
 
 app.MapPost("/api/assistant/chat", async (HttpContext context, JsonElement request, AppDb db, IConfiguration configuration, IHttpClientFactory httpClientFactory, ILogger<Program> logger) =>
 {
