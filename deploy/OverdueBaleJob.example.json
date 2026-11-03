@@ -1,0 +1,6 @@
+{
+  "ApiUrl": "http://127.0.0.1:4000/api/jobs/daily-overdue-bale",
+  "ApiKey": "REPLACE_WITH_A_LONG_RANDOM_SECRET",
+  "RunHour": 8,
+  "RetryMinutes": 5
+}
