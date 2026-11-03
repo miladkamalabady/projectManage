@@ -1530,10 +1530,10 @@ export default function App() {
                 <path className="radar-axis" d="M28 160H292M160 28V292M67 67L253 253M253 67L67 253"/>
                 <text className="radar-ring-label" x="168" y="24">۳۰ روز</text><text className="radar-ring-label" x="168" y="92">۷ روز</text><text className="radar-ring-label" x="168" y="127">امروز</text><circle className="radar-center" cx="160" cy="160" r="5"/>
                 {radarTasks.items.map((entry,index)=><g key={entry.item.id} className={`radar-point ${entry.days<0?"overdue":entry.days<=3?"urgent":entry.days<=7?"soon":"upcoming"}`} role="button" tabIndex={0} aria-label={`مصوبه ${entry.item.number}، ${entry.days<0?Math.abs(entry.days)+" روز از سررسید گذشته":entry.days===0?"سررسید امروز":"سررسید تا "+entry.days+" روز دیگر"}`} onClick={()=>openWallTask(entry.item)} onKeyDown={event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();openWallTask(entry.item);}}}>
-                  <circle cx={entry.x} cy={entry.y} r="10"/><text x={entry.x} y={entry.y+3.5}>{index+1}</text><title>{`مصوبه ${entry.item.number} · ${entry.days<0?Math.abs(entry.days)+" روز تأخیر":entry.days===0?"امروز":entry.days+" روز دیگر"}`}</title>
+                  <circle cx={entry.x} cy={entry.y} r="8"/><text x={entry.x} y={entry.y+3.5}>{index+1}</text><title>{`مصوبه ${entry.item.number} · ${entry.days<0?Math.abs(entry.days)+" روز تأخیر":entry.days===0?"امروز":entry.days+" روز دیگر"}`}</title>
                 </g>)}
               </svg>
-              <div className="radar-center-caption">فوری</div>
+              
             </div>
             <div className="deadline-radar-list">{radarTasks.items.map((entry,index)=><button type="button" className={`deadline-radar-item ${entry.days<0?"overdue":entry.days<=3?"urgent":entry.days<=7?"soon":"upcoming"}`} key={entry.item.id} onClick={()=>openWallTask(entry.item)}><span className="radar-item-index">{new Intl.NumberFormat("fa-IR").format(index+1)}</span><span className="radar-item-copy"><b>مصوبه {entry.item.number} · شناسه یکتا: {entry.item.id}</b><small>{entry.days<0?`${new Intl.NumberFormat("fa-IR").format(Math.abs(entry.days))} روز از سررسید گذشته`:entry.days===0?"سررسید امروز":`سررسید تا ${new Intl.NumberFormat("fa-IR").format(entry.days)} روز دیگر`}</small><em>{entry.item.text}</em></span><span className={`status ${entry.status}`}>{labels[entry.status]||entry.status}</span></button>)}</div>
           </div> : <div className="deadline-radar-empty"><CircleAlert size={18}/><span>در ۳۰ روز آینده سررسید بازی ثبت نشده است.</span></div>}
