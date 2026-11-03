@@ -1225,12 +1225,35 @@ export default function App() {
       if (!Number.isFinite(dueAtNoon)) return [];
       const days = Math.ceil((dueAtNoon - todayAtNoon) / 86400000);
       if (days > 30) return [];
-      const radius = days < 0 ? Math.max(9, 25 - Math.min(16, Math.abs(days) * 1.5))
-        : days === 0 ? 34 : days <= 3 ? 46 + days * 4 : days <= 7 ? 62 + (days - 4) * 5 : 82 + ((days - 8) / 22) * 40;
-      const angle = ((item.id * 137.508) % 360) * Math.PI / 180;
-      return [{ item, status, days, radius, x: 160 + Math.cos(angle) * radius, y: 160 + Math.sin(angle) * radius }];
+      const radius = days < 0 ? Math.max(12, 25 - Math.min(13, Math.abs(days) * 1.2))
+        : days === 0 ? 36 : days <= 3 ? 48 + days * 4 : days <= 7 ? 64 + (days - 4) * 5 : 84 + ((days - 8) / 22) * 38;
+      return [{ item, status, days, radius }];
     }).sort((left, right) => left.days - right.days || left.item.id - right.item.id);
-    return { total: urgent.length, items: urgent.slice(0, 12) };
+    // Keep deadline urgency as the target radius, then nudge nearby markers apart
+    // so several urgent tasks don't collapse into a single unreadable center dot.
+    const placed: { x: number; y: number }[] = [];
+    const positioned = urgent.map(entry => {
+      let best = { x: 160, y: 160 };
+      let bestScore = Number.POSITIVE_INFINITY;
+      const baseAngle = (entry.item.id * 137.508) % 360;
+      const offsets = [0, 8, -8, 16, -16, 24, -24, 32, -32];
+      for (let angleStep = 0; angleStep < 360; angleStep += 10) {
+        const angle = (baseAngle + angleStep) * Math.PI / 180;
+        for (const offset of offsets) {
+          const radius = Math.max(18, Math.min(132, entry.radius + offset));
+          const x = 160 + Math.cos(angle) * radius;
+          const y = 160 + Math.sin(angle) * radius;
+          const closest = placed.length ? Math.min(...placed.map(point => Math.hypot(point.x - x, point.y - y))) : 40;
+          const overlapPenalty = Math.max(0, 25 - closest) * 14;
+          const radiusPenalty = Math.abs(radius - entry.radius) * 0.55;
+          const score = overlapPenalty + radiusPenalty;
+          if (score < bestScore) { bestScore = score; best = { x, y }; }
+        }
+      }
+      placed.push(best);
+      return { ...entry, ...best };
+    });
+    return { total: positioned.length, items: positioned.slice(0, 12) };
   }, [mine, isAdmin, viewerId]);
   const personalCounts = mine.reduce((counts, item) => {
     const status = isAdmin ? item.status : item.progress?.find(progress => progress.nationalId === viewerId)?.status ?? item.status;
