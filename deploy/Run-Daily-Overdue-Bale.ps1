@@ -14,7 +14,7 @@ $runHour = [int]$config.RunHour
 $retryMinutes = [int]$config.RetryMinutes
 
 if ([string]::IsNullOrWhiteSpace($apiUrl)) { throw "ApiUrl در OverdueBaleJob.json خالی است." }
-if ([string]::IsNullOrWhiteSpace($apiKey) -or $apiKey -match "REPLACE|CHANGE_ME") { throw "ApiKey را در OverdueBaleJob.json تنظیم کنید." }
+if ([string]::IsNullOrWhiteSpace($apiKey) -or $apiKey.Length -lt 32 -or $apiKey -match "REPLACE|CHANGE_ME") { throw "ApiKey را در OverdueBaleJob.json تنظیم کنید." }
 if ($runHour -lt 0 -or $runHour -gt 23) { throw "RunHour باید بین 0 و 23 باشد." }
 if ($retryMinutes -lt 1) { $retryMinutes = 5 }
 
