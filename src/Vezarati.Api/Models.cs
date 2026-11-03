@@ -330,8 +330,13 @@ public sealed class AppDb(DbContextOptions<AppDb> options, ILogger<AppDb> logger
 
     public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
+        // Deadline notices are created when the user opens notifications; keep them in-app,
+        // but do not turn that page load into a Bale send. Scheduled overdue jobs enqueue explicitly.
         var pendingNotifications = ChangeTracker.Entries<UserNotification>()
-            .Where(entry => entry.State == EntityState.Added && entry.Entity.Type != "bale-warning")
+            .Where(entry => entry.State == EntityState.Added
+                && entry.Entity.Type != "bale-warning"
+                && entry.Entity.Type != "overdue"
+                && entry.Entity.Type != "deadline")
             .Select(entry => entry.Entity)
             .ToList();
 
