@@ -9,7 +9,7 @@ $configPath = Join-Path $PSScriptRoot "OverdueBaleJob.json"
 if (-not (Test-Path -LiteralPath $runnerPath)) { throw "فایل اجرا پیدا نشد: $runnerPath" }
 if (-not (Test-Path -LiteralPath $configPath)) { throw "ابتدا OverdueBaleJob.example.json را به OverdueBaleJob.json کپی و تنظیم کنید." }
 $config = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
-if ([string]::IsNullOrWhiteSpace([string]$config.ApiKey) -or [string]$config.ApiKey -match "REPLACE|CHANGE_ME") { throw "ApiKey در OverdueBaleJob.json تنظیم نشده است." }
+if ([string]::IsNullOrWhiteSpace([string]$config.ApiKey) -or ([string]$config.ApiKey).Length -lt 32 -or [string]$config.ApiKey -match "REPLACE|CHANGE_ME") { throw "ApiKey در OverdueBaleJob.json تنظیم نشده است." }
 
 $actionArguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $runnerPath + '"'
 $action = New-ScheduledTaskAction -Execute "PowerShell.exe" -Argument $actionArguments -WorkingDirectory $PSScriptRoot
