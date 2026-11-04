@@ -288,22 +288,19 @@ app.MapPost("/api/assistant/chat", async (HttpContext context, JsonElement reque
         .ToList();
     var numericTokens = searchTokens.Where(token => token.All(char.IsDigit)).ToHashSet(StringComparer.Ordinal);
 
-    int Relevance(dynamic item)
+    var ranked = candidates.Select(item =>
     {
         var score = 0;
-        if (numericTokens.Contains(item.id.ToString()) || numericTokens.Contains(NormalizeDigits((string)item.number))) score += 100;
-        var title = NormalizeDigits((string)item.text).ToLowerInvariant();
-        var notes = NormalizeDigits((string)item.notes).ToLowerInvariant();
+        if (numericTokens.Contains(item.id.ToString()) || numericTokens.Contains(NormalizeDigits(item.number))) score += 100;
+        var title = NormalizeDigits(item.text).ToLowerInvariant();
+        var notes = NormalizeDigits(item.notes).ToLowerInvariant();
         foreach (var token in searchTokens)
         {
             if (title.Contains(token, StringComparison.Ordinal)) score += 5;
             if (notes.Contains(token, StringComparison.Ordinal)) score += 2;
         }
-        return score;
-    }
-
-    var ranked = candidates
-        .Select(item => new { Item = item, Score = Relevance(item) })
+        return new { Item = item, Score = score };
+    })
         .OrderByDescending(entry => entry.Score)
         .ThenByDescending(entry => entry.Item.sortDate)
         .ToList();
