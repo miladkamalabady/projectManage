@@ -379,7 +379,7 @@ app.MapPost("/api/assistant/chat", async (HttpContext context, JsonElement reque
         if (!hasPersian(reply))
         {
             using var retry = await httpClientFactory.CreateClient("Ollama").PostAsJsonAsync(new Uri(ollamaUri, "api/chat"),
-                new { model, think = false, stream = false, keep_alive = "10m", options = new { num_ctx = 4096, num_predict = 300, temperature = 0.1 },
+                new { model, think = false, stream = false, keep_alive = "10m", options = new { num_ctx = 32768, num_predict = 300, temperature = 0.1 },
                     messages = new object[] { messages[0], new { role = "user", content = question + "\\nپاسخ را فقط به فارسی و با خط فارسی بنویس." } } }, context.RequestAborted);
             if (retry.IsSuccessStatusCode)
             {
