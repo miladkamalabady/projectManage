@@ -378,7 +378,7 @@ app.MapPost("/api/assistant/chat", async (HttpContext context, JsonElement reque
             : null;
         if (string.IsNullOrWhiteSpace(reply))
             return Results.Problem("Ollama پاسخ قابل‌خواندن برنگرداند.", statusCode: StatusCodes.Status502BadGateway);
-        bool hasPersian(string value) => value.Any(ch => (ch >= 0x0600 && ch <= 0x06FF) || (ch >= 0xFB50 && ch <= 0xFDFF) || (ch >= 0xFE70 && ch <= 0xFEFF));
+        bool hasPersian(string value) => value.Count(ch => (ch >= 0x0600 && ch <= 0x06FF) || (ch >= 0xFB50 && ch <= 0xFDFF) || (ch >= 0xFE70 && ch <= 0xFEFF)) >= Math.Max(3, value.Count(char.IsLetter) * 2 / 3);
         if (!hasPersian(reply))
         {
             using var retry = await httpClientFactory.CreateClient("Ollama").PostAsJsonAsync(new Uri(ollamaUri, "api/chat"),
