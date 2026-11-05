@@ -26,6 +26,7 @@ public sealed class Resolution
     public string Notes { get; set; } = "";
     public string Status { get; set; } = "before";
     public bool PublishToAll { get; set; }
+    public bool IsConfidential { get; set; }
     public bool IsArchived { get; set; }
     public string? SourceKey { get; set; }
     public int? GroupId { get; set; }
@@ -646,6 +647,7 @@ public static class SchemaCompatibility
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.ResolutionAttachments', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.ResolutionAttachments', N'ContentHash') IS NULL ALTER TABLE dbo.ResolutionAttachments ADD ContentHash nvarchar(64) NOT NULL CONSTRAINT DF_ResolutionAttachments_ContentHash DEFAULT N'';");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.ResolutionAttachments', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.ResolutionAttachments', N'ResolutionReportId') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_ResolutionAttachments_ResolutionReportId' AND object_id = OBJECT_ID(N'dbo.ResolutionAttachments')) CREATE INDEX IX_ResolutionAttachments_ResolutionReportId ON dbo.ResolutionAttachments (ResolutionReportId);");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.Resolutions', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.Resolutions', N'MeetingId') IS NULL ALTER TABLE dbo.Resolutions ADD MeetingId int NULL;");
+            await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.Resolutions', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.Resolutions', N'IsConfidential') IS NULL ALTER TABLE dbo.Resolutions ADD IsConfidential bit NOT NULL CONSTRAINT DF_Resolutions_IsConfidential DEFAULT 0;");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.Meetings', N'U') IS NULL CREATE TABLE dbo.Meetings (Id int IDENTITY(1,1) NOT NULL PRIMARY KEY, Date date NOT NULL, DateJalali nvarchar(max) NOT NULL, Title nvarchar(300) NOT NULL, GuestText nvarchar(max) NOT NULL, CreatedAt datetimeoffset NOT NULL);");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.MeetingAttachments', N'U') IS NULL CREATE TABLE dbo.MeetingAttachments (Id int IDENTITY(1,1) NOT NULL PRIMARY KEY, MeetingId int NOT NULL, OriginalName nvarchar(512) NOT NULL, StoredName nvarchar(128) NOT NULL, ContentType nvarchar(256) NOT NULL, Size bigint NOT NULL, ContentHash nvarchar(64) NOT NULL, UploadedBy nvarchar(11) NOT NULL, UploadedAt datetimeoffset NOT NULL, CONSTRAINT FK_MeetingAttachments_Meetings_MeetingId FOREIGN KEY (MeetingId) REFERENCES dbo.Meetings(Id) ON DELETE CASCADE);");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.MeetingAttendees', N'U') IS NULL CREATE TABLE dbo.MeetingAttendees (Id int IDENTITY(1,1) NOT NULL PRIMARY KEY, MeetingId int NOT NULL, NationalId nvarchar(11) NOT NULL, DisplayName nvarchar(300) NOT NULL, Title nvarchar(max) NOT NULL, IsPresent bit NOT NULL, AbsenceReason nvarchar(200) NOT NULL, CONSTRAINT FK_MeetingAttendees_Meetings_MeetingId FOREIGN KEY (MeetingId) REFERENCES dbo.Meetings(Id) ON DELETE CASCADE);");
@@ -680,6 +682,7 @@ public static class SchemaCompatibility
         if (columns.Count > 0 && !columns.Contains("DueDateJalali")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN DueDateJalali TEXT NOT NULL DEFAULT '';");
         if (columns.Count > 0 && !columns.Contains("IsArchived")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN IsArchived INTEGER NOT NULL DEFAULT 0;");
         if (columns.Count > 0 && !columns.Contains("PublishToAll")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN PublishToAll INTEGER NOT NULL DEFAULT 0;");
+        if (columns.Count > 0 && !columns.Contains("IsConfidential")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN IsConfidential INTEGER NOT NULL DEFAULT 0;");
         await db.Database.ExecuteSqlRawAsync("UPDATE Resolutions SET StartDate = MeetingDate, StartDateJalali = MeetingDateJalali WHERE StartDate IS NULL;");
         await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_Resolutions_SourceKey ON Resolutions (SourceKey);");
         var reportColumns = await ReadColumns(db, "ResolutionReports");
@@ -865,13 +868,13 @@ public static class BaleMessageText
 
     public static string ForAssignment(Resolution item, string recipientName, string? recipientTitle = null)
     {
-        var text = Clip(item.Text, 500);
-        var notes = Clip(item.Notes, 260);
+        var text = item.IsConfidential ? "محرمانه" : Clip(item.Text, 500);
+        var notes = item.IsConfidential ? "" : Clip(item.Notes, 260);
         var message = "📬 وظیفهٔ جدید از دفتر وزارتی\n"
             + Greeting(recipientName, recipientTitle) + " یک مصوبه برای پیگیری به شما ارجاع شده است.\n"
             + "🔢 شماره مصوبه: " + item.Number + "\n"
             + "📝 موضوع: " + text + "\n"
-            + "📅 تاریخ جلسه: " + Date(item.MeetingDate, item.MeetingDateJalali) + "\n"
+            + "📅 جلسه: " + (item.Meeting?.Title ?? "جلسه") + " (" + Date(item.MeetingDate, item.MeetingDateJalali) + ")\n
             + "🚀 شروع پیگیری: " + Date(item.StartDate, item.StartDateJalali) + "\n"
             + "⏰ مهلت اقدام: " + Date(item.DueDate, item.DueDateJalali)
             + (string.IsNullOrWhiteSpace(notes) ? "" : "\nℹ️ توضیحات: " + notes)
@@ -883,13 +886,13 @@ public static class BaleMessageText
     public static string ForReportReview(Resolution? item, bool approved, string? feedback)
     {
         var number = item?.Number ?? "";
-        var title = Clip(item?.Text, 360);
+        var title = item?.IsConfidential == true ? "محرمانه" : Clip(item?.Text, 360);
         var message = approved
             ? "✅ گزارش اقدام شما تأیید شد و وضعیت پیگیری‌تان به «اجرا شده» تغییر کرد.\n"
             : "↩️ گزارش اقدام شما نیازمند اصلاح است و وضعیت پیگیری‌تان به «در حال اجرا» برگشت.\n";
         message += "🔢 شماره مصوبه: " + (string.IsNullOrWhiteSpace(number) ? "—" : number) + "\n"
             + "📌 عنوان مصوبه: «" + (string.IsNullOrWhiteSpace(title) ? "بدون عنوان" : title) + "»\n"
-            + (string.IsNullOrWhiteSpace(feedback) ? "" : "📝 توضیح ادمین: " + Clip(feedback, 500) + "\n")
+            + (item?.IsConfidential == true || string.IsNullOrWhiteSpace(feedback) ? "" : "📝 توضیح ادمین: " + Clip(feedback, 500) + "\n")
             + "لطفاً جزئیات را در سامانه «پیگیری مصوبات» بررسی کنید.";
         if (item is not null) message = WithResolutionId(message, item.Id);
         return WithResolutionTag(message, number);
@@ -897,8 +900,8 @@ public static class BaleMessageText
 
     public static string ForWarning(Resolution item, string recipientName, string status, string? recipientTitle = null)
     {
-        var text = Clip(item.Text, 420);
-        var notes = Clip(item.Notes, 180);
+        var text = item.IsConfidential ? "محرمانه" : Clip(item.Text, 420);
+        var notes = item.IsConfidential ? "" : Clip(item.Notes, 180);
         var message = "🚨 یادآوری پیگیری از دفتر وزارتی\n"
             + Greeting(recipientName, recipientTitle) + "\n"
             + "برای وظیفهٔ شما در این مصوبه، وضعیت «" + status + "» ثبت شده است.\n"
@@ -921,7 +924,7 @@ public static class BaleMessageText
             var status = item.Progress.FirstOrDefault(progress => progress.NationalId == nationalId)?.Status ?? item.Status;
             var label = status == "delayed" ? "دارای تأخیر" : "در حال اجرا";
             var detail = "• مصوبه " + item.Number + " · شناسه یکتا: " + item.Id + " | " + label + " | سررسید: " + Date(item.DueDate, item.DueDateJalali)
-                + " | " + Clip(item.Text, 150);
+                + " | " + (item.IsConfidential ? "محرمانه" : Clip(item.Text, 150));
             return WithResolutionTag(detail, item.Number);
         });
         var total = items.Count();
