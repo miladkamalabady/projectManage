@@ -351,6 +351,10 @@ public sealed class AppDb(DbContextOptions<AppDb> options, ILogger<AppDb> logger
                 if (enabled)
                 {
                     var recipientIds = pendingNotifications.Select(notification => notification.NationalId).Distinct().ToList();
+                    var relatedResolutionIds = pendingNotifications.Where(notification => notification.ResolutionId.HasValue).Select(notification => notification.ResolutionId!.Value).Distinct().ToList();
+                    var confidentialResolutionIds = relatedResolutionIds.Count == 0
+                        ? new HashSet<int>()
+                        : (await Resolutions.AsNoTracking().Where(resolution => relatedResolutionIds.Contains(resolution.Id) && resolution.IsConfidential).Select(resolution => resolution.Id).ToListAsync(CancellationToken.None)).ToHashSet();
                     var mobiles = await Users.AsNoTracking()
                         .Where(user => recipientIds.Contains(user.NationalId) && user.Mobile != "")
                         .Select(user => new { user.NationalId, user.Mobile })
@@ -362,7 +366,10 @@ public sealed class AppDb(DbContextOptions<AppDb> options, ILogger<AppDb> logger
                     foreach (var notification in pendingNotifications)
                         if (mobileById.TryGetValue(notification.NationalId, out var mobile) && !string.IsNullOrWhiteSpace(mobile))
                         {
-                            var text = BaleMessageText.WithDetectedResolutionTags(BaleMessageText.WithResolutionId(notification.Text, notification.ResolutionId));
+                            var isConfidential = notification.ResolutionId.HasValue && confidentialResolutionIds.Contains(notification.ResolutionId.Value);
+                            var text = isConfidential
+                                ? "🔒 این مصوبه محرمانه است؛ برای بررسی جزئیات به سامانه مراجعه کنید."
+                                : BaleMessageText.WithDetectedResolutionTags(BaleMessageText.WithResolutionId(notification.Text, notification.ResolutionId));
                             var now = DateTimeOffset.UtcNow;
                             BaleMessageQueue.Add(new BaleQueuedMessage
                             {
