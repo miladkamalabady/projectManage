@@ -683,11 +683,7 @@ app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context
         user.RegionId = ReadInt("regionId");
         user.LastLoginAt = DateTimeOffset.UtcNow;
         user.DisplayName = displayName;
-        var userTitleOverrideKey = "UserTitleOverride:" + nationalId;
-        var titleWasEditedByAdmin = await db.Settings.AnyAsync(setting => setting.Key == userTitleOverrideKey, context.RequestAborted);
-        if (!titleWasEditedByAdmin)
-            user.Title = string.IsNullOrWhiteSpace(position) ? ReadString("orgPositionTypeDesc") : position;
-        else if (string.IsNullOrWhiteSpace(user.Title))
+        if (string.IsNullOrWhiteSpace(user.Title))
             user.Title = string.IsNullOrWhiteSpace(position) ? ReadString("orgPositionTypeDesc") : position;
         if (string.IsNullOrWhiteSpace(user.OrganizationUnit)) user.OrganizationUnit = user.RegionId?.ToString() ?? "";
 
