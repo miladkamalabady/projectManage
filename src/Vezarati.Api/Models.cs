@@ -881,7 +881,7 @@ public static class BaleMessageText
             + Greeting(recipientName, recipientTitle) + " یک مصوبه برای پیگیری به شما ارجاع شده است.\n"
             + "🔢 شماره مصوبه: " + item.Number + "\n"
             + "📝 موضوع: " + text + "\n"
-            + "📅 جلسه: " + (item.Meeting?.Title ?? "جلسه") + " (" + Date(item.MeetingDate, item.MeetingDateJalali) + ")\n
+            + "📅 جلسه: " + (item.Meeting?.Title ?? "جلسه") + " (" + Date(item.MeetingDate, item.MeetingDateJalali) + ")\n"
             + "🚀 شروع پیگیری: " + Date(item.StartDate, item.StartDateJalali) + "\n"
             + "⏰ مهلت اقدام: " + Date(item.DueDate, item.DueDateJalali)
             + (string.IsNullOrWhiteSpace(notes) ? "" : "\nℹ️ توضیحات: " + notes)
