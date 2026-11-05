@@ -367,9 +367,8 @@ public sealed class AppDb(DbContextOptions<AppDb> options, ILogger<AppDb> logger
                         if (mobileById.TryGetValue(notification.NationalId, out var mobile) && !string.IsNullOrWhiteSpace(mobile))
                         {
                             var isConfidential = notification.ResolutionId.HasValue && confidentialResolutionIds.Contains(notification.ResolutionId.Value);
-                            var text = isConfidential
-                                ? "🔒 این مصوبه محرمانه است؛ برای بررسی جزئیات به سامانه مراجعه کنید."
-                                : BaleMessageText.WithDetectedResolutionTags(BaleMessageText.WithResolutionId(notification.Text, notification.ResolutionId));
+                            var text = BaleMessageText.WithDetectedResolutionTags(BaleMessageText.WithResolutionId(notification.Text, notification.ResolutionId));
+                            if (isConfidential) text = BaleMessageText.RedactConfidentialResolutionText(text);
                             var now = DateTimeOffset.UtcNow;
                             BaleMessageQueue.Add(new BaleQueuedMessage
                             {
@@ -873,10 +872,16 @@ public static class BaleMessageText
         return text;
     }
 
+    public static string RedactConfidentialResolutionText(string text)
+    {
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"(?m)^📝 موضوع:.*$", "📝 موضوع: محرمانه");
+        return System.Text.RegularExpressions.Regex.Replace(text, @"(?m)^📌 عنوان مصوبه:.*$", "📌 عنوان مصوبه: «محرمانه»");
+    }
+
     public static string ForAssignment(Resolution item, string recipientName, string? recipientTitle = null)
     {
         var text = item.IsConfidential ? "محرمانه" : Clip(item.Text, 500);
-        var notes = item.IsConfidential ? "" : Clip(item.Notes, 260);
+        var notes = Clip(item.Notes, 260);
         var message = "📬 وظیفهٔ جدید از دفتر وزارتی\n"
             + Greeting(recipientName, recipientTitle) + " یک مصوبه برای پیگیری به شما ارجاع شده است.\n"
             + "🔢 شماره مصوبه: " + item.Number + "\n"
@@ -899,7 +904,7 @@ public static class BaleMessageText
             : "↩️ گزارش اقدام شما نیازمند اصلاح است و وضعیت پیگیری‌تان به «در حال اجرا» برگشت.\n";
         message += "🔢 شماره مصوبه: " + (string.IsNullOrWhiteSpace(number) ? "—" : number) + "\n"
             + "📌 عنوان مصوبه: «" + (string.IsNullOrWhiteSpace(title) ? "بدون عنوان" : title) + "»\n"
-            + (item?.IsConfidential == true || string.IsNullOrWhiteSpace(feedback) ? "" : "📝 توضیح ادمین: " + Clip(feedback, 500) + "\n")
+            + (string.IsNullOrWhiteSpace(feedback) ? "" : "📝 توضیح ادمین: " + Clip(feedback, 500) + "\n")
             + "لطفاً جزئیات را در سامانه «پیگیری مصوبات» بررسی کنید.";
         if (item is not null) message = WithResolutionId(message, item.Id);
         return WithResolutionTag(message, number);
@@ -908,7 +913,7 @@ public static class BaleMessageText
     public static string ForWarning(Resolution item, string recipientName, string status, string? recipientTitle = null)
     {
         var text = item.IsConfidential ? "محرمانه" : Clip(item.Text, 420);
-        var notes = item.IsConfidential ? "" : Clip(item.Notes, 180);
+        var notes = Clip(item.Notes, 180);
         var message = "🚨 یادآوری پیگیری از دفتر وزارتی\n"
             + Greeting(recipientName, recipientTitle) + "\n"
             + "برای وظیفهٔ شما در این مصوبه، وضعیت «" + status + "» ثبت شده است.\n"
