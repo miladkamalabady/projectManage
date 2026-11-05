@@ -849,7 +849,8 @@ export default function App() {
         setAssistantMessages(current => [...current, { role: "assistant", content: reply }]);
         return;
       }
-      const promptKey = normalizeSearchText(message).replace(/\u200c/g, "").replace(/[؟?!]/g, "").replace(/\s+/g, "");
+      const promptKey = normalizeSearchText(message).replace(/[\u200c\s؟?!.,،؛:]+/g, "");
+      const promptMatches = (prompt: string) => promptKey.includes(normalizeSearchText(prompt).replace(/[\u200c\s؟?!.,،؛:]+/g, ""));
       const personalStatusOf = (item: Resolution) => item.progress?.find(progress => progress.nationalId === viewerId)?.status || item.status;
       let localReply: string | null = null;
       if (promptKey.includes("کداموظایفمنسررسیدنزدیکدارند") || promptKey.includes("کداموظایفمنمهلتنزدیکدارند")) {
@@ -883,6 +884,59 @@ export default function App() {
               return `• مصوبه ${item.number} · ${subject.slice(0, 100)}${subject.length > 100 ? "…" : ""} · ${labels[status] || status} · سررسید: ${due}`;
             }).join("\n") + (ongoing.length > 20 ? `\nو ${ongoing.length - 20} مصوبهٔ دیگر.` : "")
           : "در حال حاضر مصوبه‌ای با وضعیت «در حال پیگیری» یا «دارای تأخیر» ندارید.";
+      }
+      if (localReply === null && promptMatches("مصوبه‌های عقب‌افتادهٔ من کدام‌اند؟")) {
+        const overdue = mine
+          .filter(item => !item.isArchived && item.dueDate && item.dueDate < today() && !["completed", "cancelled"].includes(personalStatusOf(item)))
+          .sort((left, right) => (left.dueDate || "").localeCompare(right.dueDate || "") || left.id - right.id);
+        localReply = overdue.length
+          ? `مصوبه‌های عقب‌افتادهٔ شما: ${overdue.length} مورد.\n` + overdue.slice(0, 20).map(item => {
+              const subject = item.text.replace(/\s+/g, " ").trim();
+              const status = personalStatusOf(item);
+              return `• مصوبه ${item.number} · ${subject.slice(0, 100)}${subject.length > 100 ? "…" : ""} · مهلت: ${formatDate(item.dueDate!, item.dueDateJalali?.replace(/\./g, "/"))} · ${labels[status] || status}`;
+            }).join("\n") + (overdue.length > 20 ? `\nو ${overdue.length - 20} مصوبهٔ دیگر.` : "")
+          : "مصوبهٔ عقب‌افتاده‌ای در کارتابل شما نیست.";
+      }
+      if (localReply === null && promptMatches("کدام گزارش‌های من هنوز تأیید نشده‌اند؟")) {
+        const pendingReports = mine.filter(item => {
+          const personal = item.progress?.find(progress => progress.nationalId === viewerId);
+          return !item.isArchived && personal?.approvalStatus === "pending";
+        }).sort((left, right) => left.id - right.id);
+        localReply = pendingReports.length
+          ? `گزارش‌های در انتظار تأیید شما: ${pendingReports.length} مورد.\n` + pendingReports.slice(0, 20).map(item => {
+              const personal = item.progress?.find(progress => progress.nationalId === viewerId);
+              const subject = item.text.replace(/\s+/g, " ").trim();
+              return `• مصوبه ${item.number} · ${subject.slice(0, 100)}${subject.length > 100 ? "…" : ""}${personal?.reportText?.trim() ? ` · گزارش: ${personal.reportText.replace(/\s+/g, " ").trim().slice(0, 120)}` : ""}`;
+            }).join("\n") + (pendingReports.length > 20 ? `\nو ${pendingReports.length - 20} گزارش دیگر.` : "")
+          : "گزارشی در انتظار تأیید برای شما ثبت نشده است.";
+      }
+      if (localReply === null && promptMatches("این هفته چه سررسیدهایی دارم؟")) {
+        const todayDate = new Date(`${today()}T00:00:00Z`);
+        const endOfWeek = new Date(todayDate);
+        endOfWeek.setUTCDate(endOfWeek.getUTCDate() + (5 - todayDate.getUTCDay() + 7) % 7);
+        const todayKey = todayDate.toISOString().slice(0, 10);
+        const weekEndKey = endOfWeek.toISOString().slice(0, 10);
+        const thisWeekDeadlines = mine
+          .filter(item => !item.isArchived && item.dueDate && item.dueDate >= todayKey && item.dueDate <= weekEndKey && !["completed", "cancelled"].includes(personalStatusOf(item)))
+          .sort((left, right) => (left.dueDate || "").localeCompare(right.dueDate || "") || left.id - right.id);
+        localReply = thisWeekDeadlines.length
+          ? `سررسیدهای باقی‌ماندهٔ این هفته: ${thisWeekDeadlines.length} مورد (تا ${formatDate(weekEndKey)}).\n` + thisWeekDeadlines.slice(0, 20).map(item => {
+              const subject = item.text.replace(/\s+/g, " ").trim();
+              const status = personalStatusOf(item);
+              return `• مصوبه ${item.number} · ${subject.slice(0, 100)}${subject.length > 100 ? "…" : ""} · سررسید: ${formatDate(item.dueDate!, item.dueDateJalali?.replace(/\./g, "/"))} · ${labels[status] || status}`;
+            }).join("\n") + (thisWeekDeadlines.length > 20 ? `\nو ${thisWeekDeadlines.length - 20} مصوبهٔ دیگر.` : "")
+          : "تا پایان این هفته سررسیدی برای مصوبه‌های فعال شما ثبت نشده است.";
+      }
+      if (localReply === null && promptMatches("مصوبه‌های انجام‌شدهٔ من را نشان بده")) {
+        const completedItems = mine
+          .filter(item => !item.isArchived && personalStatusOf(item) === "completed")
+          .sort((left, right) => (right.updatedAt || "").localeCompare(left.updatedAt || "") || left.id - right.id);
+        localReply = completedItems.length
+          ? `مصوبه‌های انجام‌شدهٔ شما: ${completedItems.length} مورد.\n` + completedItems.slice(0, 20).map(item => {
+              const subject = item.text.replace(/\s+/g, " ").trim();
+              return `• مصوبه ${item.number} · ${subject.slice(0, 100)}${subject.length > 100 ? "…" : ""} · جلسه: ${item.meetingTitle || formatDate(item.meetingDate, item.meetingDateJalali?.replace(/\./g, "/"))}`;
+            }).join("\n") + (completedItems.length > 20 ? `\nو ${completedItems.length - 20} مصوبهٔ دیگر.` : "")
+          : "مصوبهٔ انجام‌شده‌ای در کارتابل شما ثبت نشده است.";
       }
       if (localReply !== null) {
         setAssistantMessages(current => [...current, { role: "assistant", content: localReply! }]);
@@ -1644,7 +1698,7 @@ export default function App() {
       {tab === "assistant" && <section className="panel assistant-chat-panel">
         <div className="assistant-chat-heading"><span className="assistant-chat-icon"><MessageCircle size={20}/></span><div><h2>دستیار پیگیری وظایف</h2><p>پرسش دربارهٔ مصوبه‌ها، سررسیدها و وضعیت پیگیری‌های در دسترس شما</p></div></div>
         <div className="assistant-chat-notice">دستیار فقط اطلاعاتی را می‌بیند که در کارتابل شما مجاز است. برای ثبت مستقیم گزارش و تأیید یک مصوبهٔ خودتان، بنویسید «مصوبه شماره ۱۲ را تایید کن»؛ گزارش «اقدام انجام شد» ثبت می‌شود. برای پیش‌نویس و پرسش‌های دیگر از دستیار استفاده کنید.</div>
-        <div className="assistant-chat-prompts">{["کدام وظایف من سررسید نزدیک دارند؟","مصوبه‌های در حال پیگیری را خلاصه کن","برای گزارش وضعیت این وظیفه یک پیش‌نویس بنویس"].map(prompt=><button key={prompt} type="button" className="assistant-prompt" disabled={assistantSending} onClick={()=>void sendAssistantMessage(prompt)}>{prompt}</button>)}</div>
+        <div className="assistant-chat-prompts">{["کدام وظایف من سررسید نزدیک دارند؟","مصوبه‌های در حال پیگیری را خلاصه کن","مصوبه‌های عقب‌افتادهٔ من کدام‌اند؟","کدام گزارش‌های من هنوز تأیید نشده‌اند؟","این هفته چه سررسیدهایی دارم؟","مصوبه‌های انجام‌شدهٔ من را نشان بده","برای گزارش وضعیت این وظیفه یک پیش‌نویس بنویس"].map(prompt=><button key={prompt} type="button" className="assistant-prompt" disabled={assistantSending} onClick={()=>void sendAssistantMessage(prompt)}>{prompt}</button>)}</div>
         <div className="assistant-chat-messages" aria-live="polite">{assistantMessages.length===0&&<div className="assistant-chat-empty">سؤالتان را دربارهٔ وظایف و مصوبات بنویسید.</div>}{assistantMessages.map((turn,index)=><article key={index} className={"assistant-chat-bubble "+turn.role}><b>{turn.role==="user"?"شما":"دستیار"}</b><p>{turn.content}</p></article>)}{assistantSending&&<div className="assistant-chat-thinking">در حال بررسی وظایف شما…</div>}<div ref={assistantEndRef}/></div>
         {assistantError&&<div className="assistant-chat-error" role="alert">{assistantError}</div>}
         <form className="assistant-chat-form" onSubmit={event=>{event.preventDefault();void sendAssistantMessage();}}><textarea value={assistantInput} onChange={event=>setAssistantInput(event.target.value)} onKeyDown={event=>{if(event.key==="Enter"&&!event.shiftKey){event.preventDefault();void sendAssistantMessage();}}} placeholder="مثلاً: برای مصوبه ۱۲ چه اقدامی از من مانده؟" maxLength={2000} rows={2}/><button className="primary" type="submit" disabled={!assistantInput.trim()||assistantSending}><Send size={16}/>{assistantSending?"در حال پاسخ":"ارسال"}</button></form>
