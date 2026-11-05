@@ -12,6 +12,8 @@ public sealed class Resolution
     public int Id { get; set; }
     public int? MeetingId { get; set; }
     [JsonIgnore] public Meeting? Meeting { get; set; }
+    [NotMapped] public string MeetingTitle { get; set; } = "";
+    [NotMapped] public bool HasSubmittedReport { get; set; }
     public DateOnly MeetingDate { get; set; }
     public string MeetingDateJalali { get; set; } = "";
     public DateOnly? StartDate { get; set; }
