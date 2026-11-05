@@ -999,11 +999,12 @@ app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpC
     }
     var requestedPeople = request.People.Distinct().Where(personId => !coveredPeople.Contains(personId)).ToList();
 
-    var record = new Resolution { PublishToAll = request.PublishToAll, StartDate = request.StartDate, StartDateJalali = request.StartDate is null ? "" : (request.StartDateJalali ?? JalaliDate.FromGregorian(request.StartDate.GetValueOrDefault())), DueDate = request.DueDate, DueDateJalali = request.DueDate is null ? "" : (request.DueDateJalali ?? JalaliDate.FromGregorian(request.DueDate.GetValueOrDefault())), RequiresPeriodicReport = request.RequiresPeriodicReport, ReportFrequency = request.RequiresPeriodicReport ? request.ReportFrequency ?? "" : "", CancellationReason = request.CancellationReason?.Trim() ?? "", MeetingDate = request.MeetingDate, MeetingDateJalali = string.IsNullOrWhiteSpace(request.MeetingDateJalali) ? JalaliDate.FromGregorian(request.MeetingDate) : request.MeetingDateJalali, Number = request.Number.Trim(), Text = request.Text.Trim(), Notes = request.Notes?.Trim() ?? "", Status = ResolutionStatusUpdater.TimeBasedResolutionStatus(request.MeetingDate, request.StartDate.GetValueOrDefault(), request.DueDate, DateOnly.FromDateTime(DateTime.Today)), GroupId = request.GroupId, MeetingId = request.MeetingId, CreatedAt = DateTimeOffset.UtcNow, CreatedBy = http.User.Identity?.Name ?? "کاربر" };
+    var record = new Resolution { PublishToAll = request.PublishToAll, StartDate = request.StartDate, StartDateJalali = request.StartDate is null ? "" : (request.StartDateJalali ?? JalaliDate.FromGregorian(request.StartDate.GetValueOrDefault())), DueDate = request.DueDate, DueDateJalali = request.DueDate is null ? "" : (request.DueDateJalali ?? JalaliDate.FromGregorian(request.DueDate.GetValueOrDefault())), RequiresPeriodicReport = request.RequiresPeriodicReport, ReportFrequency = request.RequiresPeriodicReport ? request.ReportFrequency ?? "" : "", CancellationReason = request.CancellationReason?.Trim() ?? "", MeetingDate = request.MeetingDate, MeetingDateJalali = string.IsNullOrWhiteSpace(request.MeetingDateJalali) ? JalaliDate.FromGregorian(request.MeetingDate) : request.MeetingDateJalali, Number = request.Number.Trim(), Text = request.Text.Trim(), Notes = request.Notes?.Trim() ?? "", IsConfidential = request.IsConfidential, Status = ResolutionStatusUpdater.TimeBasedResolutionStatus(request.MeetingDate, request.StartDate.GetValueOrDefault(), request.DueDate, DateOnly.FromDateTime(DateTime.Today)), GroupId = request.GroupId, MeetingId = request.MeetingId, CreatedAt = DateTimeOffset.UtcNow, CreatedBy = http.User.Identity?.Name ?? "کاربر" };
     foreach (var groupId in requestedGroupIds) record.GroupAssignments.Add(new ResolutionGroupAssignment { GroupId = groupId });
     foreach (var id in requestedPeople) record.Assignments.Add(new ResolutionAssignment { NationalId = id });
     db.Resolutions.Add(record);
     await db.SaveChangesAsync();
+    record.Meeting = await db.Meetings.FirstOrDefaultAsync(item => item.Id == record.MeetingId);
     var recipientIds = requestedPeople.ToHashSet();
     var groupIdsToNotify = (request.GroupIds ?? (request.GroupId.HasValue ? [request.GroupId.Value] : [])).Distinct().ToHashSet();
     recipientIds.UnionWith(await db.GroupMembers.Where(member => groupIdsToNotify.Contains(member.GroupId)).Select(member => member.NationalId).ToListAsync());
@@ -1034,7 +1035,7 @@ app.MapPut("/api/resolutions/{id:int}", async (int id, ResolutionCreate request,
     if (request.StartDate is null) return Results.BadRequest(new { error = "زمان شروع مصوبه الزامی است." });
     if (request.MeetingDate > request.StartDate.GetValueOrDefault()) return Results.BadRequest(new { error = "تاریخ جلسه نباید بعد از زمان شروع باشد." });
     if (request.DueDate.HasValue && request.DueDate.GetValueOrDefault() <= request.StartDate.GetValueOrDefault()) return Results.BadRequest(new { error = "زمان سررسید باید بعد از زمان شروع باشد." });
-    var record = await db.Resolutions.Include(r => r.Assignments).Include(r => r.GroupAssignments).FirstOrDefaultAsync(r => r.Id == id);
+    var record = await db.Resolutions.Include(r => r.Meeting).Include(r => r.Assignments).Include(r => r.GroupAssignments).FirstOrDefaultAsync(r => r.Id == id);
     if (record is null) return Results.NotFound();
     var validGroupIds = await db.Groups.Where(group => groupIds.Contains(group.Id)).Select(group => group.Id).ToListAsync();
     if (validGroupIds.Count != groupIds.Count) return Results.BadRequest(new { error = "گروه انتخاب‌شده پیدا نشد." });
@@ -1062,7 +1063,7 @@ app.MapPut("/api/resolutions/{id:int}", async (int id, ResolutionCreate request,
     
     record.PublishToAll = request.PublishToAll;
     record.MeetingDateJalali = string.IsNullOrWhiteSpace(request.MeetingDateJalali) ? JalaliDate.FromGregorian(request.MeetingDate) : request.MeetingDateJalali;
-    record.Number = request.Number.Trim(); record.Text = request.Text.Trim(); record.Notes = request.Notes?.Trim() ?? "";
+    record.Number = request.Number.Trim(); record.Text = request.Text.Trim(); record.Notes = request.Notes?.Trim() ?? ""; record.IsConfidential = request.IsConfidential;
     if (scheduleChanged)
     {
         record.Status = ResolutionStatusUpdater.TimeBasedResolutionStatus(record.MeetingDate, request.StartDate.GetValueOrDefault(), request.DueDate, DateOnly.FromDateTime(DateTime.Today));
@@ -2372,7 +2373,7 @@ static string NormalizeStatusEventText(ResolutionEvent entry, IReadOnlyDictionar
 app.MapFallbackToFile("index.html");
 app.Run();
 
-record ResolutionCreate(DateOnly MeetingDate, string? MeetingDateJalali, string Number, string Text, string? Notes, string Status, int? GroupId, List<int>? GroupIds, List<string> People, bool PublishToAll, DateOnly? DueDate, string? DueDateJalali, DateOnly? StartDate, string? StartDateJalali, bool RequiresPeriodicReport, string? ReportFrequency, string? CancellationReason, int? MeetingId);
+record ResolutionCreate(DateOnly MeetingDate, string? MeetingDateJalali, string Number, string Text, string? Notes, string Status, int? GroupId, List<int>? GroupIds, List<string> People, bool PublishToAll, DateOnly? DueDate, string? DueDateJalali, DateOnly? StartDate, string? StartDateJalali, bool RequiresPeriodicReport, string? ReportFrequency, string? CancellationReason, int? MeetingId, bool IsConfidential);
 record MeetingAttendeeRequest(string NationalId, bool IsPresent, string? AbsenceReason);
 record MeetingRequest(DateOnly Date, string? DateJalali, string Title, string? GuestText, List<MeetingAttendeeRequest>? Attendees);
 record AbsenceReasonsRequest(List<string> Reasons);
