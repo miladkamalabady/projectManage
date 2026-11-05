@@ -804,7 +804,11 @@ app.MapGet("/api/dashboard", async (HttpContext context, AppDb db) =>
     var isAdmin = context.User.IsInRole("ادمین");
     var groups = await db.Groups.Include(g => g.Members).ToListAsync();
     var records = await db.Resolutions.AsNoTracking().Where(item => !item.IsArchived).Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Attachments.Where(attachment => isAdmin || (!attachment.ResolutionReportId.HasValue && attachment.ApprovedForAll))) .Include(r => r.Events).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).Include(r => r.Meeting).ThenInclude(meeting => meeting!.Attachments).OrderByDescending(r => r.MeetingDate).ToListAsync();
-    foreach (var resolution in records) resolution.MeetingAttachments = resolution.Meeting?.Attachments ?? [];
+    foreach (var resolution in records)
+    {
+        resolution.MeetingAttachments = resolution.Meeting?.Attachments ?? [];
+        resolution.MeetingTitle = resolution.Meeting?.Title ?? "";
+    }
     var eventNames = await LoadPersonDisplayNames(db);
     foreach (var entry in records.SelectMany(resolution => resolution.Events)) entry.Text = NormalizeStatusEventText(entry, eventNames);
     if (!isAdmin) foreach (var resolution in records)
@@ -816,6 +820,13 @@ app.MapGet("/api/dashboard", async (HttpContext context, AppDb db) =>
     }
     var groupIds = groups.Where(g => g.Members.Any(m => m.NationalId == id)).Select(g => g.Id).ToHashSet();
     var mine = isAdmin ? records : records.Where(r => !r.IsArchived && r.Status != "cancelled" && (r.PublishToAll || (r.GroupId.HasValue && groupIds.Contains(r.GroupId.Value)) || r.GroupAssignments.Any(a => groupIds.Contains(a.GroupId)) || r.Assignments.Any(a => a.NationalId == id))).ToList();
+    if (!isAdmin)
+    {
+        var mineIds = mine.Select(item => item.Id).ToList();
+        var reportIds = mineIds.Count == 0 ? new HashSet<int>() : (await db.ResolutionReports.AsNoTracking().Where(report => report.NationalId == id && mineIds.Contains(report.ResolutionId)).Select(report => report.ResolutionId).Distinct().ToListAsync()).ToHashSet();
+        foreach (var resolution in mine)
+            resolution.HasSubmittedReport = reportIds.Contains(resolution.Id) || resolution.Progress.Any(progress => progress.NationalId == id && !string.IsNullOrWhiteSpace(progress.ReportText));
+    }
     object? currentUser;
     if (isAdmin)
     {
@@ -962,7 +973,11 @@ app.MapGet("/api/resolutions", async (HttpContext context, AppDb db) =>
     var id = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
     var isAdmin = context.User.IsInRole("ادمین");
     var records = await db.Resolutions.AsNoTracking().Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Attachments.Where(attachment => isAdmin || (!attachment.ResolutionReportId.HasValue && attachment.ApprovedForAll))).Include(r => r.Events).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).Include(r => r.Meeting).ThenInclude(meeting => meeting!.Attachments).OrderByDescending(r => r.MeetingDate).ToListAsync();
-    foreach (var resolution in records) resolution.MeetingAttachments = resolution.Meeting?.Attachments ?? [];
+    foreach (var resolution in records)
+    {
+        resolution.MeetingAttachments = resolution.Meeting?.Attachments ?? [];
+        resolution.MeetingTitle = resolution.Meeting?.Title ?? "";
+    }
     var eventNames = await LoadPersonDisplayNames(db);
     foreach (var entry in records.SelectMany(resolution => resolution.Events)) entry.Text = NormalizeStatusEventText(entry, eventNames);
     if (isAdmin) return Results.Ok(records);
@@ -975,6 +990,10 @@ app.MapGet("/api/resolutions", async (HttpContext context, AppDb db) =>
         foreach (var assignment in resolution.Assignments) assignment.NationalId = "";
         foreach (var attachment in resolution.Attachments) attachment.UploadedBy = "";
     }
+    var mineIds = mine.Select(item => item.Id).ToList();
+    var reportIds = mineIds.Count == 0 ? new HashSet<int>() : (await db.ResolutionReports.AsNoTracking().Where(report => report.NationalId == id && mineIds.Contains(report.ResolutionId)).Select(report => report.ResolutionId).Distinct().ToListAsync()).ToHashSet();
+    foreach (var resolution in mine)
+        resolution.HasSubmittedReport = reportIds.Contains(resolution.Id) || resolution.Progress.Any(progress => progress.NationalId == id && !string.IsNullOrWhiteSpace(progress.ReportText));
     return Results.Ok(mine);
 });
 app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpContext http) =>
