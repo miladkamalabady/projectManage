@@ -939,6 +939,7 @@ export default function App() {
           : "مصوبهٔ انجام‌شده‌ای در کارتابل شما ثبت نشده است.";
       }
       if (localReply !== null) {
+        await new Promise(resolve => window.setTimeout(resolve, 700));
         setAssistantMessages(current => [...current, { role: "assistant", content: localReply! }]);
         return;
       }
