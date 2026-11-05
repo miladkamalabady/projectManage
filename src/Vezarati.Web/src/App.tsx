@@ -871,7 +871,7 @@ export default function App() {
               return `• مصوبه ${item.number} · ${subject.slice(0, 100)}${subject.length > 100 ? "…" : ""} · ${deadline} (${formatDate(item.dueDate!, item.dueDateJalali?.replace(/\./g, "/"))}) · ${labels[status] || status}`;
             }).join("\n")
           : "تا ۷ روز آینده سررسیدی برای مصوبه‌های فعال شما ثبت نشده است.";
-      } else if (promptKey.includes("مصوبههای درحالپیگیریراخلاصهکن") || promptKey.includes("مصوبههای درحالپیگیریراخلاصه")) {
+      } else if (promptKey.includes("مصوبههایدرحالپیگیریراخلاصهکن") || promptKey.includes("مصوبههایدرحالپیگیریراخلاصه")) {
         const ongoing = mine
           .filter(item => !item.isArchived && item.status !== "cancelled" && ["in_progress", "delayed"].includes(personalStatusOf(item)))
           .sort((left, right) => (left.dueDate || "9999-12-31").localeCompare(right.dueDate || "9999-12-31") || left.id - right.id);
