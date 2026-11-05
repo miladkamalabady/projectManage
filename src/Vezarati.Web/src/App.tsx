@@ -849,6 +849,45 @@ export default function App() {
         setAssistantMessages(current => [...current, { role: "assistant", content: reply }]);
         return;
       }
+      const promptKey = normalizeSearchText(message).replace(/\u200c/g, "").replace(/[؟?!]/g, "").replace(/\s+/g, "");
+      const personalStatusOf = (item: Resolution) => item.progress?.find(progress => progress.nationalId === viewerId)?.status || item.status;
+      let localReply: string | null = null;
+      if (promptKey.includes("کداموظایفمنسررسیدنزدیکدارند") || promptKey.includes("کداموظایفمنمهلتنزدیکدارند")) {
+        const todayDate = new Date(`${today()}T00:00:00`);
+        const nearDeadlines = mine
+          .filter(item => !item.isArchived && item.status !== "cancelled" && item.dueDate && personalStatusOf(item) !== "completed")
+          .map(item => {
+            const due = new Date(`${item.dueDate}T00:00:00`);
+            const days = Math.ceil((due.getTime() - todayDate.getTime()) / 86400000);
+            return { item, days, status: personalStatusOf(item) };
+          })
+          .filter(entry => Number.isFinite(entry.days) && entry.days <= 7)
+          .sort((left, right) => left.days - right.days || left.item.id - right.item.id)
+          .slice(0, 20);
+        localReply = nearDeadlines.length
+          ? `مهلت‌های گذشته و سررسیدهای تا ۷ روز آینده: ${nearDeadlines.length} مصوبه.\n` + nearDeadlines.map(({ item, days, status }) => {
+              const deadline = days < 0 ? `${Math.abs(days)} روز از مهلت گذشته` : days === 0 ? "سررسید امروز" : `تا ${days} روز دیگر`;
+              const subject = item.text.replace(/\s+/g, " ").trim();
+              return `• مصوبه ${item.number} · ${subject.slice(0, 100)}${subject.length > 100 ? "…" : ""} · ${deadline} (${formatDate(item.dueDate!, item.dueDateJalali?.replace(/\./g, "/"))}) · ${labels[status] || status}`;
+            }).join("\n")
+          : "تا ۷ روز آینده سررسیدی برای مصوبه‌های فعال شما ثبت نشده است.";
+      } else if (promptKey.includes("مصوبههای درحالپیگیریراخلاصهکن") || promptKey.includes("مصوبههای درحالپیگیریراخلاصه")) {
+        const ongoing = mine
+          .filter(item => !item.isArchived && item.status !== "cancelled" && ["in_progress", "delayed"].includes(personalStatusOf(item)))
+          .sort((left, right) => (left.dueDate || "9999-12-31").localeCompare(right.dueDate || "9999-12-31") || left.id - right.id);
+        localReply = ongoing.length
+          ? `مصوبه‌های در حال پیگیری یا دارای تأخیر: ${ongoing.length} مورد.\n` + ongoing.slice(0, 20).map(item => {
+              const status = personalStatusOf(item);
+              const subject = item.text.replace(/\s+/g, " ").trim();
+              const due = item.dueDate ? formatDate(item.dueDate, item.dueDateJalali?.replace(/\./g, "/")) : "تعیین نشده";
+              return `• مصوبه ${item.number} · ${subject.slice(0, 100)}${subject.length > 100 ? "…" : ""} · ${labels[status] || status} · سررسید: ${due}`;
+            }).join("\n") + (ongoing.length > 20 ? `\nو ${ongoing.length - 20} مصوبهٔ دیگر.` : "")
+          : "در حال حاضر مصوبه‌ای با وضعیت «در حال پیگیری» یا «دارای تأخیر» ندارید.";
+      }
+      if (localReply !== null) {
+        setAssistantMessages(current => [...current, { role: "assistant", content: localReply! }]);
+        return;
+      }
       const response = await fetch("/api/assistant/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1604,7 +1643,7 @@ export default function App() {
       <header className="top"><div><div className="eyebrow">پیگیری مصوبات</div><h1>{tab === "wall" ? "دیواره پیگیری من" : tab === "assistant" ? "دستیار وظایف" : tab === "resolutions" ? "مصوبات و جلسات" : tab === "groups" ? "گروه‌های اصلی و مسئولان معاونت‌ها" : tab === "sessions" ? "مدیریت جلسات و حضور و غیاب" : tab === "archive" ? "بایگانی مصوبات" : tab === "notifications" ? "اعلان‌های من" : "گزارش‌های اجرایی"}</h1><p>مصوبات، مسئولیت‌ها و روند اجرای اقدامات</p></div><div className="top-actions"><div className="font-size-control" aria-label="اندازه نوشته‌ها"><button type="button" className="secondary" aria-label="کوچک کردن نوشته‌ها" disabled={fontScale<=14} onClick={()=>setFontScale(size=>Math.max(14,size-1))}>A−</button><button type="button" className="secondary" aria-label="بزرگ کردن نوشته‌ها" disabled={fontScale>=20} onClick={()=>setFontScale(size=>Math.min(20,size+1))}>A+</button></div><span className="today"><CalendarDays size={16} />{formatDate(today(), gregorianToJalali(today()).replace(/\./g, "/"))}</span>{isAdmin && tab !== "groups" && tab !== "sessions" && tab !== "archive" && tab !== "notifications" && tab !== "reports" && <button className="primary" onClick={() => openCreateResolution()}><Plus size={17} />ثبت مصوبه</button>}</div></header>
       {tab === "assistant" && <section className="panel assistant-chat-panel">
         <div className="assistant-chat-heading"><span className="assistant-chat-icon"><MessageCircle size={20}/></span><div><h2>دستیار پیگیری وظایف</h2><p>پرسش دربارهٔ مصوبه‌ها، سررسیدها و وضعیت پیگیری‌های در دسترس شما</p></div></div>
-        <div className="assistant-chat-notice">دستیار فقط اطلاعاتی را می‌بیند که در کارتابل شما مجاز است. برای ثبت مستقیم گزارش و تأیید یک مصوبهٔ خودتان، بنویسید «مصوبه شماره ۱۲ را تایید کن»؛ گزارش «اقدام انجام شد» ثبت می‌شود و این دستور به هوش مصنوعی ارسال نمی‌شود. برای پیش‌نویس و پرسش‌های دیگر از دستیار استفاده کنید.</div>
+        <div className="assistant-chat-notice">دستیار فقط اطلاعاتی را می‌بیند که در کارتابل شما مجاز است. برای ثبت مستقیم گزارش و تأیید یک مصوبهٔ خودتان، بنویسید «مصوبه شماره ۱۲ را تایید کن»؛ گزارش «اقدام انجام شد» ثبت می‌شود. برای پیش‌نویس و پرسش‌های دیگر از دستیار استفاده کنید.</div>
         <div className="assistant-chat-prompts">{["کدام وظایف من سررسید نزدیک دارند؟","مصوبه‌های در حال پیگیری را خلاصه کن","برای گزارش وضعیت این وظیفه یک پیش‌نویس بنویس"].map(prompt=><button key={prompt} type="button" className="assistant-prompt" disabled={assistantSending} onClick={()=>void sendAssistantMessage(prompt)}>{prompt}</button>)}</div>
         <div className="assistant-chat-messages" aria-live="polite">{assistantMessages.length===0&&<div className="assistant-chat-empty">سؤالتان را دربارهٔ وظایف و مصوبات بنویسید.</div>}{assistantMessages.map((turn,index)=><article key={index} className={"assistant-chat-bubble "+turn.role}><b>{turn.role==="user"?"شما":"دستیار"}</b><p>{turn.content}</p></article>)}{assistantSending&&<div className="assistant-chat-thinking">در حال بررسی وظایف شما…</div>}<div ref={assistantEndRef}/></div>
         {assistantError&&<div className="assistant-chat-error" role="alert">{assistantError}</div>}
