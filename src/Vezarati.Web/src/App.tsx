@@ -651,8 +651,8 @@ export default function App() {
         target.classList.add("resolution-card-highlight");
         window.setTimeout(() => target.classList.remove("resolution-card-highlight"), 1800);
         setCalendarTargetId(null);
-      } else if (attempts++ < 12) {
-        timer = window.setTimeout(scrollToCard, 60);
+      } else if (attempts++ < 40) {
+        timer = window.setTimeout(scrollToCard, 80);
       } else {
         setCalendarTargetId(null);
       }
@@ -663,7 +663,7 @@ export default function App() {
       if (timer !== undefined) window.clearTimeout(timer);
     };
   }, [calendarTargetId, selectedDay, calendarMonth, tab, wallStatusFilter]);
-  useEffect(() => { if(tab!=="wall"||wallStatusFilter!=="all") return; const [year,month,day]=jalaliParts(selectedDay); const monthKey=`${year}.${String(month).padStart(2,"0")}.01`; if(monthKey!==calendarMonth) return; const week=Math.floor((jalaliDayOffset(calendarMonth)+day-1)/7); document.getElementById(`calendar-week-${week}`)?.scrollIntoView({behavior:"smooth",block:"nearest",inline:"center"}); }, [selectedDay,calendarMonth,tab,wallStatusFilter]);
+  useEffect(() => { if(tab!=="wall"||wallStatusFilter!=="all"||calendarTargetId!==null) return; const [year,month,day]=jalaliParts(selectedDay); const monthKey=`${year}.${String(month).padStart(2,"0")}.01`; if(monthKey!==calendarMonth) return; const week=Math.floor((jalaliDayOffset(calendarMonth)+day-1)/7); document.getElementById(`calendar-week-${week}`)?.scrollIntoView({behavior:"smooth",block:"nearest",inline:"center"}); }, [selectedDay,calendarMonth,tab,wallStatusFilter]);
 
 
   async function uploadAttachment(resolutionId: number, file: File) {
