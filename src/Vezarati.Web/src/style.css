@@ -795,3 +795,5 @@
 .execution-calendar-task small{font-size:10px;color:#829096}
 .execution-calendar-task-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
 @media(max-width:700px){.execution-calendar-day{min-height:80px;padding:4px;gap:3px}.execution-calendar-day>span{font-size:8px}.execution-calendar-range{grid-column:1/-1}.execution-calendar-task{grid-template-columns:1fr auto;gap:8px}.execution-calendar-task-text{grid-column:1/-1;grid-row:2;white-space:normal}.execution-calendar-task .status{grid-column:2;grid-row:1}}
+
+.execution-calendar-task{scroll-margin-block:24px;transition:background .25s,border-color .25s,box-shadow .25s}.execution-calendar-task-highlight{border-color:#177d73!important;background:#eaf4f2!important;box-shadow:0 0 0 3px #177d7326!important}
