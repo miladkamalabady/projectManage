@@ -113,7 +113,6 @@ const oneMonthAgoDateKey = () => {
 };
 const today = () => new Date().toISOString().slice(0, 10);
 const addMonthsToDateKey = (value: string, offset: number) => { const [year, month, day] = value.split("-").map(Number); const date = new Date(Date.UTC(year, month - 1, 1)); date.setUTCMonth(date.getUTCMonth() + offset); const maxDay = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate(); return date.getUTCFullYear() + "-" + String(date.getUTCMonth() + 1).padStart(2, "0") + "-" + String(Math.min(day, maxDay)).padStart(2, "0"); };
-const shiftJalaliMonth = (value: string, offset: number) => { const date = new Date(jalaliToGregorian(value) + "T12:00:00"); date.setDate(1); date.setMonth(date.getMonth() + offset); return gregorianToJalali(localDateKey(date)).slice(0, 7) + ".01"; };
 const tomorrow = () => { const date=new Date(`${today()}T12:00:00`); date.setDate(date.getDate()+1); return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`; };
 const formatDate = (value: string, jalali?: string) => jalali || new Intl.DateTimeFormat("fa-IR-u-ca-persian", { dateStyle: "medium", numberingSystem: "arabext" }).format(new Date(`${value}T12:00:00`));
 const formatDateTime = (value: string) => { const date=new Date(value); return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat("fa-IR-u-ca-persian",{dateStyle:"medium",timeStyle:"short",numberingSystem:"arabext"}).format(date); };
