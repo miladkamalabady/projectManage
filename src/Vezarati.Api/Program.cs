@@ -2364,7 +2364,7 @@ record RestoreBackupRequest(string FileName);
 
 static class DatabaseBackupManager
 {
-    private static readonly System.Text.RegularExpressions.Regex ManagedFileName = new(@"^vezarati-(daily-\\d{8}|manual-\\d{8}-\\d{6}-[a-f0-9]{8})\\.bak$", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+    private static readonly System.Text.RegularExpressions.Regex ManagedFileName = new(@"^vezarati-(daily-\d{8}|manual-\d{8}-\d{6}-[a-f0-9]{8})\.bak$", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
     private static readonly SemaphoreSlim BackupGate = new(1, 1);
 
     public static string GetDirectory(IConfiguration configuration, IWebHostEnvironment environment)
