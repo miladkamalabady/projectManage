@@ -875,3 +875,21 @@
 .special-followup-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:14px 0}.special-followup-toolbar .search{flex:1 1 260px}.special-followup-toolbar label{display:flex;align-items:center;gap:7px;color:#687a80;font-size:11px}.special-followup-toolbar select{min-width:125px;padding:9px 10px;border:1px solid #e0e7e9;border-radius:8px;background:#fff;color:#34484f}.special-followup-toolbar .secondary{white-space:nowrap}
 :root[data-theme="dark"] .special-followup-toolbar label{color:#b4c1c7}
 :root[data-theme="dark"] .special-followup-toolbar select{background:#142129;color:#e5edf1;border-color:#40515c}
+
+/* Softer execution calendar surface */
+.execution-calendar-panel{background:#f4f7f6;border-color:#e0e7e4}
+.execution-calendar-panel .calendar-panel{background:#eef3f1;border-color:#e0e7e4}
+.execution-calendar-panel .calendar-heading h3{color:#405650}
+.execution-calendar-panel .calendar-weekday{color:#778982}
+.execution-calendar-panel .calendar-blank{background:transparent}
+.execution-calendar-panel .calendar-day,.execution-calendar-panel .execution-calendar-day{background:#f8faf9;border-color:#e1e8e5;color:#40534d}
+.execution-calendar-panel .calendar-day:hover,.execution-calendar-panel .execution-calendar-day:hover{background:#eef5f2;border-color:#a9c7bd}
+.execution-calendar-panel .calendar-day.active,.execution-calendar-panel .execution-calendar-day.active{background:#dcece6;border-color:#559582;color:#236c5b}
+.execution-calendar-panel .calendar-day.has-tasks{box-shadow:inset 0 -3px #c79b50}
+.execution-calendar-panel .execution-calendar-task{background:#f7f9f8;border-color:#dfe7e4}
+.execution-calendar-panel .execution-calendar-task:hover{background:#edf4f1;border-color:#9bbdb1}
+:root[data-theme="dark"] .execution-calendar-panel{background:#17242b;border-color:#34434d}
+:root[data-theme="dark"] .execution-calendar-panel .calendar-panel{background:#1b2831;border-color:#34434d}
+:root[data-theme="dark"] .execution-calendar-panel .calendar-day,:root[data-theme="dark"] .execution-calendar-panel .execution-calendar-day,:root[data-theme="dark"] .execution-calendar-panel .execution-calendar-task{background:#202e37;border-color:#394b55;color:#dce6ea}
+:root[data-theme="dark"] .execution-calendar-panel .calendar-day.active,:root[data-theme="dark"] .execution-calendar-panel .execution-calendar-day.active{background:#29463e;border-color:#5ca28d;color:#a9ddca}
+:root[data-theme="dark"] .execution-calendar-panel .execution-calendar-task:hover{background:#263b3d;border-color:#5c9583}
