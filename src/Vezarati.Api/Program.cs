@@ -1036,7 +1036,7 @@ app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpC
         var title = string.IsNullOrWhiteSpace(profile?.Title) ? profile?.OrgPositionDesc : profile.Title;
         db.Notifications.Add(new UserNotification { NationalId = recipient, ResolutionId = record.Id, Type = "assigned", DateKey = record.Id.ToString(), Text = BaleMessageText.ForAssignment(record, displayName, title), CreatedAt = DateTimeOffset.UtcNow });
     }
-    db.Events.Add(new ResolutionEvent { ResolutionId = record.Id, NationalId = primaryAdminNationalId, UserName = record.CreatedBy, Text = "مصوبه ثبت و برای پیگیری ارجاع شد.", CreatedAt = DateTimeOffset.UtcNow });
+    db.Events.Add(new ResolutionEvent { ResolutionId = record.Id, NationalId = primaryAdminNationalId, UserName = record.CreatedBy, Text = record.IsSpecialTracking ? "پیگیری ویژه ثبت و برای اقدام ارجاع شد." : "مصوبه ثبت و برای پیگیری ارجاع شد.", CreatedAt = DateTimeOffset.UtcNow });
     await db.SaveChangesAsync();
     return Results.Created("/api/resolutions/" + record.Id, record);
 });
