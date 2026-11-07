@@ -23,6 +23,7 @@ builder.Services.AddHostedService<ResolutionStatusRefreshService>();
 builder.Services.AddHostedService<BaleMessageQueueService>();
 builder.Services.AddHostedService<BrowserPushQueueService>();
 builder.Services.AddHostedService<DailyDatabaseBackupService>();
+builder.Services.AddHostedService<DailyAdminStatisticsService>();
 builder.Services.AddHttpClient("MessageApi", client => client.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddHttpClient("MeduSso", client => client.Timeout = TimeSpan.FromSeconds(60)).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddHttpClient("Ollama", (services, client) =>
@@ -2443,6 +2444,130 @@ static class DatabaseBackupManager
             try { if (IsManagedFileName(Path.GetFileName(file)) && File.GetLastWriteTimeUtc(file) < cutoff) File.Delete(file); }
             catch { /* A retention cleanup failure must not stop backup creation. */ }
         }
+    }
+}
+
+sealed class DailyAdminStatisticsService(IServiceScopeFactory scopeFactory, IConfiguration configuration, ILogger<DailyAdminStatisticsService> logger) : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        var tehran = GetTehranTimeZone();
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                var localNow = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, tehran);
+                if (localNow.Hour >= 8)
+                {
+                    using var scope = scopeFactory.CreateScope();
+                    var db = scope.ServiceProvider.GetRequiredService<AppDb>();
+                    var dayKey = localNow.ToString("yyyyMMdd");
+                    var markerKey = "admin-daily-statistics:" + dayKey;
+                    if (!await db.Settings.AsNoTracking().AnyAsync(setting => setting.Key == markerKey, stoppingToken))
+                    {
+                        var notificationsEnabled = await db.Settings.AsNoTracking()
+                            .AnyAsync(setting => setting.Key == "BaleNotificationsEnabled" && setting.Value == "true", stoppingToken);
+                        var hasCredentials = !string.IsNullOrWhiteSpace(configuration["BALE_USERNAME"] ?? configuration["Bale:Username"])
+                            && !string.IsNullOrWhiteSpace(configuration["BALE_PASSWORD"] ?? configuration["Bale:Password"]);
+                        if (notificationsEnabled && hasCredentials)
+                            await QueueDailyStatisticsAsync(db, markerKey, localNow, stoppingToken);
+                    }
+                }
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+            catch (Exception exception) { logger.LogError(exception, "Could not queue daily administrator statistics."); }
+            try { await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken); }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+        }
+    }
+
+    private async Task QueueDailyStatisticsAsync(AppDb db, string markerKey, DateTimeOffset localNow, CancellationToken cancellationToken)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
+        if (await db.Settings.AsNoTracking().AnyAsync(setting => setting.Key == markerKey, cancellationToken))
+        {
+            await transaction.CommitAsync(cancellationToken);
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var monthCutoff = now.AddDays(-30);
+        var reportRows = await db.ResolutionReports.AsNoTracking()
+            .Where(report => report.SubmittedAt >= monthCutoff)
+            .Select(report => new { report.ResolutionId, report.NationalId, report.SubmittedAt })
+            .ToListAsync(cancellationToken);
+        var reportPairs = reportRows.Select(report => (report.ResolutionId, report.NationalId)).ToHashSet();
+        var legacyRows = await db.Progress.AsNoTracking()
+            .Where(progress => progress.UpdatedAt >= monthCutoff && progress.ReportText != "")
+            .Select(progress => new { progress.ResolutionId, progress.NationalId, progress.UpdatedAt })
+            .ToListAsync(cancellationToken);
+        int CountReceivedSince(DateTimeOffset cutoff) =>
+            reportRows.Count(report => report.SubmittedAt >= cutoff)
+            + legacyRows.Count(progress => progress.UpdatedAt >= cutoff && !reportPairs.Contains((progress.ResolutionId, progress.NationalId)));
+
+        var resolutions = await db.Resolutions.AsNoTracking()
+            .Where(item => !item.IsArchived && item.Status != "cancelled")
+            .Select(item => item.Status)
+            .ToListAsync(cancellationToken);
+        var inProgressResolutions = resolutions.Count(status => status is "before" or "in_progress");
+        var delayedResolutions = resolutions.Count(status => status == "delayed");
+        var completedResolutions = resolutions.Count(status => status == "completed");
+        var meetingResolutionRows = await db.Resolutions.AsNoTracking()
+            .Where(item => !item.IsArchived && item.Status != "cancelled" && item.MeetingId.HasValue)
+            .GroupBy(item => item.MeetingId)
+            .Select(group => new { Total = group.Count(), Completed = group.Count(item => item.Status == "completed") })
+            .ToListAsync(cancellationToken);
+        var inProgressMeetings = meetingResolutionRows.Count(group => group.Total > group.Completed);
+        var completedMeetings = meetingResolutionRows.Count(group => group.Total > 0 && group.Total == group.Completed);
+        var admins = await db.Users.AsNoTracking()
+            .Where(user => user.Role == "ادمین" && user.Mobile != "")
+            .Select(user => new { user.NationalId, user.Mobile })
+            .ToListAsync(cancellationToken);
+        var recipients = admins.Where(admin => !string.IsNullOrWhiteSpace(admin.Mobile))
+            .GroupBy(admin => admin.NationalId, StringComparer.Ordinal).Select(group => group.First()).ToList();
+        if (recipients.Count == 0)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return;
+        }
+
+        var jalaliDate = JalaliDate.FromGregorian(DateOnly.FromDateTime(localNow.DateTime)).Replace('.', '/');
+        var message = "📊 آمار روزانه سامانه پیگیری مصوبات · " + jalaliDate + "\n"
+            + "گزارش‌های دریافتی:\n"
+            + "• ۲۴ ساعت گذشته: " + CountReceivedSince(now.AddHours(-24)).ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("fa-IR")) + "\n"
+            + "• ۷ روز گذشته: " + CountReceivedSince(now.AddDays(-7)).ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("fa-IR")) + "\n"
+            + "• ۳۰ روز گذشته: " + CountReceivedSince(monthCutoff).ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("fa-IR")) + "\n"
+            + "وضعیت مصوبات فعال:\n"
+            + "• در حال پیگیری: " + inProgressResolutions.ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("fa-IR")) + "\n"
+            + "• با تأخیر و تکمیل‌نشده: " + delayedResolutions.ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("fa-IR")) + "\n"
+            + "• تکمیل‌شده: " + completedResolutions.ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("fa-IR")) + "\n"
+            + "وضعیت جلسات دارای مصوبه فعال:\n"
+            + "• در حال پیگیری / تکمیل‌نشده: " + inProgressMeetings.ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("fa-IR")) + "\n"
+            + "• تکمیل‌شده: " + completedMeetings.ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("fa-IR"));
+
+        var nowUnix = now.ToUnixTimeMilliseconds();
+        foreach (var admin in recipients)
+        {
+            db.BaleMessageQueue.Add(new BaleQueuedMessage
+            {
+                NationalId = admin.NationalId,
+                Mobile = admin.Mobile,
+                Text = message,
+                Status = "pending",
+                CreatedAtUnixMs = nowUnix,
+                NextAttemptAtUnixMs = nowUnix
+            });
+        }
+        db.Settings.Add(new AppSetting { Key = markerKey, Value = "queued" });
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        logger.LogInformation("Queued daily statistics for {AdminCount} administrators for {DateKey}.", recipients.Count, markerKey);
+    }
+
+    private static TimeZoneInfo GetTehranTimeZone()
+    {
+        try { return TimeZoneInfo.FindSystemTimeZoneById("Iran Standard Time"); }
+        catch (TimeZoneNotFoundException) { return TimeZoneInfo.FindSystemTimeZoneById("Asia/Tehran"); }
     }
 }
 
