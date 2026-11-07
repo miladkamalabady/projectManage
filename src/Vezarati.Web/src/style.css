@@ -842,3 +842,32 @@
 .special-followup-report-details .submitted-report-entry p{white-space:pre-wrap}
 .special-followup-report-file{display:flex;align-items:center;gap:5px;margin-top:5px;color:#177d73;font-size:10px}
 @media(max-width:700px){.special-followups-report .table-wrap{overflow-x:auto}.special-followups-report table{min-width:900px}}
+
+/* Per-user theme selector */
+.theme-picker{display:inline-flex;align-items:center;gap:6px;padding:5px 8px;border:1px solid #e2e8ea;border-radius:9px;background:#fff;color:#53656c;font-size:11px}
+.theme-picker select{border:0;background:transparent;color:inherit;font-size:11px;outline:none;cursor:pointer}
+:root[data-theme="blue"] .primary{background:#326db1}
+:root[data-theme="blue"] .primary:hover{background:#285b98}
+:root[data-theme="blue"] .eyebrow,:root[data-theme="blue"] .nav.active,:root[data-theme="blue"] .brand-icon{color:#326db1}
+:root[data-theme="blue"] .nav.active{background:#e9f1fb}
+:root[data-theme="blue"] .brand-icon{background:#e9f1fb}
+:root[data-theme="violet"] .primary{background:#7754a8}
+:root[data-theme="violet"] .primary:hover{background:#63448e}
+:root[data-theme="violet"] .eyebrow,:root[data-theme="violet"] .nav.active,:root[data-theme="violet"] .brand-icon{color:#7754a8}
+:root[data-theme="violet"] .nav.active{background:#f0ebf8}
+:root[data-theme="violet"] .brand-icon{background:#f0ebf8}
+:root[data-theme="dark"]{color-scheme:dark;color:#e5edf1;background:#111a20}
+:root[data-theme="dark"] body,:root[data-theme="dark"] .shell,:root[data-theme="dark"] .main{background:#111a20;color:#e5edf1}
+:root[data-theme="dark"] .sidebar,:root[data-theme="dark"] .panel,:root[data-theme="dark"] .metric,:root[data-theme="dark"] .resolution-card,:root[data-theme="dark"] .table-wrap,:root[data-theme="dark"] .modal,:root[data-theme="dark"] .counter,:root[data-theme="dark"] .theme-picker,:root[data-theme="dark"] .execution-calendar-tabs{background:#1b2831;color:#e5edf1;border-color:#34434d}
+:root[data-theme="dark"] .brand,:root[data-theme="dark"] .sidebar-foot,:root[data-theme="dark"] td,:root[data-theme="dark"] th,:root[data-theme="dark"] .admin-submitted-reports,:root[data-theme="dark"] .submitted-report-entry{border-color:#34434d}
+:root[data-theme="dark"] .nav{color:#b4c1c7}
+:root[data-theme="dark"] .nav.active,:root[data-theme="dark"] .execution-calendar-tabs button.active{background:#263e46;color:#78c8ba}
+:root[data-theme="dark"] .brand-icon,:root[data-theme="dark"] .avatar{background:#263e46;color:#78c8ba}
+:root[data-theme="dark"] input,:root[data-theme="dark"] textarea,:root[data-theme="dark"] select,:root[data-theme="dark"] .theme-picker select{background-color:#142129;color:#e5edf1;border-color:#40515c}
+:root[data-theme="dark"] .secondary{background:#2b3942;color:#d4dfe4}
+:root[data-theme="dark"] .today,:root[data-theme="dark"] .top p,:root[data-theme="dark"] .section-head p,:root[data-theme="dark"] .panel>p,:root[data-theme="dark"] .modal-head p,:root[data-theme="dark"] .metric span,:root[data-theme="dark"] small{color:#a6b5bc}
+:root[data-theme="dark"] table,:root[data-theme="dark"] tr,:root[data-theme="dark"] td,:root[data-theme="dark"] th{color:#dce6ea}
+:root[data-theme="dark"] .table-wrap,:root[data-theme="dark"] table{background:#1b2831}
+:root[data-theme="dark"] .execution-calendar-tabs button{color:#b4c1c7}
+:root[data-theme="dark"] .status{filter:brightness(.78)}
+@media(max-width:850px){.theme-picker span{display:none}.theme-picker{gap:4px;padding:5px}}
