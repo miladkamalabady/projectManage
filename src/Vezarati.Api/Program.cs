@@ -2512,6 +2512,7 @@ sealed class DailyAdminStatisticsService(IServiceScopeFactory scopeFactory, ICon
         var inProgressResolutions = resolutions.Count(status => status is "before" or "in_progress");
         var delayedResolutions = resolutions.Count(status => status == "delayed");
         var completedResolutions = resolutions.Count(status => status == "completed");
+        var unfinishedResolutions = inProgressResolutions + delayedResolutions;
         var meetingResolutionRows = await db.Resolutions.AsNoTracking()
             .Where(item => !item.IsArchived && item.Status != "cancelled" && item.MeetingId.HasValue)
             .GroupBy(item => item.MeetingId)
@@ -2538,6 +2539,7 @@ sealed class DailyAdminStatisticsService(IServiceScopeFactory scopeFactory, ICon
             + "• ۷ روز گذشته: " + CountReceivedSince(now.AddDays(-7)).ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("fa-IR")) + "\n"
             + "• ۳۰ روز گذشته: " + CountReceivedSince(monthCutoff).ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("fa-IR")) + "\n"
             + "وضعیت مصوبات فعال:\n"
+            + "• کل تکمیل‌نشده: " + unfinishedResolutions.ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("fa-IR")) + "\n"
             + "• در حال پیگیری: " + inProgressResolutions.ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("fa-IR")) + "\n"
             + "• با تأخیر و تکمیل‌نشده: " + delayedResolutions.ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("fa-IR")) + "\n"
             + "• تکمیل‌شده: " + completedResolutions.ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("fa-IR")) + "\n"
