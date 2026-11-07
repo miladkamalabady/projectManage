@@ -445,7 +445,8 @@ app.MapPost("/api/admin/database/backups", async (HttpContext context, AppDb db,
     if (!context.User.IsInRole("ادمین")) return Results.Forbid();
     try
     {
-        var fileName = $"vezarati-manual-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}"[..( "vezarati-manual-".Length + 8 + 1 + 6 + 1 + 8)] + ".bak";
+        var backupId = Guid.NewGuid().ToString("N")[..8];
+        var fileName = $"vezarati-manual-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{backupId}.bak";
         var path = Path.Combine(DatabaseBackupManager.GetDirectory(configuration, environment), fileName);
         await DatabaseBackupManager.CreateAsync(db, path, context.RequestAborted);
         logger.LogInformation("Manual database backup created by admin {AdminId}: {FileName}", context.User.FindFirstValue(ClaimTypes.NameIdentifier), fileName);
