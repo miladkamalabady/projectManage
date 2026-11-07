@@ -871,3 +871,7 @@
 :root[data-theme="dark"] .execution-calendar-tabs button{color:#b4c1c7}
 :root[data-theme="dark"] .status{filter:brightness(.78)}
 @media(max-width:850px){.theme-picker span{display:none}.theme-picker{gap:4px;padding:5px}}
+
+.special-followup-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:14px 0}.special-followup-toolbar .search{flex:1 1 260px}.special-followup-toolbar label{display:flex;align-items:center;gap:7px;color:#687a80;font-size:11px}.special-followup-toolbar select{min-width:125px;padding:9px 10px;border:1px solid #e0e7e9;border-radius:8px;background:#fff;color:#34484f}.special-followup-toolbar .secondary{white-space:nowrap}
+:root[data-theme="dark"] .special-followup-toolbar label{color:#b4c1c7}
+:root[data-theme="dark"] .special-followup-toolbar select{background:#142129;color:#e5edf1;border-color:#40515c}
