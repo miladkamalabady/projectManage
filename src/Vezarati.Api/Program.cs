@@ -22,6 +22,7 @@ builder.Services.AddScoped<MessageDispatcher>();
 builder.Services.AddHostedService<ResolutionStatusRefreshService>();
 builder.Services.AddHostedService<BaleMessageQueueService>();
 builder.Services.AddHostedService<BrowserPushQueueService>();
+builder.Services.AddHostedService<DailyDatabaseBackupService>();
 builder.Services.AddHttpClient("MessageApi", client => client.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddHttpClient("MeduSso", client => client.Timeout = TimeSpan.FromSeconds(60)).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddHttpClient("Ollama", (services, client) =>
@@ -425,160 +426,59 @@ app.MapPost("/api/assistant/chat", async (HttpContext context, JsonElement reque
     }
 });
 
-app.MapGet("/api/admin/database/backup", async (HttpContext context, AppDb db, IConfiguration configuration, IWebHostEnvironment environment, ILogger<Program> logger) =>
+app.MapGet("/api/admin/database/backups", (HttpContext context, IConfiguration configuration, IWebHostEnvironment environment) =>
 {
     if (!context.User.IsInRole("ادمین")) return Results.Forbid();
-    var databaseName = db.Database.GetDbConnection().Database;
-    if (string.IsNullOrWhiteSpace(databaseName)) return Results.Problem("نام دیتابیس در اتصال SQL Server مشخص نیست.", statusCode: StatusCodes.Status500InternalServerError);
-    var configuredDirectory = configuration["DatabaseBackupDirectory"];
-    var backupDirectory = string.IsNullOrWhiteSpace(configuredDirectory)
-        ? Path.Combine(environment.ContentRootPath, "data", "backups")
-        : Path.GetFullPath(configuredDirectory, environment.ContentRootPath);
-    var stamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
-    var databaseFile = Path.Combine(backupDirectory, $"vezarati-{Guid.NewGuid():N}.bak");
-    var archiveFile = Path.Combine(Path.GetTempPath(), $"vezarati-backup-{Guid.NewGuid():N}.zip");
+    var directory = DatabaseBackupManager.GetDirectory(configuration, environment);
+    Directory.CreateDirectory(directory);
+    var files = Directory.GetFiles(directory, "vezarati-*.bak")
+        .Where(path => DatabaseBackupManager.IsManagedFileName(Path.GetFileName(path)))
+        .Select(path => new FileInfo(path))
+        .OrderByDescending(file => file.LastWriteTimeUtc)
+        .Select(file => new { fileName = file.Name, createdAt = file.LastWriteTimeUtc, sizeBytes = file.Length, source = file.Name.Contains("-daily-", StringComparison.Ordinal) ? "روزانه" : "دستی" })
+        .ToArray();
+    return Results.Ok(files);
+});
+
+app.MapPost("/api/admin/database/backups", async (HttpContext context, AppDb db, IConfiguration configuration, IWebHostEnvironment environment, ILogger<Program> logger) =>
+{
+    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
     try
     {
-        Directory.CreateDirectory(backupDirectory);
-        var connection = db.Database.GetDbConnection();
-        await using (var command = connection.CreateCommand())
-        {
-            command.CommandText = $"BACKUP DATABASE [{databaseName.Replace("]", "]]")}] TO DISK = @backupPath WITH COPY_ONLY, INIT";
-            command.CommandTimeout = 0;
-            var parameter = command.CreateParameter();
-            parameter.ParameterName = "@backupPath";
-            parameter.Value = databaseFile;
-            command.Parameters.Add(parameter);
-            if (connection.State != System.Data.ConnectionState.Open) await connection.OpenAsync(context.RequestAborted);
-            await command.ExecuteNonQueryAsync(context.RequestAborted);
-        }
-
-        if (!System.IO.File.Exists(databaseFile) || new FileInfo(databaseFile).Length == 0)
-            throw new InvalidOperationException("SQL Server عملیات بکاپ را انجام داد اما فایل خروجی ایجاد نشد.");
-
-        await using (var archiveStream = new FileStream(archiveFile, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
-        using (var archive = new ZipArchive(archiveStream, ZipArchiveMode.Create, leaveOpen: false))
-        {
-            var manifestEntry = archive.CreateEntry("manifest.json", CompressionLevel.Fastest);
-            await using (var manifestStream = manifestEntry.Open())
-                await JsonSerializer.SerializeAsync(manifestStream, new
-                {
-                    formatVersion = 1,
-                    product = "Vezarati",
-                    database = databaseName,
-                    createdAtUtc = DateTime.UtcNow
-                }, cancellationToken: context.RequestAborted);
-
-            archive.CreateEntryFromFile(databaseFile, "database.bak", CompressionLevel.NoCompression);
-        }
-
-        System.IO.File.Delete(databaseFile);
-        context.Response.OnCompleted(() =>
-        {
-            try { System.IO.File.Delete(archiveFile); } catch { }
-            return Task.CompletedTask;
-        });
-        return Results.File(archiveFile, "application/zip", $"vezarati-backup-{stamp}.zip", enableRangeProcessing: true);
+        var fileName = $"vezarati-manual-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}"[..( "vezarati-manual-".Length + 8 + 1 + 6 + 1 + 8)] + ".bak";
+        var path = Path.Combine(DatabaseBackupManager.GetDirectory(configuration, environment), fileName);
+        await DatabaseBackupManager.CreateAsync(db, path, context.RequestAborted);
+        logger.LogInformation("Manual database backup created by admin {AdminId}: {FileName}", context.User.FindFirstValue(ClaimTypes.NameIdentifier), fileName);
+        return Results.Ok(new { message = "نسخه پشتیبان روی سرور ذخیره شد.", fileName });
     }
     catch (Exception exception)
     {
-        logger.LogError(exception, "Database backup failed for {Database}. Backup directory: {BackupDirectory}", databaseName, backupDirectory);
-        try { if (System.IO.File.Exists(databaseFile)) System.IO.File.Delete(databaseFile); } catch { }
-        try { if (System.IO.File.Exists(archiveFile)) System.IO.File.Delete(archiveFile); } catch { }
-        var detail = exception switch
-        {
-            SqlException sqlException when sqlException.Number == 3201 => "SQL Server به مسیر پوشه پشتیبان دسترسی ندارد. پوشه باید روی خود سرور SQL Server موجود باشد و حساب سرویس SQL Server مجوز نوشتن داشته باشد.",
-            SqlException sqlException => $"خطای SQL Server در تهیه پشتیبان (کد {sqlException.Number}): {sqlException.Message}",
-            UnauthorizedAccessException => $"برنامه اجازه نوشتن در مسیر «{backupDirectory}» را ندارد. مجوز نوشتن حساب Application Pool را بررسی کنید.",
-            DirectoryNotFoundException => $"مسیر پوشه پشتیبان پیدا نشد: «{backupDirectory}».",
-            _ => $"تهیه نسخه پشتیبان ناموفق بود: {exception.Message}"
-        };
-        return Results.Problem(detail, statusCode: StatusCodes.Status500InternalServerError);
+        logger.LogError(exception, "Manual database backup failed.");
+        return Results.Problem("تهیه نسخه پشتیبان ناموفق بود. دسترسی نوشتن پوشهٔ پشتیبان را بررسی کنید.", statusCode: StatusCodes.Status500InternalServerError);
     }
 });
 
-app.MapPost("/api/admin/database/restore", async (HttpContext context, IConfiguration configuration, IWebHostEnvironment environment, ILogger<Program> logger) =>
+app.MapPost("/api/admin/database/backups/restore", async (RestoreBackupRequest request, HttpContext context, IConfiguration configuration, IWebHostEnvironment environment, ILogger<Program> logger) =>
 {
     if (!context.User.IsInRole("ادمین")) return Results.Forbid();
-    const long maxBackupBytes = 2L * 1024 * 1024 * 1024;
-    var sizeFeature = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
-    if (sizeFeature is { IsReadOnly: false }) sizeFeature.MaxRequestBodySize = maxBackupBytes;
-    if (context.Request.ContentLength is > maxBackupBytes) return Results.BadRequest(new { error = "حجم فایل پشتیبان از ۲ گیگابایت بیشتر است." });
+    if (!DatabaseBackupManager.IsManagedFileName(request.FileName)) return Results.BadRequest(new { error = "نام فایل پشتیبان معتبر نیست." });
+    var path = Path.Combine(DatabaseBackupManager.GetDirectory(configuration, environment), request.FileName);
+    if (!System.IO.File.Exists(path)) return Results.NotFound(new { error = "نسخه پشتیبان موردنظر پیدا نشد." });
     var connectionString = configuration.GetConnectionString("DefaultConnection");
-    if (string.IsNullOrWhiteSpace(connectionString)) return Results.Problem("رشته اتصال دیتابیس تنظیم نشده است.", statusCode: StatusCodes.Status500InternalServerError);
+    if (string.IsNullOrWhiteSpace(connectionString)) return Results.Problem("تنظیم اتصال دیتابیس پیدا نشد.", statusCode: StatusCodes.Status500InternalServerError);
     var databaseName = new SqlConnectionStringBuilder(connectionString).InitialCatalog;
-    if (string.IsNullOrWhiteSpace(databaseName)) return Results.Problem("نام دیتابیس در رشته اتصال مشخص نشده است.", statusCode: StatusCodes.Status500InternalServerError);
-    var configuredDirectory = configuration["DatabaseBackupDirectory"];
-    var backupDirectory = string.IsNullOrWhiteSpace(configuredDirectory)
-        ? Path.Combine(environment.ContentRootPath, "data", "backups")
-        : Path.GetFullPath(configuredDirectory, environment.ContentRootPath);
-    Directory.CreateDirectory(backupDirectory);
-    var tempArchive = Path.Combine(Path.GetTempPath(), $"vezarati-restore-{Guid.NewGuid():N}.zip");
-    var databaseFile = Path.Combine(backupDirectory, $"restore-{Guid.NewGuid():N}.bak");
+    if (string.IsNullOrWhiteSpace(databaseName)) return Results.Problem("نام دیتابیس در تنظیم اتصال مشخص نشده است.", statusCode: StatusCodes.Status500InternalServerError);
     try
     {
-        await using (var output = new FileStream(tempArchive, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            await context.Request.Body.CopyToAsync(output, context.RequestAborted);
-        if (new FileInfo(tempArchive).Length > maxBackupBytes) return Results.BadRequest(new { error = "حجم فایل پشتیبان از ۲ گیگابایت بیشتر است." });
-        using (var archive = ZipFile.OpenRead(tempArchive))
-        {
-            var manifestEntry = archive.GetEntry("manifest.json");
-            var databaseEntry = archive.GetEntry("database.bak");
-            if (manifestEntry is null || databaseEntry is null) return Results.BadRequest(new { error = "فایل انتخاب‌شده نسخه پشتیبان معتبر دفتر وزارتی نیست." });
-            using (var reader = new StreamReader(manifestEntry.Open()))
-            {
-                using var manifest = JsonDocument.Parse(await reader.ReadToEndAsync(context.RequestAborted));
-                if (!manifest.RootElement.TryGetProperty("formatVersion", out var version) || version.GetInt32() != 1 || !manifest.RootElement.TryGetProperty("product", out var product) || product.GetString() != "Vezarati")
-                    return Results.BadRequest(new { error = "قالب نسخه پشتیبان پشتیبانی نمی‌شود." });
-            }
-            if (databaseEntry.Length <= 0 || databaseEntry.Length > maxBackupBytes) return Results.BadRequest(new { error = "فایل دیتابیس داخل نسخه پشتیبان معتبر نیست." });
-            await using var input = databaseEntry.Open();
-            await using var output = new FileStream(databaseFile, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-            await input.CopyToAsync(output, context.RequestAborted);
-        }
-        try
-        {
-            var masterBuilder = new SqlConnectionStringBuilder(connectionString) { InitialCatalog = "master", ConnectTimeout = 30 };
-            await using var sqlConnection = new SqlConnection(masterBuilder.ConnectionString);
-            await sqlConnection.OpenAsync(context.RequestAborted);
-            var quotedDatabase = $"[{databaseName.Replace("]", "]]")}]";
-            await using var command = sqlConnection.CreateCommand();
-            command.CommandTimeout = 0;
-            command.CommandText = $"ALTER DATABASE {quotedDatabase} SET SINGLE_USER WITH ROLLBACK IMMEDIATE; RESTORE DATABASE {quotedDatabase} FROM DISK = @backupPath WITH REPLACE; ALTER DATABASE {quotedDatabase} SET MULTI_USER;";
-            command.Parameters.Add(new SqlParameter("@backupPath", System.Data.SqlDbType.NVarChar, 4000) { Value = databaseFile });
-            await command.ExecuteNonQueryAsync(context.RequestAborted);
-            SqlConnection.ClearAllPools();
-        }
-        catch
-        {
-            try
-            {
-                var masterBuilder = new SqlConnectionStringBuilder(connectionString) { InitialCatalog = "master", ConnectTimeout = 30 };
-                await using var sqlConnection = new SqlConnection(masterBuilder.ConnectionString);
-                await sqlConnection.OpenAsync(CancellationToken.None);
-                await using var command = sqlConnection.CreateCommand();
-                command.CommandText = $"ALTER DATABASE [{databaseName.Replace("]", "]]")}] SET MULTI_USER";
-                await command.ExecuteNonQueryAsync(CancellationToken.None);
-            }
-            catch { }
-            throw;
-        }
-        logger.LogWarning("Database {Database} was restored by admin {AdminId}", databaseName, context.User.FindFirstValue(ClaimTypes.NameIdentifier));
-        return Results.Ok(new { message = "بازیابی دیتابیس انجام شد. پیوست‌ها از نسخه پشتیبان بازیابی نمی‌شوند؛ برنامه را یک‌بار تازه‌سازی کنید." });
-    }
-    catch (InvalidDataException)
-    {
-        return Results.BadRequest(new { error = "فایل پشتیبان خراب یا غیرقابل‌خواندن است." });
+        await DatabaseBackupManager.RestoreAsync(connectionString, databaseName, path, context.RequestAborted);
+        logger.LogWarning("Database {Database} was restored by admin {AdminId} from {FileName}", databaseName, context.User.FindFirstValue(ClaimTypes.NameIdentifier), request.FileName);
+        SqlConnection.ClearAllPools();
+        return Results.Ok(new { message = "بازیابی انجام شد. صفحه را تازه‌سازی کنید." });
     }
     catch (Exception exception)
     {
-        logger.LogError(exception, "Database restore failed for {Database}", databaseName);
-        return Results.Problem("بازیابی ناموفق بود. دسترسی حساب SQL Server به پوشه پشتیبان و مجوز RESTORE DATABASE را بررسی کنید.", statusCode: StatusCodes.Status500InternalServerError);
-    }
-    finally
-    {
-        try { if (System.IO.File.Exists(tempArchive)) System.IO.File.Delete(tempArchive); } catch { }
-        try { if (System.IO.File.Exists(databaseFile)) System.IO.File.Delete(databaseFile); } catch { }
+        logger.LogError(exception, "Database restore failed for {Database} from {FileName}", databaseName, request.FileName);
+        return Results.Problem("بازیابی ناموفق بود. دسترسی بازیابی و مجوز خواندن پوشهٔ پشتیبان را بررسی کنید.", statusCode: StatusCodes.Status500InternalServerError);
     }
 });
 
@@ -2459,6 +2359,128 @@ static class ResolutionStatusUpdater
         finally { Gate.Release(); }
     }
 }
+record RestoreBackupRequest(string FileName);
+
+static class DatabaseBackupManager
+{
+    private static readonly System.Text.RegularExpressions.Regex ManagedFileName = new(@"^vezarati-(daily-\\d{8}|manual-\\d{8}-\\d{6}-[a-f0-9]{8})\\.bak$", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+    private static readonly SemaphoreSlim BackupGate = new(1, 1);
+
+    public static string GetDirectory(IConfiguration configuration, IWebHostEnvironment environment)
+    {
+        var configured = configuration["DatabaseBackupDirectory"];
+        return string.IsNullOrWhiteSpace(configured) ? Path.Combine(environment.ContentRootPath, "data", "backups") : Path.GetFullPath(configured, environment.ContentRootPath);
+    }
+
+    public static bool IsManagedFileName(string? fileName) => !string.IsNullOrWhiteSpace(fileName) && Path.GetFileName(fileName) == fileName && ManagedFileName.IsMatch(fileName);
+
+    public static async Task CreateAsync(AppDb db, string filePath, CancellationToken cancellationToken)
+    {
+        await BackupGate.WaitAsync(cancellationToken);
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+            var connection = db.Database.GetDbConnection();
+            var databaseName = connection.Database;
+            if (string.IsNullOrWhiteSpace(databaseName)) throw new InvalidOperationException("نام دیتابیس تنظیم نشده است.");
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"BACKUP DATABASE [{databaseName.Replace("]", "]]")}] TO DISK = @backupPath WITH COPY_ONLY, INIT, CHECKSUM";
+            command.CommandTimeout = 0;
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = "@backupPath";
+            parameter.Value = filePath;
+            command.Parameters.Add(parameter);
+            if (connection.State != System.Data.ConnectionState.Open) await connection.OpenAsync(cancellationToken);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+            if (!File.Exists(filePath) || new FileInfo(filePath).Length == 0) throw new InvalidOperationException("فایل پشتیبان ایجاد نشد.");
+        }
+        finally { BackupGate.Release(); }
+    }
+
+    public static async Task RestoreAsync(string connectionString, string databaseName, string filePath, CancellationToken cancellationToken)
+    {
+        var masterBuilder = new SqlConnectionStringBuilder(connectionString) { InitialCatalog = "master", ConnectTimeout = 30 };
+        var quotedDatabase = $"[{databaseName.Replace("]", "]]")}]";
+        await using var connection = new SqlConnection(masterBuilder.ConnectionString);
+        await connection.OpenAsync(cancellationToken);
+        try
+        {
+            await using var verify = connection.CreateCommand();
+            verify.CommandTimeout = 0;
+            verify.CommandText = "RESTORE VERIFYONLY FROM DISK = @backupPath";
+            verify.Parameters.Add(new SqlParameter("@backupPath", System.Data.SqlDbType.NVarChar, 4000) { Value = filePath });
+            await verify.ExecuteNonQueryAsync(cancellationToken);
+            await using var restore = connection.CreateCommand();
+            restore.CommandTimeout = 0;
+            restore.CommandText = $"ALTER DATABASE {quotedDatabase} SET SINGLE_USER WITH ROLLBACK IMMEDIATE; RESTORE DATABASE {quotedDatabase} FROM DISK = @backupPath WITH REPLACE, CHECKSUM; ALTER DATABASE {quotedDatabase} SET MULTI_USER;";
+            restore.Parameters.Add(new SqlParameter("@backupPath", System.Data.SqlDbType.NVarChar, 4000) { Value = filePath });
+            await restore.ExecuteNonQueryAsync(cancellationToken);
+        }
+        catch
+        {
+            try
+            {
+                await using var reset = connection.CreateCommand();
+                reset.CommandText = $"ALTER DATABASE {quotedDatabase} SET MULTI_USER";
+                await reset.ExecuteNonQueryAsync(CancellationToken.None);
+            }
+            catch { }
+            throw;
+        }
+    }
+
+    public static void RemoveExpiredDailyFiles(string directory, DateTime utcNow)
+    {
+        var cutoff = utcNow.AddDays(-30);
+        foreach (var file in Directory.GetFiles(directory, "vezarati-daily-*.bak"))
+        {
+            try { if (IsManagedFileName(Path.GetFileName(file)) && File.GetLastWriteTimeUtc(file) < cutoff) File.Delete(file); }
+            catch { /* A retention cleanup failure must not stop backup creation. */ }
+        }
+    }
+}
+
+sealed class DailyDatabaseBackupService(IServiceScopeFactory scopeFactory, IConfiguration configuration, IWebHostEnvironment environment, ILogger<DailyDatabaseBackupService> logger) : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        var tehran = GetTehranTimeZone();
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                var localNow = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, tehran);
+                if (localNow.Hour >= 2)
+                {
+                    var dateKey = localNow.ToString("yyyyMMdd");
+                    var directory = DatabaseBackupManager.GetDirectory(configuration, environment);
+                    Directory.CreateDirectory(directory);
+                    var fileName = $"vezarati-daily-{dateKey}.bak";
+                    var filePath = Path.Combine(directory, fileName);
+                    if (!File.Exists(filePath))
+                    {
+                        using var scope = scopeFactory.CreateScope();
+                        var db = scope.ServiceProvider.GetRequiredService<AppDb>();
+                        await DatabaseBackupManager.CreateAsync(db, filePath, stoppingToken);
+                        DatabaseBackupManager.RemoveExpiredDailyFiles(directory, DateTime.UtcNow);
+                        logger.LogInformation("Daily database backup created: {FileName}", fileName);
+                    }
+                }
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+            catch (Exception exception) { logger.LogError(exception, "Daily database backup failed."); }
+            try { await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken); }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+        }
+    }
+
+    private static TimeZoneInfo GetTehranTimeZone()
+    {
+        try { return TimeZoneInfo.FindSystemTimeZoneById("Iran Standard Time"); }
+        catch (TimeZoneNotFoundException) { return TimeZoneInfo.FindSystemTimeZoneById("Asia/Tehran"); }
+    }
+}
+
 sealed class ResolutionStatusRefreshService : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
