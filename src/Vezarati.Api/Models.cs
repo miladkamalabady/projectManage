@@ -887,10 +887,10 @@ public static class BaleMessageText
         var text = item.IsConfidential ? "محرمانه" : Clip(item.Text, 500);
         var notes = Clip(item.Notes, 260);
         var message = "📬 وظیفهٔ جدید از دفتر وزارتی\n"
-            + Greeting(recipientName, recipientTitle) + " یک مصوبه برای پیگیری به شما ارجاع شده است.\n"
+            + Greeting(recipientName, recipientTitle) + (item.IsSpecialTracking ? " یک پیگیری ویژه برای اقدام به شما ارجاع شده است.\n" : " یک مصوبه برای پیگیری به شما ارجاع شده است.\n")
             + "🔢 شماره مصوبه: " + item.Number + "\n"
             + "📝 موضوع: " + text + "\n"
-            + "📅 جلسه: " + (item.Meeting?.Title ?? "جلسه") + " (" + Date(item.MeetingDate, item.MeetingDateJalali) + ")\n"
+            + "📅 " + (item.IsSpecialTracking ? "پیگیری ویژه" : "جلسه: " + (item.Meeting?.Title ?? "جلسه")) + " (" + Date(item.MeetingDate, item.MeetingDateJalali) + ")\n"
             + "🚀 شروع پیگیری: " + Date(item.StartDate, item.StartDateJalali) + "\n"
             + "⏰ مهلت اقدام: " + Date(item.DueDate, item.DueDateJalali)
             + (string.IsNullOrWhiteSpace(notes) ? "" : "\nℹ️ توضیحات: " + notes)
