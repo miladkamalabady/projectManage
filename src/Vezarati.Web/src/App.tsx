@@ -3,7 +3,7 @@ import DatePicker from "react-multi-date-picker";
 import MeetingsPage from "./MeetingsPage";
 import persian from "react-date-object/calendars/persian";
 import persian_fa from "react-date-object/locales/persian_fa";
-import { Archive, Bell, Bookmark, CalendarDays, CheckCheck, ChevronDown, CircleAlert, ClipboardList, FileText, LayoutDashboard, MessageCircle, Paperclip, Plus, Search, Send, ShieldCheck, Trash2, Upload, Users, X } from "lucide-react";
+import { Archive, Bell, Bookmark, CalendarDays, CheckCheck, ChevronDown, CircleAlert, ClipboardList, FileText, LayoutDashboard, MessageCircle, Paperclip, Palette, Plus, Search, Send, ShieldCheck, Trash2, Upload, Users, X } from "lucide-react";
 
 type Member = { id: number; nationalId: string; displayName: string; title: string; organizationUnit?: string; mobile?: string };
 type Group = { id: number; name: string; category?: string; members: Member[] };
@@ -282,6 +282,8 @@ export default function App() {
   const [meetingPickerQuery, setMeetingPickerQuery] = useState("");
   const [meetingPickerOpen, setMeetingPickerOpen] = useState(false);
   const [fontScale, setFontScale] = useState(() => { try { const saved = Number(localStorage.getItem("vezarati.fontScale")); return Number.isFinite(saved) && saved >= 14 && saved <= 20 ? saved : 16; } catch { return 16; } });
+  const [theme, setTheme] = useState<"light" | "blue" | "violet" | "dark">("light");
+  const [themeLoadedFor, setThemeLoadedFor] = useState("");
   const overviewFromPickerRef = useRef<any>(null);
   const overviewToPickerRef = useRef<any>(null);
   const [overviewFrom, setOverviewFrom] = useState("");
@@ -581,6 +583,8 @@ export default function App() {
     return () => { active = false; };
   }, [authUser?.nationalId, isAdmin, tab, archiveLoaded]);
   useEffect(() => { document.documentElement.style.setProperty("--ui-scale", String(fontScale / 16)); try { localStorage.setItem("vezarati.fontScale", String(fontScale)); } catch { /* local storage is optional */ } }, [fontScale]);
+  useEffect(() => { const userId = authUser?.nationalId; if (!userId) return; let saved: string | null = null; try { saved = localStorage.getItem(`vezarati.theme:${userId}`); } catch { /* local storage is optional */ } setTheme(saved === "blue" || saved === "violet" || saved === "dark" ? saved : "light"); setThemeLoadedFor(userId); }, [authUser?.nationalId]);
+  useEffect(() => { const userId = authUser?.nationalId; if (!userId || themeLoadedFor !== userId) return; document.documentElement.dataset.theme = theme; try { localStorage.setItem(`vezarati.theme:${userId}`, theme); } catch { /* local storage is optional */ } }, [authUser?.nationalId, theme, themeLoadedFor]);
   useEffect(() => {
     if (!authUser || !("serviceWorker" in navigator) || !("PushManager" in window)) { setPushEnabled(false); return; }
     let active = true;
@@ -1776,7 +1780,7 @@ export default function App() {
           </div></>}
         </div>
       </div>
-      <header className="top"><div><div className="eyebrow">پیگیری مصوبات</div><h1>{tab === "wall" ? "پیگیری" : tab === "execution-calendar" ? "تقویم اجرایی" : tab === "assistant" ? "دستیار وظایف" : tab === "resolutions" ? "مصوبات و جلسات" : tab === "groups" ? "گروه‌های اصلی و مسئولان معاونت‌ها" : tab === "sessions" ? "مدیریت جلسات و حضور و غیاب" : tab === "archive" ? "بایگانی مصوبات" : tab === "notifications" ? "اعلان‌های من" : "گزارش‌های اجرایی"}</h1><p>مصوبات، مسئولیت‌ها و روند اجرای اقدامات</p></div><div className="top-actions"><div className="font-size-control" aria-label="اندازه نوشته‌ها"><button type="button" className="secondary" aria-label="کوچک کردن نوشته‌ها" disabled={fontScale<=14} onClick={()=>setFontScale(size=>Math.max(14,size-1))}>A−</button><button type="button" className="secondary" aria-label="بزرگ کردن نوشته‌ها" disabled={fontScale>=20} onClick={()=>setFontScale(size=>Math.min(20,size+1))}>A+</button></div><span className="today"><CalendarDays size={16} />{formatDate(today(), gregorianToJalali(today()).replace(/\./g, "/"))}</span>{isAdmin && tab !== "groups" && tab !== "sessions" && tab !== "archive" && tab !== "notifications" && tab !== "reports" && <><button className="primary" onClick={() => openCreateResolution()}><Plus size={17} />افزودن مصوبه</button><button className="secondary" onClick={() => openCreateResolution(undefined,true)}><Plus size={17} />پیگیری‌های ویژه</button></>}</div></header>
+      <header className="top"><div><div className="eyebrow">پیگیری مصوبات</div><h1>{tab === "wall" ? "پیگیری" : tab === "execution-calendar" ? "تقویم اجرایی" : tab === "assistant" ? "دستیار وظایف" : tab === "resolutions" ? "مصوبات و جلسات" : tab === "groups" ? "گروه‌های اصلی و مسئولان معاونت‌ها" : tab === "sessions" ? "مدیریت جلسات و حضور و غیاب" : tab === "archive" ? "بایگانی مصوبات" : tab === "notifications" ? "اعلان‌های من" : "گزارش‌های اجرایی"}</h1><p>مصوبات، مسئولیت‌ها و روند اجرای اقدامات</p></div><div className="top-actions"><label className="theme-picker"><Palette size={15}/><span>تم</span><select aria-label="انتخاب تم سامانه" value={theme} onChange={event=>setTheme(event.target.value as "light" | "blue" | "violet" | "dark")}><option value="light">روشن</option><option value="blue">آبی</option><option value="violet">بنفش</option><option value="dark">تیره</option></select></label><div className="font-size-control" aria-label="اندازه نوشته‌ها"><button type="button" className="secondary" aria-label="کوچک کردن نوشته‌ها" disabled={fontScale<=14} onClick={()=>setFontScale(size=>Math.max(14,size-1))}>A−</button><button type="button" className="secondary" aria-label="بزرگ کردن نوشته‌ها" disabled={fontScale>=20} onClick={()=>setFontScale(size=>Math.min(20,size+1))}>A+</button></div><span className="today"><CalendarDays size={16} />{formatDate(today(), gregorianToJalali(today()).replace(/\./g, "/"))}</span>{isAdmin && tab !== "groups" && tab !== "sessions" && tab !== "archive" && tab !== "notifications" && tab !== "reports" && <><button className="primary" onClick={() => openCreateResolution()}><Plus size={17} />افزودن مصوبه</button><button className="secondary" onClick={() => openCreateResolution(undefined,true)}><Plus size={17} />پیگیری‌های ویژه</button></>}</div></header>
       {tab === "assistant" && <section className="panel assistant-chat-panel">
         <div className="assistant-chat-heading"><span className="assistant-chat-icon"><MessageCircle size={20}/></span><div><h2>دستیار پیگیری وظایف</h2><p>پرسش دربارهٔ مصوبه‌ها، سررسیدها و وضعیت پیگیری‌های در دسترس شما</p></div></div>
         <div className="assistant-chat-notice">دستیار فقط اطلاعاتی را می‌بیند که در کارتابل شما مجاز است. برای ثبت مستقیم گزارش و تأیید یک مصوبهٔ خودتان، بنویسید «مصوبه شماره ۱۲ را تایید کن»؛ گزارش «اقدام انجام شد» ثبت می‌شود. برای پیش‌نویس و پرسش‌های دیگر از دستیار استفاده کنید.</div>
