@@ -2395,6 +2395,11 @@ static class DatabaseBackupManager
             await command.ExecuteNonQueryAsync(cancellationToken);
             if (!File.Exists(filePath) || new FileInfo(filePath).Length == 0) throw new InvalidOperationException("فایل پشتیبان ایجاد نشد.");
         }
+        catch
+        {
+            try { if (File.Exists(filePath)) File.Delete(filePath); } catch { }
+            throw;
+        }
         finally { BackupGate.Release(); }
     }
 
