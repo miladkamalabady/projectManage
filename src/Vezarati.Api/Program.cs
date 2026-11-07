@@ -2066,7 +2066,7 @@ app.MapGet("/api/reports", async (HttpContext context, AppDb db, string? view, i
         ).ToList();
     }
     var directory = await db.Users.ToDictionaryAsync(u => u.NationalId, u => (DisplayName: u.DisplayName, Title: u.Title));
-    var userTitles = await db.Users.ToDictionaryAsync(u => u.NationalId, u => u.OrgPositionDesc);
+    var userTitles = await db.Users.ToDictionaryAsync(u => u.NationalId, u => u.Title);
     var personRows = new List<(string NationalId, string DisplayName, string Title, string Status)>();
     foreach (var record in records)
     {
