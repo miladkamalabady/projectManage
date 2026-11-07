@@ -888,7 +888,7 @@ public static class BaleMessageText
         var notes = Clip(item.Notes, 260);
         var message = "📬 وظیفهٔ جدید از دفتر وزارتی\n"
             + Greeting(recipientName, recipientTitle) + (item.IsSpecialTracking ? " یک پیگیری ویژه برای اقدام به شما ارجاع شده است.\n" : " یک مصوبه برای پیگیری به شما ارجاع شده است.\n")
-            + "🔢 شماره مصوبه: " + item.Number + "\n"
+            + "🔢 " + (item.IsSpecialTracking ? "شماره پیگیری ویژه: " : "شماره مصوبه: ") + item.Number + "\n"
             + "📝 موضوع: " + text + "\n"
             + (item.IsSpecialTracking ? "📅 تاریخ درخواست: " : "📅 جلسه: " + (item.Meeting?.Title ?? "جلسه") + " (") + Date(item.MeetingDate, item.MeetingDateJalali) + (item.IsSpecialTracking ? "" : ")") + "\n"
             + "🚀 شروع پیگیری: " + Date(item.StartDate, item.StartDateJalali) + "\n"
