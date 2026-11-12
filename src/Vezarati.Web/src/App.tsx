@@ -1556,7 +1556,7 @@ export default function App() {
       const text = normalizeSearchText(toLatinDigits(`${item.id} ${item.number} ${item.text} ${item.notes} ${item.status} ${relatedText}`));
       return !term || text.includes(term);
     });
-  }, [specialFollowupSource, specialFollowupQuery, specialFollowupStatusFilter, users, isAdmin, viewerId]);
+  }, [specialFollowupSource, specialFollowupQuery, specialFollowupStatusFilter, users, isAdmin, viewerId, specialFollowupStatusOf]);
   const specialFollowupStats = { total: specialFollowupSource.length, completed: specialFollowupSource.filter(item => specialFollowupStatusOf(item) === "completed").length, delayed: specialFollowupSource.filter(item => specialFollowupStatusOf(item) === "delayed").length, pending: specialFollowupSource.filter(item => ["before","in_progress"].includes(specialFollowupStatusOf(item))).length };
   const specialFollowupReports = useMemo(() => {
     const term = normalizeSearchText(toLatinDigits(specialReportSearch));
