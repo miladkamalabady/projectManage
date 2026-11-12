@@ -131,7 +131,7 @@ app.MapPost("/api/jobs/daily-overdue-bale", async (HttpContext context, JsonElem
         .ToHashSet(StringComparer.Ordinal);
 
     var resolutions = await db.Resolutions.AsNoTracking()
-        .Where(item => !item.IsArchived && item.Status != "cancelled")
+        .Where(item => !item.IsArchived && item.Status is not ("cancelled" or "completed"))
         .Include(item => item.Assignments).Include(item => item.Progress)
         .Include(item => item.Group).ThenInclude(group => group!.Members)
         .Include(item => item.GroupAssignments).ThenInclude(assignment => assignment.Group).ThenInclude(group => group!.Members)
@@ -1074,6 +1074,7 @@ app.MapPatch("/api/resolutions/{id:int}/status", async (int id, ResolutionStatus
     if (!isAdmin) return Results.StatusCode(StatusCodes.Status403Forbidden);
     if (request.Status is not ("completed" or "cancelled")) return Results.BadRequest(new { error = "ادمین فقط می‌تواند وضعیت کلی را اجرا شده یا لغو شده کند." });
     if (request.Status == "cancelled" && string.IsNullOrWhiteSpace(request.Notes)) return Results.BadRequest(new { error = "برای لغو مصوبه، توضیحات لغو الزامی است." });
+    record.Status = request.Status;
     record.Notes = request.Notes ?? record.Notes;
     record.UpdatedAt = DateTimeOffset.UtcNow;
     db.Events.Add(new ResolutionEvent { ResolutionId = id, NationalId = primaryAdminNationalId, UserName = "مدیر دفتر وزارتی", Text = "وضعیت کلی مصوبه به «" + ResolutionStatusLabel(request.Status) + "» تغییر کرد.", CreatedAt = DateTimeOffset.UtcNow });
@@ -1499,7 +1500,7 @@ app.MapGet("/api/notifications", async (HttpContext context, AppDb db, ILogger<P
         var dueDateText = string.IsNullOrWhiteSpace(item.DueDateJalali) ? JalaliDate.FromGregorian(item.DueDate.Value) : item.DueDateJalali;
         var subject = (item.Text ?? "").Replace("\r", " ").Replace("\n", " ").Trim();
         if (subject.Length > 220) subject = subject[..220] + "…";
-        var personalStatus = item.Progress.FirstOrDefault(progress => progress.NationalId == nationalId)?.Status ?? item.Status;
+        var personalStatus = item.Status == "completed" ? "completed" : item.Progress.FirstOrDefault(progress => progress.NationalId == nationalId)?.Status ?? item.Status;
         var personalStatusText = personalStatus switch
         {
             "completed" => "اجرا شده",
@@ -1986,7 +1987,7 @@ app.MapGet("/api/reports", async (HttpContext context, AppDb db, string? view, i
 
         foreach (var person in participants)
         {
-            var personStatus = record.Progress.FirstOrDefault(progress => progress.NationalId == person.NationalId)?.Status ?? record.Status;
+            var personStatus = record.Status == "completed" ? "completed" : record.Progress.FirstOrDefault(progress => progress.NationalId == person.NationalId)?.Status ?? record.Status;
             personRows.Add((person.NationalId, person.DisplayName, person.Title, personStatus));
         }
     }
@@ -2047,7 +2048,7 @@ app.MapGet("/api/reports/people/{nationalId}/tasks", async (string nationalId, s
     var statusFilter = (status ?? "all").Trim().ToLowerInvariant();
     var filtered = records.Where(item =>
     {
-        var personalStatus = item.Progress.FirstOrDefault(progress => progress.NationalId == nationalId)?.Status ?? item.Status;
+        var personalStatus = item.Status == "completed" ? "completed" : item.Progress.FirstOrDefault(progress => progress.NationalId == nationalId)?.Status ?? item.Status;
         return statusFilter == "all" ||
             statusFilter == "completed" && personalStatus == "completed" ||
             statusFilter == "delayed" && personalStatus == "delayed" ||
@@ -2076,6 +2077,7 @@ app.MapPost("/api/resolutions/{id:int}/warnings", async (int id, WarningRecipien
         .Include(item => item.GroupAssignments).ThenInclude(assignment => assignment.Group).ThenInclude(group => group!.Members)
         .FirstOrDefaultAsync(context.RequestAborted);
     if (resolution is null) return Results.NotFound(new { error = "مصوبه پیدا نشد یا لغو شده است." });
+    if (resolution.Status == "completed") return Results.Conflict(new { error = "مصوبه اجرا شده است و ارسال یادآوری برای آن مجاز نیست." });
 
     var directory = await db.Users.AsNoTracking()
         .Where(person => nationalIds.Contains(person.NationalId))
@@ -2089,7 +2091,7 @@ app.MapPost("/api/resolutions/{id:int}/warnings", async (int id, WarningRecipien
 
     foreach (var nationalId in nationalIds)
     {
-        var memberStatus = resolution.Progress.FirstOrDefault(progress => progress.NationalId == nationalId)?.Status ?? resolution.Status;
+        var memberStatus = resolution.Status == "completed" ? "completed" : resolution.Progress.FirstOrDefault(progress => progress.NationalId == nationalId)?.Status ?? resolution.Status;
         var isAssigned = resolution.Assignments.Any(assignment => assignment.NationalId == nationalId)
             || resolution.Group?.Members.Any(member => member.NationalId == nationalId) == true
             || resolution.GroupAssignments.Any(assignment => assignment.Group?.Members.Any(member => member.NationalId == nationalId) == true);
@@ -2154,12 +2156,12 @@ app.MapPost("/api/reports/warnings/{nationalId}", async (string nationalId, AppD
 {
     var normalizedId = NormalizeDigits(nationalId.Trim());
     var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3.5));
-    var records = await db.Resolutions.Where(item => !item.IsArchived && item.Status != "cancelled")
+    var records = await db.Resolutions.Where(item => !item.IsArchived && item.Status is not ("cancelled" or "completed"))
         .Include(item => item.Assignments).Include(item => item.Progress).Include(item => item.Group).ThenInclude(group => group!.Members)
         .Include(item => item.GroupAssignments).ThenInclude(assignment => assignment.Group).ThenInclude(group => group!.Members).ToListAsync(context.RequestAborted);
     var delayed = records.Where(item =>
     {
-        var status = item.Progress.FirstOrDefault(progress => progress.NationalId == normalizedId)?.Status ?? item.Status;
+        var status = item.Status == "completed" ? "completed" : item.Progress.FirstOrDefault(progress => progress.NationalId == normalizedId)?.Status ?? item.Status;
         return status == "delayed" || status == "in_progress"
             || (status != "completed" && item.DueDate.HasValue && item.DueDate.Value < today);
     })
