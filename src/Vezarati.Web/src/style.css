@@ -904,3 +904,17 @@
 
 .special-followup-meeting-label{gap:6px}.special-followup-meeting-label label{display:grid;gap:5px;color:#718187;font-size:10px;font-weight:600}.special-followup-meeting-label select{width:100%;padding:5px 7px;border:1px solid #d8e2e4;border-radius:7px;background:#fff;color:#177d73;font:inherit;font-size:12px;font-weight:800}
 :root[data-theme="dark"] .special-followup-meeting-label select{background:#142129;color:#e5edf1;border-color:#40515c}
+
+/* Keep long report bodies out of the admin table rows. */
+.submitted-reports-panel .report-submission-text{white-space:normal;min-width:220px;max-width:360px;vertical-align:top;overflow-wrap:anywhere}
+.submitted-reports-panel .report-submission-text p{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;overflow:hidden;margin:0;white-space:pre-wrap;line-height:1.7;overflow-wrap:anywhere}
+.submitted-reports-panel .report-submission-text small{display:block;max-width:100%;margin-top:5px;white-space:normal;line-height:1.6;overflow-wrap:anywhere}
+.report-text-more{margin-top:7px;padding:5px 8px;border:1px solid #cfe1dc;border-radius:7px;background:#f0f7f5;color:#176b5f;font-size:10px;font-weight:700;white-space:nowrap}
+.report-text-more:hover{background:#e4f1ed}
+.report-text-modal{width:min(760px,calc(100vw - 28px));max-height:min(84vh,760px);display:flex;flex-direction:column;overflow:hidden}
+.report-text-modal-body{overflow:auto;padding:12px 18px;line-height:1.9}
+.report-text-modal-body h3{margin:6px 0;font-size:12px;color:#61716f}
+.report-text-modal-body p{margin:0 0 15px;padding:12px;border:1px solid #e4e9e8;border-radius:9px;background:#f8faf9;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.9;font-size:13px}
+:root[data-theme="dark"] .report-text-more{background:#263d3b;color:#b6dccf;border-color:#405e57}
+:root[data-theme="dark"] .report-text-modal-body p{background:#202e37;color:#dce6ea;border-color:#394b55}
+@media(max-width:700px){.submitted-reports-panel .report-submission-text{min-width:180px;max-width:240px}.report-text-modal-body{padding:8px 12px}}
