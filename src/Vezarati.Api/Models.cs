@@ -890,10 +890,10 @@ public static class BaleMessageText
         var text = item.IsConfidential ? "محرمانه" : Clip(item.Text, 500);
         var notes = Clip(item.Notes, 260);
         var message = "📬 وظیفهٔ جدید از دفتر وزارتی\n"
-            + Greeting(recipientName, recipientTitle) + (item.IsSpecialTracking ? " یک پیگیری ویژه برای اقدام به شما ارجاع شده است.\n" : " یک مصوبه برای پیگیری به شما ارجاع شده است.\n")
-            + "🔢 " + (item.IsSpecialTracking ? "شماره پیگیری ویژه: " : "شماره مصوبه: ") + item.Number + "\n"
+            + Greeting(recipientName, recipientTitle) + (item.IsSpecialTracking ? (item.SpecialTrackingType == "provincial" ? " یک سفر استانی وزیر برای پیگیری به شما ارجاع شده است.\n" : " یک دستور وزیر برای اقدام به شما ارجاع شده است.\n") : " یک مصوبه شورای معاونین برای پیگیری به شما ارجاع شده است.\n")
+            + "🔢 " + (item.IsSpecialTracking ? (item.SpecialTrackingType == "provincial" ? "شماره سفر استانی: " : "شماره دستور وزیر: ") : "شماره مصوبه شورای معاونین: ") + item.Number + "\n"
             + "📝 موضوع: " + text + "\n"
-            + (item.IsSpecialTracking ? "📅 تاریخ درخواست: " : "📅 جلسه: " + (item.Meeting?.Title ?? "جلسه") + " (") + Date(item.MeetingDate, item.MeetingDateJalali) + (item.IsSpecialTracking ? "" : ")") + "\n"
+            + (item.IsSpecialTracking ? (item.SpecialTrackingType == "provincial" ? "📅 تاریخ سفر: " : "📅 تاریخ درخواست: ") : "📅 جلسه: " + (item.Meeting?.Title ?? "جلسه") + " (") + Date(item.MeetingDate, item.MeetingDateJalali) + (item.IsSpecialTracking ? "" : ")") + "\n"
             + "🚀 شروع پیگیری: " + Date(item.StartDate, item.StartDateJalali) + "\n"
             + "⏰ مهلت اقدام: " + Date(item.DueDate, item.DueDateJalali)
             + (string.IsNullOrWhiteSpace(notes) ? "" : "\nℹ️ توضیحات: " + notes)
