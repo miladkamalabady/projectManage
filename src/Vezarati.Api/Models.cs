@@ -30,6 +30,7 @@ public sealed class Resolution
     public bool PublishToAll { get; set; }
     public bool IsConfidential { get; set; }
     public bool IsSpecialTracking { get; set; }
+    public string SpecialTrackingType { get; set; } = "minister";
     public bool IsArchived { get; set; }
     public string? SourceKey { get; set; }
     public int? GroupId { get; set; }
@@ -417,6 +418,7 @@ public sealed class AppDb(DbContextOptions<AppDb> options, ILogger<AppDb> logger
         model.Entity<GroupMember>().HasIndex(x => new { x.GroupId, x.NationalId }).IsUnique();
         model.Entity<Resolution>().HasIndex(x => x.SourceKey).IsUnique();
         model.Entity<Resolution>().Ignore(x => x.MeetingAttachments);
+        model.Entity<Resolution>().Property(x => x.SpecialTrackingType).HasMaxLength(32);
         model.Entity<Meeting>().ToTable("Meetings");
         model.Entity<MeetingAttendee>().ToTable("MeetingAttendees");
         model.Entity<MeetingAttachment>().ToTable("MeetingAttachments");
@@ -657,6 +659,7 @@ public static class SchemaCompatibility
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.ResolutionAttachments', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.ResolutionAttachments', N'ResolutionReportId') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_ResolutionAttachments_ResolutionReportId' AND object_id = OBJECT_ID(N'dbo.ResolutionAttachments')) CREATE INDEX IX_ResolutionAttachments_ResolutionReportId ON dbo.ResolutionAttachments (ResolutionReportId);");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.Resolutions', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.Resolutions', N'MeetingId') IS NULL ALTER TABLE dbo.Resolutions ADD MeetingId int NULL;");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.Resolutions', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.Resolutions', N'IsConfidential') IS NULL ALTER TABLE dbo.Resolutions ADD IsConfidential bit NOT NULL CONSTRAINT DF_Resolutions_IsConfidential DEFAULT 0;");
+            await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.Resolutions', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.Resolutions', N'SpecialTrackingType') IS NULL EXEC(N'ALTER TABLE dbo.Resolutions ADD SpecialTrackingType nvarchar(32) NOT NULL CONSTRAINT DF_Resolutions_SpecialTrackingType DEFAULT N''minister'';');");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.Resolutions', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.Resolutions', N'IsSpecialTracking') IS NULL EXEC(N'ALTER TABLE dbo.Resolutions ADD IsSpecialTracking bit NOT NULL CONSTRAINT DF_Resolutions_IsSpecialTracking DEFAULT 0;');");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.Meetings', N'U') IS NULL CREATE TABLE dbo.Meetings (Id int IDENTITY(1,1) NOT NULL PRIMARY KEY, Date date NOT NULL, DateJalali nvarchar(max) NOT NULL, Title nvarchar(300) NOT NULL, GuestText nvarchar(max) NOT NULL, CreatedAt datetimeoffset NOT NULL);");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.MeetingAttachments', N'U') IS NULL CREATE TABLE dbo.MeetingAttachments (Id int IDENTITY(1,1) NOT NULL PRIMARY KEY, MeetingId int NOT NULL, OriginalName nvarchar(512) NOT NULL, StoredName nvarchar(128) NOT NULL, ContentType nvarchar(256) NOT NULL, Size bigint NOT NULL, ContentHash nvarchar(64) NOT NULL, UploadedBy nvarchar(11) NOT NULL, UploadedAt datetimeoffset NOT NULL, CONSTRAINT FK_MeetingAttachments_Meetings_MeetingId FOREIGN KEY (MeetingId) REFERENCES dbo.Meetings(Id) ON DELETE CASCADE);");
