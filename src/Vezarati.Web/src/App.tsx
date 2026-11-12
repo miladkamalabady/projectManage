@@ -1547,16 +1547,17 @@ export default function App() {
   const reportDonut = `conic-gradient(#4c9a70 0% ${completedEnd}%, #ce7068 ${completedEnd}% ${delayedEnd}%, #d7a33f ${delayedEnd}% 100%)`;
   const activeResolutions = resolutions.filter(item => !item.isArchived);
   const specialFollowupSource = (isAdmin ? activeResolutions : mine).filter(item => item.isSpecialTracking && !item.isArchived);
+  const specialFollowupStatusOf = (item: Resolution) => isAdmin ? item.status : item.progress?.find(progress => progress.nationalId === viewerId)?.status || item.status;
   const filteredSpecialFollowups = useMemo(() => {
     const term = normalizeSearchText(toLatinDigits(specialFollowupQuery));
     return specialFollowupSource.filter(item => {
-      if (specialFollowupStatusFilter !== "all" && item.status !== specialFollowupStatusFilter) return false;
+      if (specialFollowupStatusFilter !== "all" && specialFollowupStatusOf(item) !== specialFollowupStatusFilter) return false;
       const relatedText = (item.assignments || []).map(assignment => users.find(user => user.nationalId === assignment.nationalId)?.displayName || assignment.nationalId).join(" ");
       const text = normalizeSearchText(toLatinDigits(`${item.id} ${item.number} ${item.text} ${item.notes} ${item.status} ${relatedText}`));
       return !term || text.includes(term);
     });
-  }, [specialFollowupSource, specialFollowupQuery, specialFollowupStatusFilter, users]);
-  const specialFollowupStats = { total: specialFollowupSource.length, completed: specialFollowupSource.filter(item => item.status === "completed").length, delayed: specialFollowupSource.filter(item => item.status === "delayed").length, pending: specialFollowupSource.filter(item => item.status === "before" || item.status === "in_progress").length };
+  }, [specialFollowupSource, specialFollowupQuery, specialFollowupStatusFilter, users, isAdmin, viewerId]);
+  const specialFollowupStats = { total: specialFollowupSource.length, completed: specialFollowupSource.filter(item => specialFollowupStatusOf(item) === "completed").length, delayed: specialFollowupSource.filter(item => specialFollowupStatusOf(item) === "delayed").length, pending: specialFollowupSource.filter(item => ["before","in_progress"].includes(specialFollowupStatusOf(item))).length };
   const specialFollowupReports = useMemo(() => {
     const term = normalizeSearchText(toLatinDigits(specialReportSearch));
     return activeResolutions.filter(item => {
