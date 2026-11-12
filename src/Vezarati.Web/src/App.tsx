@@ -139,9 +139,11 @@ const jalaliToday = () => gregorianToJalali(today());
 const formatEventDateTime = (value: string) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  const jalaliDate = gregorianToJalali(value.slice(0, 10)).replace(/\\./g, "/").replace(/[0-9]/g, digit => "۰۱۲۳۴۵۶۷۸۹"[Number(digit)]);
-  const time = new Intl.DateTimeFormat("fa-IR", { hour: "2-digit", minute: "2-digit" }).format(date);
-  return `${jalaliDate} · ${time}`;
+  return new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    numberingSystem: "arabext"
+  }).format(date);
 };
 const toLatinDigits = (value: string) => value.replace(/[۰-۹٠-٩]/g, digit => String("۰۱۲۳۴۵۶۷۸۹".indexOf(digit) >= 0 ? "۰۱۲۳۴۵۶۷۸۹".indexOf(digit) : "٠١٢٣٤٥٦٧٨٩".indexOf(digit)));
 const normalizeSearchText = (value: unknown) => String(value ?? "").normalize("NFKC").replace(/[يى]/g, "ی").replace(/ك/g, "ک").trim().toLocaleLowerCase("fa");
