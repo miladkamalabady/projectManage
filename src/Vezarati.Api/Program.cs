@@ -874,7 +874,7 @@ app.MapGet("/api/resolutions", async (HttpContext context, AppDb db) =>
     foreach (var resolution in records)
     {
         resolution.MeetingAttachments = resolution.Meeting?.Attachments ?? [];
-        resolution.MeetingTitle = resolution.IsSpecialTracking ? "پیگیری ویژه" : resolution.Meeting?.Title ?? "";
+        resolution.MeetingTitle = resolution.IsSpecialTracking ? ResolutionTracking.Label(resolution.SpecialTrackingType) : resolution.Meeting?.Title ?? "";
     }
     var eventNames = await LoadPersonDisplayNames(db);
     foreach (var entry in records.SelectMany(resolution => resolution.Events)) entry.Text = NormalizeStatusEventText(entry, eventNames);
