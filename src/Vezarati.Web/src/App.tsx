@@ -26,6 +26,16 @@ type Dashboard = { currentUser: { nationalId: string; displayName: string; role:
 type AuthUser = { nationalId: string; displayName: string; role: string; title?: string; organizationUnit?: string; province?: string | null; mobile?: string };
 
 let pendingSsoLogin: { code: string; task: Promise<AuthUser> } | null = null;
+const sessionExpiredMessage = "نشست شما منقضی شده است. لطفاً از درگاه سازمانی دوباره وارد شوید.";
+async function fetchApi(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const response = await fetch(input, init);
+  if (response.status === 401) {
+    window.dispatchEvent(new Event("vezarati-session-expired"));
+    throw new Error(sessionExpiredMessage);
+  }
+  return response;
+}
+
 function loginWithSso(code: string): Promise<AuthUser> {
   if (pendingSsoLogin?.code === code) return pendingSsoLogin.task;
   const task = (async () => {
@@ -358,7 +368,7 @@ export default function App() {
   async function loadDatabaseBackups() {
     setBackupsLoading(true);
     try {
-      const response = await fetch("/api/admin/database/backups", { credentials: "include", cache: "no-store" });
+      const response = await fetchApi("/api/admin/database/backups", { credentials: "include", cache: "no-store" });
       const result = await response.json().catch(() => []);
       if (!response.ok) throw new Error(result?.detail || result?.title || "دریافت فهرست نسخه‌های پشتیبان ناموفق بود.");
       setDatabaseBackups(Array.isArray(result) ? result : []);
@@ -373,7 +383,7 @@ export default function App() {
     setBackupBusy(true);
     setMessage("");
     try {
-      const response = await fetch("/api/admin/database/backups", { method: "POST", credentials: "include", cache: "no-store" });
+      const response = await fetchApi("/api/admin/database/backups", { method: "POST", credentials: "include", cache: "no-store" });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result?.detail || result?.error || result?.title || "تهیه نسخه پشتیبان ناموفق بود.");
       setMessage(result?.message || "نسخه پشتیبان روی سرور ذخیره شد.");
@@ -391,7 +401,7 @@ export default function App() {
     setBackupBusy(true);
     setMessage("");
     try {
-      const response = await fetch("/api/admin/database/backups/restore", {
+      const response = await fetchApi("/api/admin/database/backups/restore", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -415,7 +425,7 @@ export default function App() {
     setReportTaskDetailsError("");
     setReportTaskDetailsLoading(true);
     try {
-      const response = await fetch(`/api/reports/people/${encodeURIComponent(person.nationalId)}/tasks?status=${status}`, { credentials: "include", cache: "no-store" });
+      const response = await fetchApi(`/api/reports/people/${encodeURIComponent(person.nationalId)}/tasks?status=${status}`, { credentials: "include", cache: "no-store" });
       const data = await response.json();
       if (!response.ok) throw new Error(data?.error || "جزئیات مصوبات دریافت نشد.");
       if (requestId === reportTaskRequestId.current) setReportTaskDetails(asArray<Resolution>(data));
@@ -431,7 +441,7 @@ export default function App() {
     setError("");
     try {
       const [dashboardResponse, groupsResponse, usersResponse, notificationsResponse, baleSettingsResponse, meetingsResponse] = await Promise.all([
-        fetch("/api/dashboard"), fetch("/api/groups"), isAdmin ? fetch("/api/users") : Promise.resolve(new Response(JSON.stringify({ total: 0, completed: 0, delayed: 0, pending: 0, people: [] }), { status: 200 })), fetch("/api/notifications"), isAdmin ? fetch("/api/settings/bale-notifications") : Promise.resolve(new Response(JSON.stringify({ enabled: false, configured: false }), { status: 200 })), isAdmin ? fetch("/api/meetings") : Promise.resolve(new Response("[]", { status: 200 }))
+        fetchApi("/api/dashboard"), fetchApi("/api/groups"), isAdmin ? fetchApi("/api/users") : Promise.resolve(new Response(JSON.stringify({ total: 0, completed: 0, delayed: 0, pending: 0, people: [] }), { status: 200 })), fetchApi("/api/notifications"), isAdmin ? fetchApi("/api/settings/bale-notifications") : Promise.resolve(new Response(JSON.stringify({ enabled: false, configured: false }), { status: 200 })), isAdmin ? fetchApi("/api/meetings") : Promise.resolve(new Response("[]", { status: 200 }))
       ]);
       for (const response of [dashboardResponse, groupsResponse, usersResponse, notificationsResponse, baleSettingsResponse, meetingsResponse]) if (!response.ok) throw new Error(response.status === 401 ? "نشست شما منقضی شده است." : "گرفتن اطلاعات از API ناموفق بود.");
       const baleSettings = await baleSettingsResponse.json();
@@ -490,6 +500,29 @@ export default function App() {
     setAuthUser(null); setViewerId(""); setDashboard(null); setResolutions([]); setGroups([]); setReports(null); setReportsLoaded(false); setSubmissionsLoaded(false); summaryFetchStarted.current = false; submissionsFetchStarted.current = false; setReportsError(""); setReportSubmissions([]); setUsers([]); setNotifications([]);
   }
   useEffect(() => {
+    const handleExpiredSession = () => {
+      setError(sessionExpiredMessage);
+      setMessage("");
+      setAuthUser(null);
+      setViewerId("");
+      setDashboard(null);
+      setDashboardLoaded(false);
+      setResolutions([]);
+      setGroups([]);
+      setReports(null);
+      setReportsLoaded(false);
+      setSubmissionsLoaded(false);
+      summaryFetchStarted.current = false;
+      submissionsFetchStarted.current = false;
+      setReportsError("");
+      setReportSubmissions([]);
+      setUsers([]);
+      setNotifications([]);
+    };
+    window.addEventListener("vezarati-session-expired", handleExpiredSession);
+    return () => window.removeEventListener("vezarati-session-expired", handleExpiredSession);
+  }, []);
+  useEffect(() => {
     let active = true;
     const params = new URLSearchParams(window.location.search);
     const queryCode = params.get("code");
@@ -533,7 +566,7 @@ export default function App() {
     peopleReportFetchStarted.current = true;
     setReportsLoading(true);
     setReportsError("");
-    fetch("/api/reports?view=people&page=1&pageSize=5000&status=all", { credentials: "include", cache: "no-store" })
+    fetchApi("/api/reports?view=people&page=1&pageSize=5000&status=all", { credentials: "include", cache: "no-store" })
       .then(async response => {
         const data = await response.json();
         if (!response.ok) throw new Error(data?.error || "گزارش فردی دریافت نشد.");
@@ -551,7 +584,7 @@ export default function App() {
     dataQualityFetchStarted.current = true;
     setDataQualityLoading(true);
     setDataQualityError("");
-    fetch("/api/reports/data-quality", { credentials: "include", cache: "no-store" })
+    fetchApi("/api/reports/data-quality", { credentials: "include", cache: "no-store" })
       .then(async response => {
         const data = await response.json();
         if (!response.ok) throw new Error(data?.detail || data?.error || "گزارش کیفیت داده دریافت نشد.");
@@ -576,7 +609,7 @@ export default function App() {
     fetchingRef.current = true;
     setReportsLoading(true);
     setReportsError("");
-    fetch(endpoint, { credentials: "include", cache: "no-store" }).then(async response => {
+    fetchApi(endpoint, { credentials: "include", cache: "no-store" }).then(async response => {
       const data = await response.json();
       if (!response.ok) throw new Error(data?.error || (requestType === "submissions" ? "گزارش‌های اقدامات دریافت نشد." : "گزارش مدیریتی دریافت نشد."));
       if (!active) return;
@@ -598,7 +631,7 @@ export default function App() {
     let active = true;
     archiveFetchStarted.current = true;
     setArchiveLoading(true);
-    fetch("/api/resolutions", { credentials: "include", cache: "no-store" })
+    fetchApi("/api/resolutions", { credentials: "include", cache: "no-store" })
       .then(async response => { const body = await response.json(); if (!response.ok) throw new Error(body?.error || "بایگانی مصوبات دریافت نشد."); return asArray<Resolution>(body); })
       .then(items => { if (active) { setResolutions(items); setArchiveLoaded(true); } })
       .catch(error => { if (active) { setMessage(error instanceof Error ? error.message : "دریافت بایگانی ناموفق بود."); archiveFetchStarted.current = false; } })
@@ -616,7 +649,7 @@ export default function App() {
       if (!active) return;
       setPushEnabled(!!subscription);
       if (subscription) {
-        await fetch("/api/push/subscriptions", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(subscription) });
+        await fetchApi("/api/push/subscriptions", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(subscription) });
       }
     }).catch(() => { if (active) setPushEnabled(false); });
     return () => { active = false; };
@@ -630,7 +663,7 @@ export default function App() {
     if (baleMessageTo) params.set("to", baleMessageTo);
     setBaleMessageLoading(true);
     setBaleMessageError("");
-    fetch(`/api/reports/bale-messages?${params.toString()}`, { credentials: "include" })
+    fetchApi(`/api/reports/bale-messages?${params.toString()}`, { credentials: "include" })
       .then(async response => {
         const body = await response.json();
         if (!response.ok) throw new Error(body?.error || "گزارش ارسال‌های بله دریافت نشد.");
@@ -647,8 +680,8 @@ export default function App() {
     const refreshLiveFeed = async () => {
       try {
         const [dashboardResponse, notificationsResponse] = await Promise.all([
-          fetch("/api/dashboard", { credentials: "include", cache: "no-store" }),
-          fetch("/api/notifications", { credentials: "include", cache: "no-store" })
+          fetchApi("/api/dashboard", { credentials: "include", cache: "no-store" }),
+          fetchApi("/api/notifications", { credentials: "include", cache: "no-store" })
         ]);
         if (!dashboardResponse.ok || !notificationsResponse.ok) return;
         const rawDashboard = await dashboardResponse.json();
@@ -700,7 +733,7 @@ export default function App() {
     const formData = new FormData(); formData.append("file", file);
     setMessage("");
     try {
-      const response = await fetch(`/api/resolutions/${resolutionId}/attachments`, { method: "POST", body: formData });
+      const response = await fetchApi(`/api/resolutions/${resolutionId}/attachments`, { method: "POST", body: formData });
       const result = response.status === 204 ? null : await response.json();
       if (!response.ok) throw new Error(result?.error || "بارگذاری فایل انجام نشد.");
       setMessage("فایل پیوست شد."); await load();
@@ -723,7 +756,7 @@ export default function App() {
       formData.append("text", text);
       formData.append("userName", dashboard?.currentUser.displayName ?? viewerId);
       files.forEach(file => formData.append("files", file));
-      const response = await fetch(`/api/resolutions/${resolutionId}/completion-report`, { method: "POST", body: formData });
+      const response = await fetchApi(`/api/resolutions/${resolutionId}/completion-report`, { method: "POST", body: formData });
       const result = response.status === 204 ? null : await response.json();
       if (!response.ok) throw new Error(result?.error || "ارسال گزارش انجام نشد.");
       setMessage("✅ گزارش اقدام با موفقیت ثبت شد. این وظیفه تا چند لحظهٔ دیگر از فهرست انجام‌نشده‌ها کنار می‌رود.");
@@ -765,7 +798,7 @@ export default function App() {
     if(!window.confirm(`مصوبه شماره ${item.number} با شناسه یکتا ${item.id} حذف شود؟`))return;
     setBusy(true);setMessage("");
     try{
-      const response=await fetch(`/api/resolutions/${item.id}`,{method:"DELETE",credentials:"include"});
+      const response=await fetchApi(`/api/resolutions/${item.id}`,{method:"DELETE",credentials:"include"});
       const result=response.status===204?null:await response.json();
       if(!response.ok)throw new Error(result?.error||"حذف مصوبه انجام نشد.");
       setResolutions(current=>current.filter(entry=>entry.id!==item.id));
@@ -838,7 +871,7 @@ export default function App() {
     if (group.category === category) return;
     setBusy(true); setGroupDeleteError(""); setMessage("");
     try {
-      const response = await fetch(`/api/groups/${group.id}/category`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ category }) });
+      const response = await fetchApi(`/api/groups/${group.id}/category`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ category }) });
       const result = response.status === 204 ? null : await response.json();
       if (!response.ok) throw new Error(result?.error || "تغییر دسته‌بندی انجام نشد.");
       setMessage(category === "group" ? "مورد به گروه‌ها منتقل شد." : "مورد به معاونت‌ها و واحدها منتقل شد.");
@@ -871,7 +904,7 @@ export default function App() {
           if (personal?.status === "completed" && personal.approvalStatus === "approved") {
             reply = `مصوبهٔ شمارهٔ ${item.number} از قبل برای شما اجراشده و تأییدشده است.`;
           } else {
-            const completionResponse = await fetch(`/api/resolutions/${item.id}/completion-report`, {
+            const completionResponse = await fetchApi(`/api/resolutions/${item.id}/completion-report`, {
               method: "POST",
               credentials: "include",
               headers: { "Content-Type": "application/json" },
@@ -982,7 +1015,7 @@ export default function App() {
         setAssistantMessages(current => [...current, { role: "assistant", content: localReply! }]);
         return;
       }
-      const response = await fetch("/api/assistant/chat", {
+      const response = await fetchApi("/api/assistant/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message, history })
@@ -1001,7 +1034,7 @@ export default function App() {
   async function request(url: string, method: string, body?: unknown) {
     setBusy(true); setMessage("");
     try {
-      const response = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+      const response = await fetchApi(url, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
       const result = response.status === 204 ? null : await response.json();
       if (!response.ok) throw new Error(result?.error || "عملیات انجام نشد.");
       setMessage("عملیات با موفقیت انجام شد."); await load(); if (tab === "reports" && (reportMainTab === "actions" || reportMainTab === "resolution" || reportMainTab === "special")) { submissionsFetchStarted.current = false; setSubmissionsLoaded(false); setReportsRetryCount(count => count + 1); } else if (tab === "reports" && reportMainTab === "overview") { summaryFetchStarted.current = false; setReportsLoaded(false); setReportsRetryCount(count => count + 1); } return true;
@@ -1024,7 +1057,7 @@ export default function App() {
       const registration = await navigator.serviceWorker.register("/service-worker.js", { scope: "/" });
       let subscription = await registration.pushManager.getSubscription();
       if (subscription && pushEnabled) {
-        const response = await fetch("/api/push/subscriptions?endpoint=" + encodeURIComponent(subscription.endpoint), { method: "DELETE", credentials: "include" });
+        const response = await fetchApi("/api/push/subscriptions?endpoint=" + encodeURIComponent(subscription.endpoint), { method: "DELETE", credentials: "include" });
         if (!response.ok) throw new Error("لغو اشتراک اعلان مرورگر انجام نشد.");
         await subscription.unsubscribe();
         setPushEnabled(false);
@@ -1033,7 +1066,7 @@ export default function App() {
       }
       const permission = Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
       if (permission !== "granted") throw new Error("مجوز اعلان مرورگر داده نشد.");
-      const keyResponse = await fetch("/api/push/public-key", { credentials: "include" });
+      const keyResponse = await fetchApi("/api/push/public-key", { credentials: "include" });
       const keyResult = await keyResponse.json();
       if (!keyResponse.ok || !keyResult.publicKey) throw new Error(keyResult.detail || keyResult.error || "کلید عمومی Push روی سرور تنظیم نشده است.");
       const base64 = String(keyResult.publicKey).replace(/-/g, "+").replace(/_/g, "/");
@@ -1042,7 +1075,7 @@ export default function App() {
       const applicationServerKey = new Uint8Array(binary.length);
       for (let index = 0; index < binary.length; index++) applicationServerKey[index] = binary.charCodeAt(index);
       subscription = subscription || await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey });
-      const response = await fetch("/api/push/subscriptions", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(subscription) });
+      const response = await fetchApi("/api/push/subscriptions", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(subscription) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "ذخیره اشتراک اعلان مرورگر انجام نشد.");
       setPushEnabled(true);
@@ -1097,16 +1130,16 @@ export default function App() {
     const existingId=editingResolutionId;
     const url=existingId?"/api/resolutions/"+existingId:"/api/resolutions";
     try {
-      const response=await fetch(url,{method:existingId?"PUT":"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({...form,status:"before",cancellationReason:"",meetingId:form.isSpecialTracking?null:Number(form.meetingId),isSpecialTracking:form.isSpecialTracking,meetingDate:form.meetingDate,groupId:form.groupIds.length?Number(form.groupIds[0]):null,groupIds:[...form.groupIds,...form.unitIds].map(Number),people:form.people,publishToAll:form.publishToAll,dueDate:form.dueDate||null,dueDateJalali:form.dueDateJalali,startDate:form.startDate||null,startDateJalali:form.startDateJalali,requiresPeriodicReport:form.requiresPeriodicReport,reportFrequency:form.reportFrequency})});
+      const response=await fetchApi(url,{method:existingId?"PUT":"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({...form,status:"before",cancellationReason:"",meetingId:form.isSpecialTracking?null:Number(form.meetingId),isSpecialTracking:form.isSpecialTracking,meetingDate:form.meetingDate,groupId:form.groupIds.length?Number(form.groupIds[0]):null,groupIds:[...form.groupIds,...form.unitIds].map(Number),people:form.people,publishToAll:form.publishToAll,dueDate:form.dueDate||null,dueDateJalali:form.dueDateJalali,startDate:form.startDate||null,startDateJalali:form.startDateJalali,requiresPeriodicReport:form.requiresPeriodicReport,reportFrequency:form.reportFrequency})});
       const result=response.status===204?null:await response.json();
       if(!response.ok)throw new Error(result?.error||"ذخیره مصوبه انجام نشد.");
       const resolutionId=existingId??result?.id;
       if(!resolutionId)throw new Error("مصوبه ذخیره شد، اما شناسه آن دریافت نشد.");
       setEditingResolutionId(resolutionId);
-      for(const file of resolutionFiles){const data=new FormData();data.append("file",file);const attached=await fetch(`/api/resolutions/${resolutionId}/attachments`,{method:"POST",credentials:"include",body:data});const attachmentResult=attached.status===204?null:await attached.json();if(!attached.ok)throw new Error(attachmentResult?.error||"بارگذاری یکی از پیوست‌ها انجام نشد.");}
-      if(resolutionEventDraft.trim()){const eventResponse=await fetch(`/api/resolutions/${resolutionId}/events`,{method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({text:resolutionEventDraft.trim(),nationalId:viewerId,userName:authUser?.displayName||""})});const eventResult=await eventResponse.json();if(!eventResponse.ok)throw new Error(eventResult?.error||"ثبت رویداد انجام نشد.");}
+      for(const file of resolutionFiles){const data=new FormData();data.append("file",file);const attached=await fetchApi(`/api/resolutions/${resolutionId}/attachments`,{method:"POST",credentials:"include",body:data});const attachmentResult=attached.status===204?null:await attached.json();if(!attached.ok)throw new Error(attachmentResult?.error||"بارگذاری یکی از پیوست‌ها انجام نشد.");}
+      if(resolutionEventDraft.trim()){const eventResponse=await fetchApi(`/api/resolutions/${resolutionId}/events`,{method:"POST",credentials:"include",headers:{"Content-Type":"application/json"},body:JSON.stringify({text:resolutionEventDraft.trim(),nationalId:viewerId,userName:authUser?.displayName||""})});const eventResult=await eventResponse.json();if(!eventResponse.ok)throw new Error(eventResult?.error||"ثبت رویداد انجام نشد.");}
       setModalOpen(false);setEditingResolutionId(null);setResolutionFiles([]);setEditingResolutionHashes([]);setResolutionEventDraft("");setMessage("مصوبه و موارد پیوست‌شده ذخیره شد.");
-      const listResponse=await fetch("/api/resolutions",{credentials:"include",cache:"no-store"});if(listResponse.ok){const fresh=asArray<Resolution>(await listResponse.json());setResolutions(fresh);setDashboard(current=>current?{...current,resolutions:fresh}:current);}
+      const listResponse=await fetchApi("/api/resolutions",{credentials:"include",cache:"no-store"});if(listResponse.ok){const fresh=asArray<Resolution>(await listResponse.json());setResolutions(fresh);setDashboard(current=>current?{...current,resolutions:fresh}:current);}
     } catch(cause) { const text=cause instanceof Error?cause.message:"ذخیره مصوبه انجام نشد.";setResolutionFormError(text);setMessage(text); }
     finally { setBusy(false); }
   }
@@ -1132,7 +1165,7 @@ export default function App() {
       if (baleMessageQuery.trim()) params.set("q", baleMessageQuery.trim());
       if (baleMessageFrom) params.set("from", baleMessageFrom);
       if (baleMessageTo) params.set("to", baleMessageTo);
-      const response = await fetch(`/api/reports/bale-messages?${params.toString()}`, { credentials: "include" });
+      const response = await fetchApi(`/api/reports/bale-messages?${params.toString()}`, { credentials: "include" });
       const result = await response.json();
       if (!response.ok) throw new Error(result?.error || "گزارش ارسال‌های بله دریافت نشد.");
       const rows = [["نام گیرنده","موبایل","وضعیت ارسال","تعداد تلاش","زمان ثبت","زمان ارسال","متن پیام","آخرین خطا"], ...(result.items ?? []).map((item: BaleMessageReportItem) => [item.displayName,item.mobile,baleMessageStatusLabel(item.status),item.attempts,formatDateTime(item.createdAt),item.sentAt?formatDateTime(item.sentAt):"",item.text,item.lastError])];
@@ -1189,7 +1222,7 @@ export default function App() {
     setGroupDeleteError("");
     setBusy(true);
     try {
-      const response = await fetch(`/api/groups/${group.id}`, { method: "DELETE" });
+      const response = await fetchApi(`/api/groups/${group.id}`, { method: "DELETE" });
       const result = response.status === 204 ? null : await response.json();
       if (!response.ok) {
         const references = Array.isArray(result?.resolutions) ? result.resolutions as { id: number; number: string; text: string; meetingDate: string; meetingDateJalali?: string; isArchived: boolean; matchingGroupNames: string[]; groupNames: string[]; legacyReference: boolean; legacyGroupName: string }[] : [];
@@ -1209,7 +1242,7 @@ export default function App() {
     if (!isAdmin || nationalIds.length === 0) return [];
     setBusy(true); setMessage("");
     try {
-      const response = await fetch(`/api/resolutions/${resolutionId}/warnings`, {
+      const response = await fetchApi(`/api/resolutions/${resolutionId}/warnings`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ nationalIds })
@@ -1233,7 +1266,7 @@ export default function App() {
     if (person.delayed === 0 && person.pending === 0) return;
     setBusy(true); setMessage("");
     try {
-      const response = await fetch(`/api/reports/warnings/${encodeURIComponent(person.nationalId)}`, { method: "POST" });
+      const response = await fetchApi(`/api/reports/warnings/${encodeURIComponent(person.nationalId)}`, { method: "POST" });
       const result = await response.json();
       if (!response.ok) throw new Error(result?.error || "ارسال هشدار انجام نشد.");
       setMessage(result.queued ? `اعلان برای ${person.displayName} در سامانه ثبت و در صف ارسال بله قرار گرفت.` : result.reason || "اعلان در سامانه ثبت شد.");
@@ -1251,7 +1284,7 @@ export default function App() {
     if (term.length < 2) { setMemberMatches([]); setMemberSearchMessage("برای جستجو حداقل ۲ حرف یا رقم وارد کنید."); return; }
     setMemberSearching(true);
     try {
-      const response = await fetch(`/api/users/search?q=${encodeURIComponent(term)}`);
+      const response = await fetchApi(`/api/users/search?q=${encodeURIComponent(term)}`);
       if (!response.ok) throw new Error("جستجوی افراد از سرور ناموفق بود.");
       const people: DirectoryUser[] = await response.json();
       if (sequence !== memberSearchSequence.current) return;
