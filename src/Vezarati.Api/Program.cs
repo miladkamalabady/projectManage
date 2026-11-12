@@ -1344,8 +1344,7 @@ app.MapGet("/api/reports/submissions", async (AppDb db) =>
     var reports = (await db.ResolutionReports.Include(report => report.Resolution).ToListAsync())
         .OrderByDescending(report => report.SubmittedAt)
         .ToList();
-    var directory = await db.Users.AsNoTracking().ToDictionaryAsync(person => person.NationalId, person => (person.DisplayName, person.Title));
-    var positions = await db.Users.AsNoTracking().ToDictionaryAsync(user => user.NationalId, user => user.OrgPositionDesc);
+    var directory = await db.Users.AsNoTracking().ToDictionaryAsync(person => person.NationalId, person => (person.DisplayName, person.Title, person.OrgPositionDesc));
     var reportIds = reports.Select(report => report.Id).ToList();
     var attachments = await db.Attachments.AsNoTracking()
         .Where(file => file.ResolutionReportId.HasValue && reportIds.Contains(file.ResolutionReportId.Value))
@@ -1370,8 +1369,10 @@ app.MapGet("/api/reports/submissions", async (AppDb db) =>
         ResolutionNumber = report.Resolution?.Number ?? "",
         ResolutionText = report.Resolution?.Text ?? "",
         report.NationalId,
-        UserName = string.IsNullOrWhiteSpace(report.UserName) ? directory.GetValueOrDefault(report.NationalId, (DisplayName: report.NationalId, Title: "")).DisplayName : report.UserName,
-        UserTitle = !string.IsNullOrWhiteSpace(positions.GetValueOrDefault(report.NationalId)) ? positions.GetValueOrDefault(report.NationalId) : directory.GetValueOrDefault(report.NationalId, (DisplayName: "", Title: "")).Title,
+        UserName = string.IsNullOrWhiteSpace(report.UserName) ? directory.GetValueOrDefault(report.NationalId, (DisplayName: report.NationalId, Title: "", OrgPositionDesc: "")).DisplayName : report.UserName,
+        UserTitle = !string.IsNullOrWhiteSpace(directory.GetValueOrDefault(report.NationalId, (DisplayName: "", Title: "", OrgPositionDesc: "")).Title)
+            ? directory.GetValueOrDefault(report.NationalId, (DisplayName: "", Title: "", OrgPositionDesc: "")).Title
+            : directory.GetValueOrDefault(report.NationalId, (DisplayName: "", Title: "", OrgPositionDesc: "")).OrgPositionDesc,
         report.Text,
         report.ReportType,
         report.PeriodKey,
