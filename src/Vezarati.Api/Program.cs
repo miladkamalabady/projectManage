@@ -1344,7 +1344,11 @@ app.MapGet("/api/reports/submissions", async (AppDb db) =>
     var reports = (await db.ResolutionReports.Include(report => report.Resolution).ToListAsync())
         .OrderByDescending(report => report.SubmittedAt)
         .ToList();
-    var directory = await db.Users.AsNoTracking().ToDictionaryAsync(person => person.NationalId, person => (person.DisplayName, person.Title, person.OrgPositionDesc));
+    var directory = (await db.Users.AsNoTracking()
+        .Select(person => new { person.NationalId, person.DisplayName, person.Title })
+        .ToListAsync())
+        .GroupBy(person => person.NationalId.Trim(), StringComparer.OrdinalIgnoreCase)
+        .ToDictionary(group => group.Key, group => (group.First().DisplayName, group.First().Title), StringComparer.OrdinalIgnoreCase);
     var reportIds = reports.Select(report => report.Id).ToList();
     var attachments = await db.Attachments.AsNoTracking()
         .Where(file => file.ResolutionReportId.HasValue && reportIds.Contains(file.ResolutionReportId.Value))
@@ -1369,10 +1373,8 @@ app.MapGet("/api/reports/submissions", async (AppDb db) =>
         ResolutionNumber = report.Resolution?.Number ?? "",
         ResolutionText = report.Resolution?.Text ?? "",
         report.NationalId,
-        UserName = string.IsNullOrWhiteSpace(report.UserName) ? directory.GetValueOrDefault(report.NationalId, (DisplayName: report.NationalId, Title: "", OrgPositionDesc: "")).DisplayName : report.UserName,
-        UserTitle = !string.IsNullOrWhiteSpace(directory.GetValueOrDefault(report.NationalId, (DisplayName: "", Title: "", OrgPositionDesc: "")).Title)
-            ? directory.GetValueOrDefault(report.NationalId, (DisplayName: "", Title: "", OrgPositionDesc: "")).Title
-            : directory.GetValueOrDefault(report.NationalId, (DisplayName: "", Title: "", OrgPositionDesc: "")).OrgPositionDesc,
+        UserName = string.IsNullOrWhiteSpace(report.UserName) ? directory.GetValueOrDefault(report.NationalId.Trim(), (DisplayName: report.NationalId, Title: "")).DisplayName : report.UserName,
+        UserTitle = directory.GetValueOrDefault(report.NationalId.Trim(), (DisplayName: "", Title: "")).Title,
         report.Text,
         report.ReportType,
         report.PeriodKey,
