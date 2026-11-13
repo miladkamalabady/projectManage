@@ -131,7 +131,7 @@ app.MapPost("/api/jobs/daily-overdue-bale", async (HttpContext context, JsonElem
         .ToHashSet(StringComparer.Ordinal);
 
     var resolutions = await db.Resolutions.AsNoTracking()
-        .Where(item => !item.IsArchived && item.Status is not ("cancelled" or "completed"))
+        .Where(item => !item.IsArchived && item.Status != "cancelled" && item.Status != "completed")
         .Include(item => item.Assignments).Include(item => item.Progress)
         .Include(item => item.Group).ThenInclude(group => group!.Members)
         .Include(item => item.GroupAssignments).ThenInclude(assignment => assignment.Group).ThenInclude(group => group!.Members)
@@ -2158,7 +2158,7 @@ app.MapPost("/api/reports/warnings/{nationalId}", async (string nationalId, AppD
 {
     var normalizedId = NormalizeDigits(nationalId.Trim());
     var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(3.5));
-    var records = await db.Resolutions.Where(item => !item.IsArchived && item.Status is not ("cancelled" or "completed"))
+    var records = await db.Resolutions.Where(item => !item.IsArchived && item.Status != "cancelled" && item.Status != "completed")
         .Include(item => item.Assignments).Include(item => item.Progress).Include(item => item.Group).ThenInclude(group => group!.Members)
         .Include(item => item.GroupAssignments).ThenInclude(assignment => assignment.Group).ThenInclude(group => group!.Members).ToListAsync(context.RequestAborted);
     var delayed = records.Where(item =>
