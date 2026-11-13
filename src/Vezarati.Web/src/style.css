@@ -947,3 +947,6 @@
   body.print-submitted-reports .submitted-reports-print-sheet>table tr{break-inside:avoid;page-break-inside:avoid}
   body.print-submitted-reports .submitted-reports-panel .section-head,body.print-submitted-reports .submitted-reports-panel .report-submission-search,body.print-submitted-reports .submitted-reports-panel>.table-wrap{display:none!important}
 }
+
+.province-select-field{padding:10px 12px;border:1px solid #e7c761;border-radius:10px;background:#fff9e7;color:#77580f;font-weight:800}
+.province-select-field select{width:100%;min-height:38px;padding:7px 10px;border:1px solid #dec36a;border-radius:8px;background:#fff;color:#34484f}
