@@ -25,13 +25,47 @@ public sealed class Resolution
     public string CancellationReason { get; set; } = "";
     public string Number { get; set; } = "";
     public string Text { get; set; } = "";
-    public string Notes { get; set; } = "";
+    private const string ProvinceMarker = "\u001Fprovince:";
+    private string _notes = "";
+    public string Notes
+    {
+        get
+        {
+            var markerIndex = _notes.LastIndexOf(ProvinceMarker, StringComparison.Ordinal);
+            return markerIndex < 0 ? _notes : _notes[..markerIndex].TrimEnd('\r', '\n');
+        }
+        set
+        {
+            var province = ReadProvince(_notes);
+            _notes = ComposeNotes(value, province);
+        }
+    }
+    [NotMapped]
+    public string Province
+    {
+        get => ReadProvince(_notes);
+        set => _notes = ComposeNotes(Notes, value);
+    }
+    private static string ReadProvince(string? rawNotes)
+    {
+        if (string.IsNullOrEmpty(rawNotes)) return "";
+        var markerIndex = rawNotes.LastIndexOf(ProvinceMarker, StringComparison.Ordinal);
+        return markerIndex < 0 ? "" : Uri.UnescapeDataString(rawNotes[(markerIndex + ProvinceMarker.Length)..]);
+    }
+    private static string ComposeNotes(string? notes, string? province)
+    {
+        var markerIndex = notes?.LastIndexOf(ProvinceMarker, StringComparison.Ordinal) ?? -1;
+        var cleanNotes = markerIndex < 0 ? (notes ?? "") : notes![..markerIndex].TrimEnd('\r', '\n');
+        if (string.IsNullOrWhiteSpace(province)) return cleanNotes;
+        var marker = ProvinceMarker + Uri.EscapeDataString(province.Trim());
+        return cleanNotes.Length == 0 ? marker : cleanNotes + "\n" + marker;
+    }
     public string Status { get; set; } = "before";
     public bool PublishToAll { get; set; }
     public bool IsConfidential { get; set; }
     public bool IsSpecialTracking { get; set; }
     public string SpecialTrackingType { get; set; } = "minister";
-    public string Province { get; set; } = "";
+
     public bool IsArchived { get; set; }
     public string? SourceKey { get; set; }
     public int? GroupId { get; set; }
@@ -420,6 +454,7 @@ public sealed class AppDb(DbContextOptions<AppDb> options, ILogger<AppDb> logger
         model.Entity<Resolution>().HasIndex(x => x.SourceKey).IsUnique();
         model.Entity<Resolution>().Ignore(x => x.MeetingAttachments);
         model.Entity<Resolution>().Property(x => x.SpecialTrackingType).HasMaxLength(32);
+        model.Entity<Resolution>().Property(x => x.Notes).HasField("_notes").UsePropertyAccessMode(PropertyAccessMode.Field);
         model.Entity<Meeting>().ToTable("Meetings");
         model.Entity<MeetingAttendee>().ToTable("MeetingAttendees");
         model.Entity<MeetingAttachment>().ToTable("MeetingAttachments");
@@ -662,7 +697,7 @@ public static class SchemaCompatibility
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.Resolutions', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.Resolutions', N'IsConfidential') IS NULL ALTER TABLE dbo.Resolutions ADD IsConfidential bit NOT NULL CONSTRAINT DF_Resolutions_IsConfidential DEFAULT 0;");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.Resolutions', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.Resolutions', N'SpecialTrackingType') IS NULL EXEC(N'ALTER TABLE dbo.Resolutions ADD SpecialTrackingType nvarchar(32) NOT NULL CONSTRAINT DF_Resolutions_SpecialTrackingType DEFAULT N''minister'';');");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.Resolutions', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.Resolutions', N'IsSpecialTracking') IS NULL EXEC(N'ALTER TABLE dbo.Resolutions ADD IsSpecialTracking bit NOT NULL CONSTRAINT DF_Resolutions_IsSpecialTracking DEFAULT 0;');");
-            await db.Database.ExecuteSqlRawAsync("DECLARE @resolutionsSchema sysname = (SELECT TOP(1) s.name FROM sys.tables t INNER JOIN sys.schemas s ON t.schema_id = s.schema_id WHERE t.name = N'Resolutions' ORDER BY CASE WHEN s.name = N'dbo' THEN 0 ELSE 1 END); IF @resolutionsSchema IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sys.columns c INNER JOIN sys.tables t ON c.object_id = t.object_id WHERE t.name = N'Resolutions' AND t.schema_id = SCHEMA_ID(@resolutionsSchema) AND c.name = N'Province') BEGIN DECLARE @addProvinceSql nvarchar(max) = N'ALTER TABLE ' + QUOTENAME(@resolutionsSchema) + N'.[Resolutions] ADD [Province] nvarchar(200) NOT NULL CONSTRAINT [DF_Resolutions_Province] DEFAULT (N' + NCHAR(39) + NCHAR(39) + N');'; EXEC sys.sp_executesql @addProvinceSql; END;");
+
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.Meetings', N'U') IS NULL CREATE TABLE dbo.Meetings (Id int IDENTITY(1,1) NOT NULL PRIMARY KEY, Date date NOT NULL, DateJalali nvarchar(max) NOT NULL, Title nvarchar(300) NOT NULL, GuestText nvarchar(max) NOT NULL, CreatedAt datetimeoffset NOT NULL);");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.MeetingAttachments', N'U') IS NULL CREATE TABLE dbo.MeetingAttachments (Id int IDENTITY(1,1) NOT NULL PRIMARY KEY, MeetingId int NOT NULL, OriginalName nvarchar(512) NOT NULL, StoredName nvarchar(128) NOT NULL, ContentType nvarchar(256) NOT NULL, Size bigint NOT NULL, ContentHash nvarchar(64) NOT NULL, UploadedBy nvarchar(11) NOT NULL, UploadedAt datetimeoffset NOT NULL, CONSTRAINT FK_MeetingAttachments_Meetings_MeetingId FOREIGN KEY (MeetingId) REFERENCES dbo.Meetings(Id) ON DELETE CASCADE);");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.MeetingAttendees', N'U') IS NULL CREATE TABLE dbo.MeetingAttendees (Id int IDENTITY(1,1) NOT NULL PRIMARY KEY, MeetingId int NOT NULL, NationalId nvarchar(11) NOT NULL, DisplayName nvarchar(300) NOT NULL, Title nvarchar(max) NOT NULL, IsPresent bit NOT NULL, AbsenceReason nvarchar(200) NOT NULL, CONSTRAINT FK_MeetingAttendees_Meetings_MeetingId FOREIGN KEY (MeetingId) REFERENCES dbo.Meetings(Id) ON DELETE CASCADE);");
@@ -688,7 +723,7 @@ public static class SchemaCompatibility
         var columns = await ReadColumns(db, "Resolutions");
         if (columns.Count > 0 && !columns.Contains("IsSpecialTracking")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN IsSpecialTracking INTEGER NOT NULL DEFAULT 0;");
         if (columns.Count > 0 && !columns.Contains("SpecialTrackingType")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN SpecialTrackingType TEXT NOT NULL DEFAULT 'minister';");
-        if (columns.Count > 0 && !columns.Contains("Province")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN Province TEXT NOT NULL DEFAULT '';");
+
 
         if (columns.Count > 0 && !columns.Contains("MeetingDateJalali")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN MeetingDateJalali TEXT NOT NULL DEFAULT '';");
         if (columns.Count > 0 && !columns.Contains("SourceKey")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN SourceKey TEXT NULL;");
