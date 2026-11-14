@@ -1943,6 +1943,9 @@ export default function App() {
       </section>}
       {(error || message) && <div className="api-toast-stack" aria-live="polite">{error && <div className="api-toast api-toast-error" role="alert"><span>{error}</span><div><button type="button" className="secondary" onClick={() => void load()}>تلاش دوباره</button><button type="button" className="api-toast-close" aria-label="بستن پیام" onClick={() => setError("")}>×</button></div></div>}{message && <div className="api-toast api-toast-message" role="status"><span>{message}</span><button type="button" className="api-toast-close" aria-label="بستن پیام" onClick={() => setMessage("")}>×</button></div>}</div>}
       <section className="metrics"><Metric icon={<ClipboardList />} label="کل مصوبات" value={isAdmin ? reports?.total ?? resolutions.length : mine.length} color="blue" active={wallStatusFilter === "all" && tab === "wall"} onClick={() => { setTab("wall"); setWallStatusFilter("all"); }} /><Metric icon={<CheckCheck />} label="اجراشده" value={completed} color="green" active={tab === "wall" && wallStatusFilter === "completed"} onClick={() => { setTab("wall"); setWallStatusFilter("completed"); }} /><Metric icon={<CircleAlert />} label="نیازمند پیگیری" value={pending} color="amber" active={tab === "wall" && wallStatusFilter === "pending"} onClick={() => { setTab("wall"); setWallStatusFilter("pending"); }} />{isAdmin && <Metric icon={<CalendarDays />} label="انجام نشده" value={delayed} color="red" active={tab === "wall" && wallStatusFilter === "delayed"} onClick={() => { setTab("wall"); setWallStatusFilter("delayed"); }} />}</section>
+      {tab === "wall" && isAdmin && <TaskCompletionReport
+        groups={groups} resolutions={resolutions} users={users}
+      />}
       {tab === "wall" && !isAdmin && <section className="panel personal-completion-report"><div className="section-head"><div><span className="report-kicker">گزارش فردی</span><h2>درصد انجام مصوبه‌های شما</h2><p>محاسبه بر اساس مصوبه‌های فعالِ ارجاع‌شده به شما</p></div><span className="counter">{mine.length} مصوبه</span></div><div className="personal-report-stats"><div><span>انجام‌شده</span><b>{personalCompletionPercent}٪</b><small>{personalCounts.completed} از {mine.length}</small></div><div><span>انجام‌نشده</span><b>{personalRemainingPercent}٪</b><small>{Math.max(0, mine.length - personalCounts.completed)} از {mine.length}</small></div></div><div className="personal-report-track" role="progressbar" aria-label="درصد انجام مصوبه‌های شما" aria-valuemin={0} aria-valuemax={100} aria-valuenow={personalCompletionPercent}><span style={{ width: `${personalCompletionPercent}%` }} /></div></section>}
 
       {tab === "wall" && wallStatusFilter === "all" && <section className="home-focus">
@@ -2066,6 +2069,125 @@ export default function App() {
 }
 
 function Metric({ icon, label, value, color, active, onClick }: { icon: React.ReactNode; label: string; value: number; color: string; active: boolean; onClick: () => void }) { return <button type="button" className={`metric ${active ? "active" : ""}`} onClick={onClick}><div className={`metric-icon ${color}`}>{icon}</div><div><span>{label}</span><b>{value}</b></div></button>; }
+function TaskCompletionReport({ groups, resolutions, users }: {
+  groups: Group[]; resolutions: Resolution[]; users: DirectoryUser[];
+}) {
+  const [view, setView] = useState<"units" | "directors">("units");
+  const rows = useMemo(() => {
+    const directors = new Map<string, Member>();
+    const units = groups.filter(group => !isResolutionGroup(group.name, group.category) && !isIndividualRecipientGroup(group.name));
+    const membersByGroup = new Map(groups.map(group => [group.id, group.members.map(member => member.nationalId)]));
+    const unitIdsByPerson = new Map<string, Set<number>>();
+    const unitIdsByName = new Map<string, number[]>();
+
+    for (const group of groups) {
+      if (normalizeGroupName(group.name) === normalizeGroupName("مدیران کل")) {
+        for (const member of group.members) directors.set(member.nationalId, member);
+      }
+    }
+    for (const unit of units) {
+      const name = normalizeSearchText(unit.name);
+      unitIdsByName.set(name, [...(unitIdsByName.get(name) ?? []), unit.id]);
+      for (const member of unit.members) {
+        const ids = unitIdsByPerson.get(member.nationalId) ?? new Set<number>();
+        ids.add(unit.id);
+        unitIdsByPerson.set(member.nationalId, ids);
+      }
+    }
+    for (const user of users) {
+      const ids = unitIdsByPerson.get(user.nationalId) ?? new Set<number>();
+      for (const id of unitIdsByName.get(normalizeSearchText(user.organizationUnit)) ?? []) ids.add(id);
+      if (ids.size) unitIdsByPerson.set(user.nationalId, ids);
+    }
+
+    const unitRows = new Map(units.map(unit => [unit.id, {
+      id: unit.id, label: unit.name, detail: "", completed: 0, remaining: 0,
+    }]));
+    const usersById = new Map(users.map(user => [user.nationalId, user]));
+    const directorRows = new Map(Array.from(directors, ([id, member]) => [id, {
+      id, label: usersById.get(id)?.displayName || member.displayName,
+      detail: usersById.get(id)?.title || member.title, completed: 0, remaining: 0,
+    }]));
+
+    for (const item of resolutions) {
+      if (item.isArchived || item.status === "cancelled") continue;
+      const groupIds = new Set(item.groupAssignments?.map(assignment => assignment.groupId));
+      if (item.groupId != null) groupIds.add(item.groupId);
+      const recipients = new Set((item.assignments ?? []).map(assignment => assignment.nationalId));
+      for (const id of groupIds) {
+        for (const personId of membersByGroup.get(id) ?? []) recipients.add(personId);
+      }
+      if (item.publishToAll) {
+        for (const id of usersById.keys()) recipients.add(id);
+        for (const id of directors.keys()) recipients.add(id);
+      }
+
+      const progress = new Map(item.progress?.map(entry => [entry.nationalId, entry.status]));
+      const unitCompletion = new Map<number, boolean>();
+      for (const personId of recipients) {
+        const done = (progress.get(personId) ?? item.status) === "completed";
+        const director = directorRows.get(personId);
+        if (director) director[done ? "completed" : "remaining"]++;
+        for (const unitId of unitIdsByPerson.get(personId) ?? []) {
+          unitCompletion.set(unitId, (unitCompletion.get(unitId) ?? true) && done);
+        }
+      }
+      for (const id of groupIds) {
+        if (unitRows.has(id) && !unitCompletion.has(id)) unitCompletion.set(id, item.status === "completed");
+      }
+      for (const [id, done] of unitCompletion) {
+        const unit = unitRows.get(id);
+        if (unit) unit[done ? "completed" : "remaining"]++;
+      }
+    }
+
+    const byRemaining = (left: { remaining: number; label: string }, right: { remaining: number; label: string }) =>
+      right.remaining - left.remaining || left.label.localeCompare(right.label, "fa");
+    return {
+      units: Array.from(unitRows.values()).sort(byRemaining),
+      directors: Array.from(directorRows.values()).sort(byRemaining),
+    };
+  }, [groups, resolutions, users]);
+
+  const visibleRows = rows[view];
+  const max = visibleRows.reduce((largest, row) => Math.max(largest, row.completed + row.remaining), 1);
+  const number = new Intl.NumberFormat("fa-IR");
+  return <section className="panel group-report-panel" aria-labelledby="wall-task-report-title"
+    style={{ margin: "0 0 15px" }}>
+    <div className="section-head">
+      <div>
+        <h2 id="wall-task-report-title">وضعیت انجام وظایف</h2>
+        <p>{view === "units"
+          ? "هر وظیفه در هر معاونت یا واحد یک بار شمرده می‌شود و با تکمیل کار همهٔ مسئولان آن واحد، انجام‌شده محسوب می‌شود."
+          : "وضعیت هر وظیفه بر اساس پیشرفت فردی اعضای گروه مدیران کل محاسبه می‌شود."}</p>
+      </div>
+      <select aria-label="تفکیک گزارش وظایف" value={view}
+        onChange={event => setView(event.target.value === "directors" ? "directors" : "units")}>
+        <option value="units">معاونت‌ها و واحدها</option>
+        <option value="directors">مدیران کل</option>
+      </select>
+    </div>
+    {visibleRows.length ? <>
+      <div className="chart-legend">
+        <span><i className="legend-completed" />انجام‌شده</span>
+        <span><i className="legend-pending" />مانده</span>
+      </div>
+      <div className="group-report-list" role="list" style={{ maxHeight: 320, overflowY: "auto" }}>
+        {visibleRows.map(row => <div key={row.id} role="listitem">
+          <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: "4px 14px", marginBottom: 5 }}>
+            <span><b>{row.label}</b>{row.detail && <small> · {row.detail}</small>}</span>
+            <small>{number.format(row.completed)} انجام‌شده · {number.format(row.remaining)} مانده</small>
+          </div>
+          <div className="chart-bar-track" style={{ flexDirection: "row" }} aria-hidden="true">
+            <span className="completed-segment" style={{ width: `${row.completed * 100 / max}%` }} />
+            <span className="pending-segment" style={{ width: `${row.remaining * 100 / max}%` }} />
+          </div>
+        </div>)}
+      </div>
+    </> : <p className="report-empty">{view === "units" ? "معاونت یا واحدی ثبت نشده است." : "عضوی در گروه مدیران کل ثبت نشده است."}</p>}
+  </section>;
+}
+
 function ResolutionCard({ item, groups, users, viewerId, isAdmin, busy, onStatus, onUpload, eventDraft, onEventChange, onEventSubmit, onApproveAttachment, reportDraft, onReportDraftChange, onReportSubmit, submittedFading, sentWarningIds, onSendWarning, periodicDraft, onPeriodicDraftChange, onPeriodicSubmit, anchorId, submittedReports = [], reportsLoading, reportsError }: { anchorId?: string; submittedReports?: ResolutionReport[]; reportsLoading: boolean; reportsError: string; item: Resolution; groups: Group[]; users: DirectoryUser[]; viewerId: string; isAdmin: boolean; busy: boolean; onStatus: (status: string, nationalId?: string) => void; onUpload: (file: File) => Promise<void>; eventDraft: string; onEventChange: (text: string) => void; onEventSubmit: () => void; onApproveAttachment: (attachmentId: number, approved: boolean) => void; reportDraft: string; onReportDraftChange: (text: string) => void; onReportSubmit: (files: File[]) => Promise<boolean>; submittedFading?: boolean; sentWarningIds: string[]; onSendWarning: (nationalIds: string[]) => Promise<string[]>; periodicDraft: string; onPeriodicDraftChange: (text: string) => void; onPeriodicSubmit: () => void }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [progressFilter, setProgressFilter] = useState<"pending" | "completed">("pending");
