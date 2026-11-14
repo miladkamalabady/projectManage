@@ -387,7 +387,7 @@ export default function App() {
   }
 
   async function saveMinisterDirectiveCategories() {
-    const categories = ministerDirectiveCategoriesDraft.split(/\\r?\n/).map(item => item.trim()).filter(Boolean);
+    const categories = ministerDirectiveCategoriesDraft.split(/\r?\n/).map(item => item.trim()).filter(Boolean);
     if (!categories.length) { setMessage("حداقل یک دسته‌بندی وارد کنید."); return; }
     try {
       const response = await fetchApi("/api/settings/minister-directive-categories", { method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ categories }) });
