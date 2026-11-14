@@ -1898,7 +1898,7 @@ app.MapGet("/api/settings/minister-directive-categories", async (HttpContext con
     const string key = "MinisterDirectiveCategories";
     var saved = await db.Settings.AsNoTracking().Where(setting => setting.Key == key).Select(setting => setting.Value).FirstOrDefaultAsync();
     var defaults = new[] { "دفتر مقام معظم رهبری", "دفتر ریاست جمهوری، نهاد، معاونان ریاست جمهوری", "وزارت خانه ها، سازمان ها، نهادهای دولتی", "نمایندگان مجلس", "قوه قضائیه، سازمان بازرسی", "مکاتبات داخلی وزارت خانه", "سایر مکاتبات" };
-    var categories = string.IsNullOrWhiteSpace(saved) ? defaults : JsonSerializer.Deserialize<List<string>>(saved) ?? defaults;
+    var categories = string.IsNullOrWhiteSpace(saved) ? defaults : JsonSerializer.Deserialize<List<string>>(saved) ?? defaults.ToList();
     return Results.Ok(categories);
 });
 app.MapPut("/api/settings/minister-directive-categories", async (MinisterDirectiveCategoriesRequest request, HttpContext context, AppDb db) =>
