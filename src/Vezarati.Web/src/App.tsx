@@ -285,7 +285,7 @@ export default function App() {
   const [specialReportProvinceFilter, setSpecialReportProvinceFilter] = useState("all");
   const [specialReportCategory, setSpecialReportCategory] = useState("all");
   const [ministerDirectiveCategories, setMinisterDirectiveCategories] = useState<string[]>(["دفتر مقام معظم رهبری", "دفتر ریاست جمهوری، نهاد، معاونان ریاست جمهوری", "وزارت خانه ها، سازمان ها، نهادهای دولتی", "نمایندگان مجلس", "قوه قضائیه، سازمان بازرسی", "مکاتبات داخلی وزارت خانه", "سایر مکاتبات"]);
-  const [ministerDirectiveCategoriesDraft, setMinisterDirectiveCategoriesDraft] = useState("دفتر مقام معظم رهبری\\nدفتر ریاست جمهوری، نهاد، معاونان ریاست جمهوری\\nوزارت خانه ها، سازمان ها، نهادهای دولتی\\nنمایندگان مجلس\\nقوه قضائیه، سازمان بازرسی\\nمکاتبات داخلی وزارت خانه\\nسایر مکاتبات");
+  const [ministerDirectiveCategoriesDraft, setMinisterDirectiveCategoriesDraft] = useState("دفتر مقام معظم رهبری\nدفتر ریاست جمهوری، نهاد، معاونان ریاست جمهوری\nوزارت خانه ها، سازمان ها، نهادهای دولتی\nنمایندگان مجلس\nقوه قضائیه، سازمان بازرسی\nمکاتبات داخلی وزارت خانه\nسایر مکاتبات");
   const [resolutionStatusFilter, setResolutionStatusFilter] = useState("all");
   const [reportQuery, setReportQuery] = useState("");
   const [peopleReportLoaded, setPeopleReportLoaded] = useState(false);
@@ -379,7 +379,7 @@ export default function App() {
       if (!response.ok) throw new Error(result?.detail || result?.title || "دریافت دسته‌بندی دستورات ناموفق بود.");
       if (Array.isArray(result) && result.length) {
         setMinisterDirectiveCategories(result);
-        setMinisterDirectiveCategoriesDraft(result.join("\\n"));
+        setMinisterDirectiveCategoriesDraft(result.join("\n"));
       }
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : "دریافت دسته‌بندی دستورات ناموفق بود.");
@@ -387,14 +387,14 @@ export default function App() {
   }
 
   async function saveMinisterDirectiveCategories() {
-    const categories = ministerDirectiveCategoriesDraft.split(/\\r?\\n/).map(item => item.trim()).filter(Boolean);
+    const categories = ministerDirectiveCategoriesDraft.split(/\\r?\n/).map(item => item.trim()).filter(Boolean);
     if (!categories.length) { setMessage("حداقل یک دسته‌بندی وارد کنید."); return; }
     try {
       const response = await fetchApi("/api/settings/minister-directive-categories", { method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ categories }) });
       const result = await response.json().catch(() => []);
       if (!response.ok) throw new Error(result?.detail || result?.title || result?.error || "ذخیره دسته‌بندی‌ها ناموفق بود.");
       setMinisterDirectiveCategories(Array.isArray(result) ? result : categories);
-      setMinisterDirectiveCategoriesDraft((Array.isArray(result) ? result : categories).join("\\n"));
+      setMinisterDirectiveCategoriesDraft((Array.isArray(result) ? result : categories).join("\n"));
       setMessage("دسته‌بندی‌های دستورات وزیر ذخیره شد.");
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : "ذخیره دسته‌بندی‌ها ناموفق بود.");
