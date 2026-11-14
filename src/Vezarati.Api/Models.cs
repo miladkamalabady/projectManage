@@ -11,6 +11,9 @@ public sealed class Resolution
 {
     public int Id { get; set; }
     public int? MeetingId { get; set; }
+    public int? ProvincialTripId { get; set; }
+    public bool IsCommitteeDraft { get; set; }
+    public string ProvincialPoleName { get; set; } = "";
     [JsonIgnore] public Meeting? Meeting { get; set; }
     [NotMapped] public string MeetingTitle { get; set; } = "";
     [NotMapped] public bool HasSubmittedReport { get; set; }
@@ -364,6 +367,9 @@ public sealed class AppSetting
 public sealed class AppDb(DbContextOptions<AppDb> options, ILogger<AppDb> logger) : DbContext(options)
 {
     public DbSet<Resolution> Resolutions => Set<Resolution>();
+    public DbSet<ProvincialPole> ProvincialPoles => Set<ProvincialPole>();
+    public DbSet<PoleProvince> PoleProvinces => Set<PoleProvince>();
+    public DbSet<ProvincialTrip> ProvincialTrips => Set<ProvincialTrip>();
     public DbSet<Meeting> Meetings => Set<Meeting>();
     public DbSet<MeetingAttendee> MeetingAttendees => Set<MeetingAttendee>();
     public DbSet<MeetingAttachment> MeetingAttachments => Set<MeetingAttachment>();
@@ -469,6 +475,18 @@ public sealed class AppDb(DbContextOptions<AppDb> options, ILogger<AppDb> logger
         model.Entity<Resolution>().Ignore(x => x.MeetingAttachments);
         model.Entity<Resolution>().Property(x => x.SpecialTrackingType).HasMaxLength(32);
         model.Entity<Resolution>().Property(x => x.Notes).HasField("_notes").UsePropertyAccessMode(PropertyAccessMode.Field);
+        model.Entity<ProvincialPole>().Property(item => item.Name).HasMaxLength(200);
+        model.Entity<ProvincialPole>().Property(item => item.ResponsibleId).HasMaxLength(11);
+        model.Entity<ProvincialPole>().Property(item => item.TripType).HasMaxLength(16);
+        model.Entity<ProvincialPole>().Property(item => item.Representative).HasMaxLength(300);
+        model.Entity<PoleProvince>().HasKey(item => item.Province);
+        model.Entity<PoleProvince>().Property(item => item.Province).HasMaxLength(80);
+        model.Entity<ProvincialTrip>().Property(item => item.Title).HasMaxLength(300);
+        model.Entity<ProvincialTrip>().Property(item => item.Province).HasMaxLength(80);
+        model.Entity<ProvincialTrip>().Property(item => item.TripType).HasMaxLength(16);
+        model.Entity<ProvincialTrip>().Property(item => item.Representative).HasMaxLength(300);
+        model.Entity<Resolution>().Property(item => item.ProvincialPoleName).HasMaxLength(200);
+        model.Entity<Resolution>().HasOne<ProvincialTrip>().WithMany().HasForeignKey(item => item.ProvincialTripId).OnDelete(DeleteBehavior.Restrict);
         model.Entity<Meeting>().ToTable("Meetings");
         model.Entity<MeetingAttendee>().ToTable("MeetingAttendees");
         model.Entity<MeetingAttachment>().ToTable("MeetingAttachments");
@@ -712,6 +730,23 @@ public static class SchemaCompatibility
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.Resolutions', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.Resolutions', N'SpecialTrackingType') IS NULL EXEC(N'ALTER TABLE dbo.Resolutions ADD SpecialTrackingType nvarchar(32) NOT NULL CONSTRAINT DF_Resolutions_SpecialTrackingType DEFAULT N''minister'';');");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.Resolutions', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.Resolutions', N'IsSpecialTracking') IS NULL EXEC(N'ALTER TABLE dbo.Resolutions ADD IsSpecialTracking bit NOT NULL CONSTRAINT DF_Resolutions_IsSpecialTracking DEFAULT 0;');");
 
+            await db.Database.ExecuteSqlRawAsync("""
+                IF OBJECT_ID(N'dbo.ProvincialPoles', N'U') IS NULL
+                    CREATE TABLE dbo.ProvincialPoles (Id int IDENTITY(1,1) PRIMARY KEY, Name nvarchar(200) NOT NULL, ResponsibleId nvarchar(11) NOT NULL, TripType nvarchar(16) NOT NULL, MinisterPresent bit NULL, Representative nvarchar(300) NOT NULL);
+                IF OBJECT_ID(N'dbo.PoleProvinces', N'U') IS NULL
+                    CREATE TABLE dbo.PoleProvinces (Province nvarchar(80) PRIMARY KEY, ProvincialPoleId int NOT NULL REFERENCES dbo.ProvincialPoles(Id) ON DELETE CASCADE);
+                IF OBJECT_ID(N'dbo.ProvincialTrips', N'U') IS NULL
+                    CREATE TABLE dbo.ProvincialTrips (Id int IDENTITY(1,1) PRIMARY KEY, Title nvarchar(300) NOT NULL, Province nvarchar(80) NOT NULL, StartDate date NOT NULL, EndDate date NOT NULL, TripType nvarchar(16) NOT NULL, MinisterPresent bit NULL, Representative nvarchar(300) NOT NULL);
+                IF COL_LENGTH(N'dbo.Resolutions', N'ProvincialTripId') IS NULL
+                    ALTER TABLE dbo.Resolutions ADD ProvincialTripId int NULL CONSTRAINT FK_Resolutions_ProvincialTrips_ProvincialTripId REFERENCES dbo.ProvincialTrips(Id);
+                IF COL_LENGTH(N'dbo.Resolutions', N'IsCommitteeDraft') IS NULL
+                    ALTER TABLE dbo.Resolutions ADD IsCommitteeDraft bit NOT NULL CONSTRAINT DF_Resolutions_IsCommitteeDraft DEFAULT 0;
+                IF COL_LENGTH(N'dbo.Resolutions', N'ProvincialPoleName') IS NULL
+                    ALTER TABLE dbo.Resolutions ADD ProvincialPoleName nvarchar(200) NOT NULL CONSTRAINT DF_Resolutions_ProvincialPoleName DEFAULT N'';
+                IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.Resolutions') AND name = N'IX_Resolutions_ProvincialTripId')
+                    EXEC(N'CREATE INDEX IX_Resolutions_ProvincialTripId ON dbo.Resolutions(ProvincialTripId)');
+                """);
+
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.Meetings', N'U') IS NULL CREATE TABLE dbo.Meetings (Id int IDENTITY(1,1) NOT NULL PRIMARY KEY, Date date NOT NULL, DateJalali nvarchar(max) NOT NULL, Title nvarchar(300) NOT NULL, GuestText nvarchar(max) NOT NULL, CreatedAt datetimeoffset NOT NULL);");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.MeetingAttachments', N'U') IS NULL CREATE TABLE dbo.MeetingAttachments (Id int IDENTITY(1,1) NOT NULL PRIMARY KEY, MeetingId int NOT NULL, OriginalName nvarchar(512) NOT NULL, StoredName nvarchar(128) NOT NULL, ContentType nvarchar(256) NOT NULL, Size bigint NOT NULL, ContentHash nvarchar(64) NOT NULL, UploadedBy nvarchar(11) NOT NULL, UploadedAt datetimeoffset NOT NULL, CONSTRAINT FK_MeetingAttachments_Meetings_MeetingId FOREIGN KEY (MeetingId) REFERENCES dbo.Meetings(Id) ON DELETE CASCADE);");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.MeetingAttendees', N'U') IS NULL CREATE TABLE dbo.MeetingAttendees (Id int IDENTITY(1,1) NOT NULL PRIMARY KEY, MeetingId int NOT NULL, NationalId nvarchar(11) NOT NULL, DisplayName nvarchar(300) NOT NULL, Title nvarchar(max) NOT NULL, IsPresent bit NOT NULL, AbsenceReason nvarchar(200) NOT NULL, CONSTRAINT FK_MeetingAttendees_Meetings_MeetingId FOREIGN KEY (MeetingId) REFERENCES dbo.Meetings(Id) ON DELETE CASCADE);");
@@ -942,6 +977,12 @@ public static class BaleMessageText
 
     public static string ForAssignment(Resolution item, string recipientName, string? recipientTitle = null)
     {
+        if (item.IsCommitteeDraft)
+            return WithResolutionTag("ارجاع پیش‌نویس مصوبه کمیته سفر\n"
+                + Greeting(recipientName, recipientTitle) + " پیش‌نویس شماره " + item.Number
+                + " برای اطلاع به شما ارجاع شد.\nمهلت پیش‌نویس: " + Date(item.DueDate, item.DueDateJalali)
+                + "\nجزئیات در بخش سفرهای استانی سامانه در دسترس است.\nشناسه یکتا: " + item.Id, item.Number);
+
         var text = item.IsConfidential ? "محرمانه" : Clip(item.Text, 500);
         var notes = Clip(item.Notes, 260);
         var message = "📬 وظیفهٔ جدید از دفتر وزارتی\n"

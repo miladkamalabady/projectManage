@@ -950,3 +950,23 @@
 
 .province-select-field{padding:10px 12px;border:1px solid #e7c761;border-radius:10px;background:#fff9e7;color:#77580f;font-weight:800}
 .province-select-field select{width:100%;min-height:38px;padding:7px 10px;border:1px solid #dec36a;border-radius:8px;background:#fff;color:#34484f}
+
+.provincial-poles,.provincial-trips{margin-bottom:16px}
+.provincial-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;border:0;padding:12px 0;margin:0;min-width:0}
+.provincial-province-options{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:9px;border:1px solid #bac8cf;border-radius:8px;padding:12px}
+.provincial-province-options label{display:flex;flex-direction:row;align-items:center;gap:6px;margin:0}
+.provincial-province-options input{width:auto}
+.provincial-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.provincial-trip-summary{margin:16px 0 20px}
+.provincial-item p{white-space:pre-wrap;overflow-wrap:anywhere}
+.provincial-print{display:none}
+@media(max-width:600px){.provincial-fields{grid-template-columns:1fr}}
+@media print{
+  @page{margin:14mm}
+  body:has(.provincial-print) .shell{display:block!important}
+  body:has(.provincial-print) .shell>:not(.provincial-print){display:none!important}
+  .provincial-print{display:block!important;background:#fff!important;color:#111!important;width:100%;padding:0}
+  .provincial-print table{width:100%;border-collapse:collapse;min-width:0}
+  .provincial-print th,.provincial-print td{border:1px solid #b7b7b7;padding:8px;text-align:right;white-space:pre-wrap;overflow-wrap:anywhere}
+  .provincial-print tr{break-inside:avoid}
+}
