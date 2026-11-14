@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import DatePicker from "react-multi-date-picker";
 import MeetingsPage from "./MeetingsPage";
-import { ProvincialPoles, ProvincialTrips, type Trip } from "./ProvincialTrips";
+import { ProvincialPoles, ProvincialTrips, type Pole, type Trip } from "./ProvincialTrips";
 import persian from "react-date-object/calendars/persian";
 import persian_fa from "react-date-object/locales/persian_fa";
 import { Archive, Bell, Bookmark, CalendarDays, CheckCheck, ChevronDown, CircleAlert, ClipboardList, FileText, LayoutDashboard, MapPin, MessageCircle, Paperclip, Palette, Plus, Search, Send, ShieldCheck, Trash2, Upload, Users, X } from "lucide-react";
@@ -215,7 +215,7 @@ export default function App() {
   const [baleMessageError, setBaleMessageError] = useState("");
   const [reportGroupQuery, setReportGroupQuery] = useState("");
   const [reportViewTab, setReportViewTab] = useState<"groups" | "units" | "people">("groups");
-  const [reportMainTab, setReportMainTab] = useState<"overview" | "bale" | "actions" | "special" | "groups" | "units" | "people" | "events" | "lookup" | "resolution" | "backup" | "quality">("overview");
+  const [reportMainTab, setReportMainTab] = useState<"overview" | "bale" | "actions" | "special" | "provincial" | "groups" | "units" | "people" | "events" | "lookup" | "resolution" | "backup" | "quality">("overview");
   const [quickReportQuery, setQuickReportQuery] = useState("");
   const [quickReportSelection, setQuickReportSelection] = useState("");
   const [quickReportTaskFilter, setQuickReportTaskFilter] = useState("all");
@@ -639,7 +639,7 @@ export default function App() {
   }, [authUser?.nationalId, isAdmin, tab, reportMainTab, dataQualityLoaded, dataQualityRetry]);
   useEffect(() => {
     if (!authUser || !isAdmin || (tab !== "reports" && tab !== "wall" && tab !== "resolutions" && tab !== "special-followups" && tab !== "provincial-trips") || (tab === "reports" && (reportMainTab === "backup" || reportMainTab === "quality"))) return;
-    const requestType = tab === "wall" || tab === "resolutions" || tab === "special-followups" || tab === "provincial-trips" ? "submissions" : reportMainTab === "overview" ? "summary" : (reportMainTab === "actions" || reportMainTab === "resolution" || reportMainTab === "special") ? "submissions" : null;
+    const requestType = tab === "wall" || tab === "resolutions" || tab === "special-followups" || tab === "provincial-trips" ? "submissions" : reportMainTab === "overview" ? "summary" : (reportMainTab === "actions" || reportMainTab === "resolution" || reportMainTab === "special" || reportMainTab === "provincial") ? "submissions" : null;
     if (!requestType) { setReportsError(""); setReportsLoading(false); return; }
     const loaded = requestType === "summary" ? reportsLoaded : submissionsLoaded;
     const fetchingRef = requestType === "summary" ? summaryFetchStarted : submissionsFetchStarted;
@@ -1077,7 +1077,7 @@ export default function App() {
       const response = await fetchApi(url, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
       const result = response.status === 204 ? null : await response.json();
       if (!response.ok) throw new Error(result?.error || "عملیات انجام نشد.");
-      setMessage("عملیات با موفقیت انجام شد."); await load(); if (tab === "reports" && (reportMainTab === "actions" || reportMainTab === "resolution" || reportMainTab === "special")) { submissionsFetchStarted.current = false; setSubmissionsLoaded(false); setReportsRetryCount(count => count + 1); } else if (tab === "reports" && reportMainTab === "overview") { summaryFetchStarted.current = false; setReportsLoaded(false); setReportsRetryCount(count => count + 1); } return true;
+      setMessage("عملیات با موفقیت انجام شد."); await load(); if (tab === "reports" && (reportMainTab === "actions" || reportMainTab === "resolution" || reportMainTab === "special" || reportMainTab === "provincial")) { submissionsFetchStarted.current = false; setSubmissionsLoaded(false); setReportsRetryCount(count => count + 1); } else if (tab === "reports" && reportMainTab === "overview") { summaryFetchStarted.current = false; setReportsLoaded(false); setReportsRetryCount(count => count + 1); } return true;
     } catch (cause) { setMessage(cause instanceof Error ? cause.message : "خطا در ذخیره اطلاعات"); return false; }
     finally { setBusy(false); }
   }
@@ -2091,7 +2091,9 @@ export default function App() {
       {tab === "groups" && isAdmin && <ProvincialPoles api={fetchApi} provinces={iranProvinceOptions} users={users} />}
       {tab === "groups" && isAdmin && <div className="group-layout"><section className="panel"><h2>مدیریت گروه‌ها</h2><p>گروه‌ها را بسازید، اعضا را مدیریت کنید و گروه خالیِ بدون ارجاع را حذف کنید.</p>{groupDeleteError && <div className="notice" role="alert">{groupDeleteError}</div>}<label>افزودن گروه جدید<div className="inline-form"><input value={groupName} onChange={event=>setGroupName(event.target.value)} placeholder="نام گروه"/><button className="primary" disabled={busy||!groupName.trim()} onClick={async()=>{const name=groupName.trim();if(await request("/api/groups","POST",{name,category:"group"})){setGroupName("");}}}>افزودن گروه</button></div></label><label>گروه<select value={selectedGroup} onChange={event=>{setSelectedGroup(event.target.value);setSelectedPerson(null);}}><option value="">انتخاب گروه</option>{groups.filter(group=>!isIndividualRecipientGroup(group.name)).map(group=><option key={group.id} value={group.id}>{group.name} ({group.members.length} عضو)</option>)}</select></label>{selectedGroup&&<><label>دسته‌بندی<select disabled={busy} value={groups.find(group=>String(group.id)===selectedGroup)?.category || (isResolutionGroup(groups.find(group=>String(group.id)===selectedGroup)?.name || "") ? "group" : "unit")} onChange={event=>{const group=groups.find(item=>String(item.id)===selectedGroup);if(group)void changeGroupCategory(group,event.target.value as "group"|"unit");}}><option value="group">گروه</option><option value="unit">معاونت/واحد</option></select></label><div className="members">{(groups.find(group=>String(group.id)===selectedGroup)?.members??[]).map(member=><div className="member" key={member.id}><span className="avatar small">{member.displayName[0]}</span><div><b>{member.displayName}</b><small>{member.title||"سمت ثبت نشده"}</small>{displayLocation(member.organizationUnit)&&<small>{displayLocation(member.organizationUnit)}</small>}<small className="member-mobile">{member.mobile||"موبایل ثبت نشده"}</small></div><button className="icon-btn" title="حذف عضو از گروه" onClick={()=>void request(`/api/groups/${selectedGroup}/members/${member.nationalId}`,"DELETE")}><X size={17}/></button></div>)}</div><button type="button" className="secondary wide" disabled={busy} onClick={()=>{const group=groups.find(item=>String(item.id)===selectedGroup);if(group)void deleteGroup(group);}}>حذف گروه انتخاب‌شده</button></>}</section><section className="panel"><h2>افزودن عضو با کد ملی یا نام</h2><p>با کد ملی یا نام و نام خانوادگی جستجو کنید؛ سمت از اطلاعات پست کاربر به‌روز می‌شود.</p><label>گروه<select value={selectedGroup} onChange={event => setSelectedGroup(event.target.value)}><option value="">انتخاب گروه</option>{groups.filter(group=>isResolutionGroup(group.name,group.category)).map(group => <option key={group.id} value={group.id}>{groupDisplayName(group.name)}</option>)}</select></label><label>جستجوی شخص<input value={memberSearch} onChange={event => void searchMembers(event.target.value)} placeholder="کد ملی یا نام و نام خانوادگی" /></label>{memberSearching && <div className="selected-person">در حال جستجو…</div>}{memberSearchMessage && <div className="member-search-message">{memberSearchMessage}</div>}{memberMatches.length > 0 && <div className="member-search-results">{memberMatches.map(person => <button type="button" key={person.nationalId} className={selectedPerson?.nationalId === person.nationalId ? "selected" : ""} onClick={() => { setSelectedPerson(person); setMemberSearch(person.displayName); setNationalId(person.nationalId); setMemberMatches([]); }}><span>{person.displayName}</span>{isAdmin && /[0-9۰-۹٠-٩]/.test(memberSearch) && <small>{person.nationalId}</small>}</button>)}</div>}{selectedPerson && <div className="selected-person profile-editor"><b>انتخاب‌شده: {selectedPerson.displayName}</b><div className="person-name-fields"><label>پست / سمت<input value={selectedPerson.title||""} onChange={event=>setSelectedPerson({...selectedPerson,title:event.target.value})}/></label><label>معاونت / مرکز / استان<input value={selectedPerson.organizationUnit||""} onChange={event=>setSelectedPerson({...selectedPerson,organizationUnit:event.target.value})}/></label></div><button type="button" className="secondary" disabled={busy} onClick={async()=>{if(await request(`/api/users/${encodeURIComponent(selectedPerson.nationalId)}/profile`,"PATCH",{title:selectedPerson.title||"",organizationUnit:selectedPerson.organizationUnit||""})) { setSelectedPerson({...selectedPerson}); }}}>ذخیره اطلاعات پست و محل مسئولیت</button></div>}<button className="primary wide" disabled={busy || !selectedGroup || !selectedPerson} onClick={() => void addMember()}>افزودن عضو به گروه</button><div className="members">{(groups.find(group => String(group.id) === selectedGroup)?.members ?? []).map(member => <div className="member" key={member.id}><span className="avatar small">{member.displayName[0]}</span><div><b>{member.displayName}</b><small>{member.title || "سمت ثبت نشده"}</small><small className="member-mobile">{member.mobile||"موبایل ثبت نشده"}</small></div><button className="icon-btn" title="حذف عضو" onClick={() => void request(`/api/groups/${selectedGroup}/members/${member.nationalId}`, "DELETE")}><X size={17} /></button></div>)}</div></section><section className="panel"><div className="section-head"><div><h2>معاونت‌ها و مسئولان</h2><p>معاونت‌ها در این فهرست جدا از گروه‌های اصلی هستند؛ واحدهای بدون مسئول مشخص علامت‌گذاری می‌شوند.</p></div></div>{groupDeleteError && <div className="notice" role="alert">{groupDeleteError}</div>}<label>افزودن معاونت یا واحد جدید<div className="inline-form"><input value={newUnitName} onChange={event=>setNewUnitName(event.target.value)} placeholder="نام معاونت یا واحد"/><button className="primary" disabled={busy||!newUnitName.trim()} onClick={async()=>{const name=newUnitName.trim();if(await request("/api/groups","POST",{name,category:"unit"})){setNewUnitName("");setSelectedUnit("");}}}>افزودن</button></div></label><label>معاونت یا واحد<select value={selectedUnit} onChange={event=>{setSelectedUnit(event.target.value);setSelectedPerson(null);}}><option value="">انتخاب معاونت/واحد</option>{groups.filter(unit=>!isResolutionGroup(unit.name, unit.category)&&!isIndividualRecipientGroup(unit.name)).map(unit=><option key={unit.id} value={unit.id}>{unit.name} — {unit.members.length ? "مسئول مشخص شده" : "⚠ مسئول مشخص نشده"}</option>)}</select></label>{selectedUnit && (()=>{const unit=groups.find(group=>String(group.id)===selectedUnit);return <><label>دسته‌بندی<select disabled={busy} value={unit?.category || "unit"} onChange={event=>{if(unit)void changeGroupCategory(unit,event.target.value as "group"|"unit");}}><option value="unit">معاونت/واحد</option><option value="group">گروه</option></select></label>{unit?.members.length ? <div className="selected-person">مسئول مشخص شده: <b>{unit.members.map(member=>member.displayName).join("، ")}</b></div> : <div className="notice" role="status">برای این معاونت/واحد هنوز مسئولی مشخص نشده است.</div>}</>;})()}<label>جستجوی مسئول<input value={memberSearch} onChange={event=>void searchMembers(event.target.value)} placeholder="کد ملی یا نام و نام خانوادگی"/></label>{memberSearching&&<div className="selected-person">در حال جستجو…</div>}{memberSearchMessage&&<div className="member-search-message">{memberSearchMessage}</div>}{memberMatches.length>0&&<div className="member-search-results">{memberMatches.map(person=><button type="button" key={person.nationalId} className={selectedPerson?.nationalId===person.nationalId?"selected":""} onClick={()=>{setSelectedPerson(person);setMemberSearch(person.displayName);setNationalId(person.nationalId);setMemberMatches([]);}}><span>{person.displayName}</span><small>{person.title||"سمت ثبت نشده"}{displayLocation(person.organizationUnit) ? " · "+displayLocation(person.organizationUnit) : ""}</small></button>)}</div>}{selectedPerson&&<div className="selected-person">مسئول انتخاب‌شده: <b>{selectedPerson.displayName}</b><small>{selectedPerson.title||"سمت ثبت نشده"}{displayLocation(selectedPerson.organizationUnit) ? " · "+displayLocation(selectedPerson.organizationUnit) : ""}</small></div>}<button className="primary wide" disabled={busy||!selectedUnit||!selectedPerson} onClick={()=>void addUnitResponsible()}>افزودن مسئول به معاونت/واحد</button><div className="members">{(groups.find(group=>String(group.id)===selectedUnit)?.members??[]).map(member=><div className="member" key={member.id}><span className="avatar small">{member.displayName[0]}</span><div><b>{member.displayName}</b><small>{member.title||"سمت ثبت نشده"}</small>{displayLocation(member.organizationUnit)&&<small>{displayLocation(member.organizationUnit)}</small>}<small className="member-mobile">{member.mobile||"موبایل ثبت نشده"}</small></div><button className="icon-btn" title="حذف مسئول از معاونت/واحد" onClick={()=>void request(`/api/groups/${selectedUnit}/members/${member.nationalId}`,"DELETE")}><X size={17}/></button></div>)}</div><button type="button" className="secondary wide" disabled={busy||!selectedUnit} onClick={()=>{const unit=groups.find(group=>String(group.id)===selectedUnit);if(unit)void deleteGroup(unit);}}>حذف معاونت/واحد انتخاب‌شده</button></section><section className="panel add-directory-person"><h2>افزودن کاربر جدید</h2><p>پست و معاونت، مرکز یا استانِ محل مسئولیت را برای هر فرد ثبت کنید.</p><label>کد ملی<input value={newPerson.nationalId} onChange={event => setNewPerson({ ...newPerson, nationalId: event.target.value })} inputMode="numeric" maxLength={11} /></label><div className="person-name-fields"><label>نام<input value={newPerson.firstName} onChange={event => setNewPerson({ ...newPerson, firstName: event.target.value })} /></label><label>نام خانوادگی<input value={newPerson.lastName} onChange={event => setNewPerson({ ...newPerson, lastName: event.target.value })} /></label></div><label>پست / سمت<input value={newPerson.title} onChange={event=>setNewPerson({...newPerson,title:event.target.value})} placeholder="مثلاً مدیرکل، رئیس مرکز"/></label><label>معاونت / مرکز / استان<input value={newPerson.organizationUnit} onChange={event=>setNewPerson({...newPerson,organizationUnit:event.target.value})} placeholder="واحدی که مسئول آن است"/></label><button className="primary wide" disabled={busy || newPerson.nationalId.trim().length < 8 || !newPerson.firstName.trim() || !newPerson.lastName.trim()} onClick={() => void createDirectoryPerson()}>ثبت کاربر</button></section><section className="panel role-management-panel"><div className="section-head"><div><h2>مدیریت کاربران و دسترسی ادمین</h2><p>با کد ملی کاربر را پیدا کنید، عنوان پست و موبایل را ویرایش کنید یا دسترسی ادمین را مدیریت کنید. دسترسی ادمین اصلی قابل لغو نیست.</p></div><span className="counter">{users.filter(user=>user.role==="ادمین").length} ادمین</span></div><div className="search"><Search size={16}/><input inputMode="numeric" dir="ltr" value={adminUserQuery} onChange={event=>setAdminUserQuery(event.target.value)} placeholder="جستجو با کد ملی"/></div><div className="role-user-list">{filteredRoleUsers.map(user=><div className="role-user-row" key={user.nationalId}><div className="role-user-identity"><b>{user.displayName}</b><small>{user.title||"سمت ثبت نشده"}</small><small className="role-national-id" dir="ltr">{user.nationalId}</small><small className="member-mobile">{user.mobile||"موبایل ثبت نشده"}</small></div><span className={`role-badge ${user.role==="ادمین"?"admin":""}`}>{user.role==="ادمین"?"دسترسی ادمین فعال":"دسترسی ادمین ندارد"}</span><div className="role-user-actions"><button type="button" className="secondary" disabled={busy} onClick={()=>void editUserTitle(user)}>ویرایش پست</button>{user.nationalId==="0534921973"?<span className="primary-admin-label">ادمین اصلی</span>:<button type="button" className={user.role==="ادمین"?"secondary":"primary"} disabled={busy||user.canChangeRole===false} title={user.canChangeRole===false?"نمی‌توانید دسترسی ادمین حساب فعلی خودتان را لغو کنید":""} onClick={()=>void request(`/api/users/${encodeURIComponent(user.nationalId)}/role`,"PATCH",{isAdmin:user.role!=="ادمین"})}>{user.role==="ادمین"?"لغو دسترسی ادمین":"اعطای دسترسی ادمین"}</button>}</div></div>)}{filteredRoleUsers.length===0&&<div className="report-empty">{adminUserQuery.trim().length<8?"برای جستجو، کد ملی را وارد کنید.":"کاربری با این کد ملی پیدا نشد."}</div>}</div></section></div>}
 
-      {tab === "reports" && isAdmin && <div className={`reports-page reports-tab-${reportMainTab} ${reportsError ? "has-load-error" : ""}`} aria-busy={reportsLoading}>{reportsLoading && <div className="panel reports-loading-notice" role="status"><span className="app-loading-spinner" aria-hidden="true"/><div><b>در حال بارگذاری گزارش‌ها</b><small>صفحه‌های دیگر مستقل از دریافت این گزارش‌ها در دسترس هستند.</small></div></div>}{reportsError && <div className="panel reports-error-notice" role="alert"><span>{reportsError}</span><button className="secondary" type="button" onClick={()=>{if(reportMainTab==="actions"||reportMainTab==="resolution"||reportMainTab==="special"){submissionsFetchStarted.current=false;setSubmissionsLoaded(false);}else{summaryFetchStarted.current=false;setReportsLoaded(false);}setReportsError("");setReportsRetryCount(count=>count+1);}}>تلاش دوباره</button></div>}<div className="reports-main-tabs" role="tablist" aria-label="بخش‌های گزارش‌ها"><button type="button" role="tab" aria-selected={reportMainTab==="overview"} className={reportMainTab==="overview"?"active":""} onClick={()=>setReportMainTab("overview")}><LayoutDashboard size={16}/>نمای کلی</button><button type="button" role="tab" aria-selected={reportMainTab==="lookup"} className={reportMainTab==="lookup"?"active":""} onClick={()=>setReportMainTab("lookup")}><Search size={16}/>وضعیت سریع</button><button type="button" role="tab" aria-selected={reportMainTab==="resolution"} className={reportMainTab==="resolution"?"active":""} onClick={()=>setReportMainTab("resolution")}><ClipboardList size={16}/>وضعیت مصوبه</button><button type="button" role="tab" aria-selected={reportMainTab==="bale"} className={reportMainTab==="bale"?"active":""} onClick={()=>setReportMainTab("bale")}><Bell size={16}/>گزارش اطلاعیه‌ها</button><button type="button" role="tab" aria-selected={reportMainTab==="actions"} className={reportMainTab==="actions"?"active":""} onClick={()=>setReportMainTab("actions")}><FileText size={16}/>گزارش اقدامات</button><button type="button" role="tab" aria-selected={reportMainTab==="special"} className={reportMainTab==="special"?"active":""} onClick={()=>setReportMainTab("special")}><ClipboardList size={16}/>گزارش پیگیری‌های ویژه</button><button type="button" role="tab" aria-selected={reportMainTab==="people"} className={reportMainTab==="people"?"active":""} onClick={()=>{setReportMainTab("people");setReportViewTab("people");}}><Users size={16}/>گزارش فردی</button><button type="button" role="tab" aria-selected={reportMainTab==="events"} className={reportMainTab==="events"?"active":""} onClick={()=>setReportMainTab("events")}><ClipboardList size={16}/>گزارش رویدادها</button><button type="button" role="tab" aria-selected={reportMainTab==="backup"} className={reportMainTab==="backup"?"active":""} onClick={()=>setReportMainTab("backup")}><Archive size={16}/>پشتیبان‌گیری</button><button type="button" role="tab" aria-selected={reportMainTab==="quality"} className={reportMainTab==="quality"?"active":""} onClick={()=>setReportMainTab("quality")}><ShieldCheck size={16}/>کیفیت داده</button></div>
+      {tab === "reports" && isAdmin && <div className={`reports-page reports-tab-${reportMainTab} ${reportsError ? "has-load-error" : ""}`} aria-busy={reportsLoading}>{reportsLoading && <div className="panel reports-loading-notice" role="status"><span className="app-loading-spinner" aria-hidden="true"/><div><b>در حال بارگذاری گزارش‌ها</b><small>صفحه‌های دیگر مستقل از دریافت این گزارش‌ها در دسترس هستند.</small></div></div>}{reportsError && <div className="panel reports-error-notice" role="alert"><span>{reportsError}</span><button className="secondary" type="button" onClick={()=>{if(reportMainTab==="actions"||reportMainTab==="resolution"||reportMainTab==="special"||reportMainTab==="provincial"){submissionsFetchStarted.current=false;setSubmissionsLoaded(false);}else{summaryFetchStarted.current=false;setReportsLoaded(false);}setReportsError("");setReportsRetryCount(count=>count+1);}}>تلاش دوباره</button></div>}<div className="reports-main-tabs" role="tablist" aria-label="بخش‌های گزارش‌ها"><button type="button" role="tab" aria-selected={reportMainTab==="overview"} className={reportMainTab==="overview"?"active":""} onClick={()=>setReportMainTab("overview")}><LayoutDashboard size={16}/>نمای کلی</button><button type="button" role="tab" aria-selected={reportMainTab==="lookup"} className={reportMainTab==="lookup"?"active":""} onClick={()=>setReportMainTab("lookup")}><Search size={16}/>وضعیت سریع</button><button type="button" role="tab" aria-selected={reportMainTab==="resolution"} className={reportMainTab==="resolution"?"active":""} onClick={()=>setReportMainTab("resolution")}><ClipboardList size={16}/>وضعیت مصوبه</button><button type="button" role="tab" aria-selected={reportMainTab==="bale"} className={reportMainTab==="bale"?"active":""} onClick={()=>setReportMainTab("bale")}><Bell size={16}/>گزارش اطلاعیه‌ها</button><button type="button" role="tab" aria-selected={reportMainTab==="actions"} className={reportMainTab==="actions"?"active":""} onClick={()=>setReportMainTab("actions")}><FileText size={16}/>گزارش اقدامات</button><button type="button" role="tab" aria-selected={reportMainTab==="special"} className={reportMainTab==="special"?"active":""} onClick={()=>setReportMainTab("special")}><ClipboardList size={16}/>گزارش پیگیری‌های ویژه</button><button type="button" role="tab" aria-selected={reportMainTab==="provincial"} className={reportMainTab==="provincial"?"active":""} onClick={()=>setReportMainTab("provincial")}><MapPin size={16}/>سفرهای استانی</button><button type="button" role="tab" aria-selected={reportMainTab==="people"} className={reportMainTab==="people"?"active":""} onClick={()=>{setReportMainTab("people");setReportViewTab("people");}}><Users size={16}/>گزارش فردی</button><button type="button" role="tab" aria-selected={reportMainTab==="events"} className={reportMainTab==="events"?"active":""} onClick={()=>setReportMainTab("events")}><ClipboardList size={16}/>گزارش رویدادها</button><button type="button" role="tab" aria-selected={reportMainTab==="backup"} className={reportMainTab==="backup"?"active":""} onClick={()=>setReportMainTab("backup")}><Archive size={16}/>پشتیبان‌گیری</button><button type="button" role="tab" aria-selected={reportMainTab==="quality"} className={reportMainTab==="quality"?"active":""} onClick={()=>setReportMainTab("quality")}><ShieldCheck size={16}/>کیفیت داده</button></div>
+        {reportMainTab === "provincial" && <ProvincialTripReport resolutions={resolutions} submissions={reportSubmissions}
+          groups={groups} users={users} loading={!submissionsLoaded && !reportsError} submissionsError={!!reportsError && !submissionsLoaded} />}
         <section className="panel special-followups-report" aria-busy={reportsLoading}>
           <div className="section-head"><div><span className="report-kicker">پیگیری‌های بدون جلسه</span><h2>گزارش دستورات وزیر</h2><p>درخواست‌ها، وضعیت اجرا و گزارش‌های ثبت‌شده</p></div><span className="counter">{specialFollowupReports.length} مورد</span></div>
           <div className="toolbar special-followup-toolbar"><div className="search"><Search size={17}/><input value={specialReportSearch} onChange={event=>setSpecialReportSearch(event.target.value)} placeholder="جستجو در شماره، استان، شرح، ارجاع یا متن گزارش"/></div><label>دسته دستور<select value={specialReportCategory} onChange={event=>setSpecialReportCategory(event.target.value)}><option value="all">همه دسته‌ها</option>{ministerDirectiveCategories.map(category=><option key={category} value={category}>{category}</option>)}</select></label><label>وضعیت اجرا<select value={specialReportStatus} onChange={event=>setSpecialReportStatus(event.target.value)}><option value="all">همه وضعیت‌ها</option>{statusEntries.map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label><label>گزارش<select value={specialReportPresence} onChange={event=>setSpecialReportPresence(event.target.value)}><option value="all">همه</option><option value="has">گزارش دارد</option><option value="missing">بدون گزارش</option></select></label><button type="button" className="secondary" onClick={()=>{setSpecialReportSearch("");setSpecialReportStatus("all");setSpecialReportPresence("all");setSpecialReportCategory("all");}}>پاک‌کردن فیلترها</button></div>
@@ -2137,6 +2139,135 @@ export default function App() {
 }
 
 function Metric({ icon, label, value, color, active, onClick }: { icon: React.ReactNode; label: string; value: number; color: string; active: boolean; onClick: () => void }) { return <button type="button" className={`metric ${active ? "active" : ""}`} onClick={onClick}><div className={`metric-icon ${color}`}>{icon}</div><div><span>{label}</span><b>{value}</b></div></button>; }
+function ProvincialTripReport({ resolutions, submissions, groups, users, loading, submissionsError }: {
+  resolutions: Resolution[];
+  submissions: ResolutionReport[];
+  groups: Group[];
+  users: DirectoryUser[];
+  loading: boolean;
+  submissionsError: boolean;
+}) {
+  const [poles, setPoles] = useState<Pole[]>([]);
+  const [poleError, setPoleError] = useState(false);
+  const [revision, setRevision] = useState(0);
+  const [province, setProvince] = useState("");
+  const [pole, setPole] = useState("");
+  const [resolutionQuery, setResolutionQuery] = useState("");
+  const [personQuery, setPersonQuery] = useState("");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setPoleError(false);
+    fetchApi("/api/provincial-poles", { cache: "no-store", signal: controller.signal })
+      .then(async response => {
+        if (!response.ok) throw new Error();
+        const data = asArray<Pole>(await response.json());
+        if (!controller.signal.aborted) setPoles(data);
+      })
+      .catch(() => { if (!controller.signal.aborted) setPoleError(true); });
+    return () => controller.abort();
+  }, [revision]);
+
+  const rows = useMemo(() => {
+    const poleByProvince = new Map(poles.flatMap(entry => entry.provinces.map(item => [item.province, entry.name])));
+    const groupsById = new Map(groups.map(group => [group.id, group]));
+    const peopleById = new Map<string, DirectoryUser>();
+    for (const group of groups) for (const member of group.members) peopleById.set(member.nationalId, member);
+    for (const user of users) peopleById.set(user.nationalId, user);
+
+    const submissionsByResolution = new Map<number, ResolutionReport[]>();
+    for (const report of submissions) {
+      const entries = submissionsByResolution.get(report.resolutionId) ?? [];
+      entries.push(report);
+      submissionsByResolution.set(report.resolutionId, entries);
+    }
+
+    return resolutions.filter(item => !item.isArchived && item.isSpecialTracking && item.specialTrackingType === "provincial").map(item => {
+      const reportEntries = submissionsByResolution.get(item.id) ?? [];
+      const groupIds = new Set(item.groupAssignments?.map(assignment => assignment.groupId));
+      if (item.groupId != null) groupIds.add(item.groupId);
+      const assigned = new Set((item.assignments ?? []).map(assignment => assignment.nationalId));
+      for (const id of groupIds) {
+        for (const member of groupsById.get(id)?.members ?? []) assigned.add(member.nationalId);
+      }
+      const personIds = new Set([...assigned, ...(item.publishToAll ? users.map(user => user.nationalId) : []),
+        ...(item.progress ?? []).map(progress => progress.nationalId), ...reportEntries.map(report => report.nationalId)]);
+      const reportNames = new Map(reportEntries.map(report => [report.nationalId, report.userName]));
+      const people = Array.from(personIds, id => ({
+        id, name: peopleById.get(id)?.displayName || reportNames.get(id) || id,
+        title: peopleById.get(id)?.title ?? "",
+      }));
+      const reportedPeople = new Set(reportEntries.map(report => report.nationalId));
+      const legacy = (item.progress ?? []).filter(entry => entry.reportText?.trim() && !reportedPeople.has(entry.nationalId));
+      return {
+        item, pole: item.provincialPoleName || poleByProvince.get(item.province ?? "") || "",
+        people, reportEntries, legacy,
+      };
+    }).sort((a, b) => b.item.meetingDate.localeCompare(a.item.meetingDate) || b.item.id - a.item.id);
+  }, [resolutions, submissions, groups, users, poles]);
+
+  const optionsFor = (values: (string | undefined)[]) =>
+    Array.from(new Set(values.filter((value): value is string => !!value))).sort((a, b) => a.localeCompare(b, "fa"));
+  const normalized = (value: string) => normalizeSearchText(toLatinDigits(value)).replace(/‌/g, " ").replace(/\s+/g, " ");
+  const taskTerm = normalized(resolutionQuery);
+  const personTerm = normalized(personQuery);
+  const filtered = rows.filter(row =>
+    (!province || row.item.province === province) && (!pole || row.pole === pole) &&
+    (!taskTerm || normalized(`${row.item.id} ${row.item.number} ${row.item.text}`).includes(taskTerm)) &&
+    (!personTerm || row.people.some(person => normalized(`${person.name} ${person.title} ${person.id}`).includes(personTerm))));
+  const number = new Intl.NumberFormat("fa-IR");
+
+  return <section className="panel" aria-labelledby="provincial-trip-report-title">
+    <div className="section-head">
+      <h2 id="provincial-trip-report-title">گزارش سفرهای استانی</h2>
+      <span className="counter">{number.format(filtered.length)} مورد</span>
+    </div>
+    {poleError && <div className="notice" role="alert">فهرست قطب‌های فعلی دریافت نشد. قطب ثبت‌شده روی مصوبه‌ها همچنان نمایش داده می‌شود. <button type="button" className="secondary" onClick={() => setRevision(value => value + 1)}>تلاش دوباره</button></div>}
+    <div className="resolution-filters">
+      <label>استان<select value={province} onChange={event => setProvince(event.target.value)}>
+        <option value="">همه استان‌ها</option>
+        {optionsFor(rows.map(row => row.item.province)).map(value => <option key={value}>{value}</option>)}
+      </select></label>
+      <label>قطب<select value={pole} onChange={event => setPole(event.target.value)}>
+        <option value="">همه قطب‌ها</option>
+        {optionsFor([...poles.map(item => item.name), ...rows.map(row => row.pole)]).map(value => <option key={value}>{value}</option>)}
+      </select></label>
+      <label>مصوبه<input value={resolutionQuery} onChange={event => setResolutionQuery(event.target.value)} placeholder="شماره، شناسه یا متن مصوبه"/></label>
+      <label>شخص<input value={personQuery} onChange={event => setPersonQuery(event.target.value)} placeholder="نام، سمت یا کد ملی"/></label>
+      <button type="button" className="secondary" onClick={() => { setProvince(""); setPole(""); setResolutionQuery(""); setPersonQuery(""); }}>پاک‌کردن فیلترها</button>
+    </div>
+    {filtered.length ? <div className="table-wrap"><table>
+      <thead><tr><th>تاریخ سفر</th><th>استان و قطب</th><th>مصوبه</th><th>اشخاص مرتبط</th><th>وضعیت</th><th>گزارش‌های ثبت‌شده</th></tr></thead>
+      <tbody>{filtered.map(({ item, pole, people, reportEntries, legacy }) => {
+        const status = item.isCommitteeDraft && item.dueDate && item.dueDate < tehranDate() ? "closed" : item.status;
+        const visiblePeople = personTerm ? people.filter(person => normalized(`${person.name} ${person.title} ${person.id}`).includes(personTerm)) : people;
+        const ids = new Set(visiblePeople.map(person => person.id));
+        const visibleReports = reportEntries.filter(report => !personTerm || ids.has(report.nationalId));
+        const visibleLegacy = legacy.filter(report => !personTerm || ids.has(report.nationalId));
+        return <tr key={item.id}>
+          <td>{formatDate(item.meetingDate, item.meetingDateJalali)}</td>
+          <td>{item.province || "—"}<small>{pole || "قطب ثبت نشده"}</small></td>
+          <td><b>{item.isCommitteeDraft ? "مصوبه کمیته" : "مصوبه سفر"} {item.number}</b><small>شناسه {number.format(item.id)}</small>{item.text}</td>
+          <td>{item.publishToAll && !personTerm ? "همهٔ کاربران" : visiblePeople.map(person => person.name).join("، ") || "—"}</td>
+          <td><span className={`status ${status}`}>{labels[status] || status}</span></td>
+          <td>{item.isCommitteeDraft ? "—" : loading ? "در حال دریافت…" : submissionsError ? "دریافت گزارش‌ها ناموفق بود" : <details>
+            <summary>مشاهده ({number.format(visibleReports.length + visibleLegacy.length)})</summary>
+            {visibleReports.map(report => <article className="submitted-report-entry" key={report.id}>
+              <b>{report.userName}</b><small>{formatDateTime(report.submittedAt)}</small><p>{report.text}</p>
+              {report.attachments?.map(file => <a className="special-followup-report-file" key={file.id} href={`/api/attachments/${file.id}`} target="_blank" rel="noreferrer">{file.originalName}</a>)}
+            </article>)}
+            {visibleLegacy.map(report => <article className="submitted-report-entry" key={report.nationalId}>
+              <b>{people.find(person => person.id === report.nationalId)?.name || report.nationalId}</b>
+              <small>{formatDateTime(report.updatedAt)}</small><p>{report.reportText}</p>
+            </article>)}
+            {visibleReports.length + visibleLegacy.length === 0 && <small>گزارشی ثبت نشده است.</small>}
+          </details>}</td>
+        </tr>;
+      })}</tbody>
+    </table></div> : <p className="report-empty">{loading ? "در حال دریافت گزارش‌ها…" : "موردی با این فیلترها پیدا نشد."}</p>}
+  </section>;
+}
+
 function TaskCompletionReport({ groups, resolutions, users }: {
   groups: Group[]; resolutions: Resolution[]; users: DirectoryUser[];
 }) {
