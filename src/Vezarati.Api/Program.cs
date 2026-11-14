@@ -1755,11 +1755,12 @@ app.MapGet("/api/users/search", async (string? q, AppDb db) =>
         .Replace("ي", "ی").Replace("ى", "ی").Replace("ك", "ک").Replace("‌", " ")
         .Trim().ToLowerInvariant();
     var normalized = Normalize(term);
-    var digits = new string(term.Where(char.IsDigit).ToArray());
+    var digits = new string(NormalizeDigits(term).Where(char.IsDigit).ToArray());
     var directory = await db.Users.AsNoTracking().ToListAsync();
     
     var people = directory
         .Where(person => Normalize(person.DisplayName).Contains(normalized) ||
+            Normalize(string.IsNullOrWhiteSpace(person.Title) ? person.OrgPositionDesc : person.Title).Contains(normalized) ||
             (digits.Length >= 2 && person.NationalId.Contains(digits)))
         .OrderBy(person => person.DisplayName)
         .Take(30)

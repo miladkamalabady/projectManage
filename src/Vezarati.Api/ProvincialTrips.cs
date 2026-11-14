@@ -7,9 +7,9 @@ public sealed class ProvincialPole
     public int Id { get; set; }
     public string Name { get; set; } = "";
     public string ResponsibleId { get; set; } = "";
-    public string TripType { get; set; } = "";
-    public bool? MinisterPresent { get; set; }
-    public string Representative { get; set; } = "";
+    [System.Text.Json.Serialization.JsonIgnore] public string TripType { get; set; } = "internal";
+    [System.Text.Json.Serialization.JsonIgnore] public bool? MinisterPresent { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore] public string Representative { get; set; } = "";
     public List<PoleProvince> Provinces { get; set; } = [];
 }
 
@@ -49,8 +49,6 @@ static class ProvincialTrips
             var provinces = (input.Provinces ?? []).Distinct().ToArray();
             if (name.Length is 0 or > 200 || provinces.Length == 0 || provinces.Any(province => !Provinces.Contains(province)))
                 return Results.BadRequest(new { error = "نام قطب و حداقل یک استان معتبر را وارد کنید." });
-            if (!ValidAttendance(input.TripType, input.MinisterPresent, input.Representative))
-                return Results.BadRequest(new { error = "نوع سفر، وضعیت حضور وزیر و در صورت غیبت نام نماینده را وارد کنید." });
             if (!await db.Users.AnyAsync(user => user.NationalId == input.ResponsibleId))
                 return Results.BadRequest(new { error = "مسئول قطب را از کاربران سامانه انتخاب کنید." });
             var pole = await db.ProvincialPoles.Include(item => item.Provinces).FirstOrDefaultAsync(item => item.Id == id);
@@ -64,9 +62,6 @@ static class ProvincialTrips
             }
             pole.Name = name;
             pole.ResponsibleId = input.ResponsibleId!;
-            pole.TripType = input.TripType!;
-            pole.MinisterPresent = input.TripType == "external" ? input.MinisterPresent : null;
-            pole.Representative = pole.MinisterPresent == false ? input.Representative!.Trim() : "";
             foreach (var province in pole.Provinces.Where(item => !provinces.Contains(item.Province)).ToList())
             {
                 db.PoleProvinces.Remove(province);
@@ -171,6 +166,6 @@ static class ProvincialTrips
     private static bool ValidAttendance(string? type, bool? present, string? representative) =>
         type == "internal" || (type == "external" && (present == true || (present == false && representative?.Trim().Length is > 0 and <= 300)));
 
-    private sealed record PoleInput(string? Name, string? ResponsibleId, string[]? Provinces, string? TripType, bool? MinisterPresent, string? Representative);
+    private sealed record PoleInput(string? Name, string? ResponsibleId, string[]? Provinces);
     private sealed record TripInput(string? Title, string? Province, DateOnly StartDate, DateOnly EndDate, string? TripType, bool? MinisterPresent, string? Representative);
 }

@@ -4,12 +4,12 @@ import persian from "react-date-object/calendars/persian";
 import persian_fa from "react-date-object/locales/persian_fa";
 
 type Attendance = { tripType: "internal" | "external"; ministerPresent: boolean | null; representative: string };
-export type Pole = Attendance & { id: number; name: string; responsibleId: string; provinces: { province: string }[] };
+export type Pole = { id: number; name: string; responsibleId: string; provinces: { province: string }[] };
 export type Trip = Attendance & { id: number; title: string; province: string; startDate: string; endDate: string };
 type Person = { nationalId: string; displayName: string; title?: string };
 type Api = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 const defaultAttendance: Attendance = { tripType: "internal", ministerPresent: null, representative: "" };
-const blankPole: Pole = { id: 0, name: "", responsibleId: "", provinces: [], ...defaultAttendance };
+const blankPole: Pole = { id: 0, name: "", responsibleId: "", provinces: [] };
 const blankTrip: Trip = { id: 0, title: "", province: "", startDate: "", endDate: "", ...defaultAttendance };
 
 function AttendanceFields<T extends Attendance>({ value, onChange }: { value: T; onChange: (value: T) => void }) {
@@ -55,14 +55,28 @@ export function ProvincialPoles({ api, provinces, users }: { api: Api; provinces
   }, [api]);
 
   const unavailable = new Set(poles.filter(pole => pole.id !== form.id).flatMap(pole => pole.provinces.map(item => item.province)));
-  const candidates = users.filter(user => user.nationalId === form.responsibleId ||
-    `${user.displayName} ${user.title ?? ""} ${user.nationalId}`.includes(personQuery.trim()));
+  const [search, setSearch] = useState<{ term: string; matches: Person[]; error: string } | null>(null);
+  const term = personQuery.trim();
+  useEffect(() => {
+    if (term.length < 2) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      read<Person[]>(api, `/api/users/search?q=${encodeURIComponent(term)}`, { signal: controller.signal })
+        .then(matches => { if (!controller.signal.aborted) setSearch({ term, matches, error: "" }); })
+        .catch(cause => { if (!controller.signal.aborted) setSearch({ term, matches: [], error: cause.message }); });
+    }, 250);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [api, term]);
+  const matches = search?.term === term ? search.matches : [];
+  const selected = matches.find(user => user.nationalId === form.responsibleId)
+    ?? users.find(user => user.nationalId === form.responsibleId);
   return <section className="panel provincial-poles">
     <h2>قطب‌بندی استانی</h2>
     {error && <p className="notice" role="alert">{error}</p>}
     <label>قطب<select value={form.id} onChange={event => {
       setForm(poles.find(pole => pole.id === Number(event.target.value)) ?? blankPole);
       setPersonQuery("");
+      setSearch(null);
       setError("");
     }}><option value={0}>قطب جدید</option>{poles.map(pole => <option key={pole.id} value={pole.id}>{pole.name}</option>)}</select></label>
     <form onSubmit={async event => {
@@ -78,10 +92,19 @@ export function ProvincialPoles({ api, provinces, users }: { api: Api; provinces
       <fieldset disabled={busy} className="provincial-fields">
         <label>نام قطب<input required maxLength={200} value={form.name} onChange={event => setForm({ ...form, name: event.target.value })}/></label>
         <label>جستجوی مسئول<input value={personQuery} onChange={event => setPersonQuery(event.target.value)} placeholder="نام، سمت یا کد ملی"/></label>
-        <label>مسئول قطب<select required value={form.responsibleId} onChange={event => setForm({ ...form, responsibleId: event.target.value })}>
-          <option value="">انتخاب کاربر</option>{candidates.map(user => <option key={user.nationalId} value={user.nationalId}>{user.displayName}{user.title ? ` – ${user.title}` : ""}</option>)}
-        </select></label>
-        <AttendanceFields value={form} onChange={setForm}/>
+        <div className="member-search-results">
+          {form.responsibleId && <p>مسئول انتخاب‌شده: <b>{selected?.displayName ?? form.responsibleId}</b></p>}
+          {term.length < 2 ? <small>برای جست‌وجو دست‌کم دو حرف یا رقم وارد کنید.</small>
+            : search?.term !== term ? <small role="status">در حال جست‌وجو…</small>
+            : search.error ? <small role="alert">{search.error}</small>
+            : matches.length === 0 ? <small role="status">کاربری پیدا نشد.</small>
+            : matches.map(user => <button type="button" key={user.nationalId}
+                className={form.responsibleId === user.nationalId ? "selected" : ""}
+                aria-pressed={form.responsibleId === user.nationalId}
+                onClick={() => setForm(current => ({ ...current, responsibleId: user.nationalId }))}>
+                <span>{user.displayName}{user.title ? ` – ${user.title}` : ""}</span><small>{user.nationalId}</small>
+              </button>)}
+        </div>
         <fieldset className="provincial-province-options">
           <legend>استان‌های قطب</legend>
           {provinces.map(province => <label key={province}>
@@ -90,7 +113,7 @@ export function ProvincialPoles({ api, provinces, users }: { api: Api; provinces
             {province}
           </label>)}
         </fieldset>
-        <button type="submit" className="primary" disabled={!form.provinces.length}>{busy ? "در حال ذخیره…" : "ذخیره قطب"}</button>
+        <button type="submit" className="primary" disabled={!form.provinces.length || !form.responsibleId}>{busy ? "در حال ذخیره…" : "ذخیره قطب"}</button>
       </fieldset>
     </form>
   </section>;
@@ -148,12 +171,8 @@ export function ProvincialTrips({ api, admin, onCreate, renderItems, renderPrint
     }}>
       <fieldset disabled={busy} className="provincial-fields">
         <label>عنوان سفر<input required maxLength={300} value={editing.title} onChange={event => setEditing({ ...editing, title: event.target.value })}/></label>
-        <label>استان<select required value={editing.province} onChange={event => {
-          const province = event.target.value;
-          const pole = provincePoles.get(province);
-          setEditing({ ...editing, ...defaultAttendance, tripType: pole?.tripType ?? "internal",
-            ministerPresent: pole?.ministerPresent ?? null, representative: pole?.representative ?? "", province });
-        }}><option value="">انتخاب استان</option>
+        <label>استان<select required value={editing.province}
+          onChange={event => setEditing({ ...editing, province: event.target.value })}><option value="">انتخاب استان</option>
           {Array.from(new Set([...provincePoles.keys(), ...(editing.province ? [editing.province] : [])])).sort((a,b) => a.localeCompare(b, "fa"))
             .map(province => <option key={province} value={province}>{province}{provincePoles.has(province) ? ` – ${provincePoles.get(province)!.name}` : ""}</option>)}
         </select></label>
