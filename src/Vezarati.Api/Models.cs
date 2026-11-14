@@ -26,39 +26,53 @@ public sealed class Resolution
     public string Number { get; set; } = "";
     public string Text { get; set; } = "";
     private const string ProvinceMarker = "\u001Fprovince:";
+    private const string MinisterCategoryMarker = "\u001Fminister-category:";
     private string _notes = "";
     public string Notes
     {
         get
         {
-            var markerIndex = _notes.LastIndexOf(ProvinceMarker, StringComparison.Ordinal);
+            var provinceIndex = _notes.LastIndexOf(ProvinceMarker, StringComparison.Ordinal);
+            var categoryIndex = _notes.LastIndexOf(MinisterCategoryMarker, StringComparison.Ordinal);
+            var markerIndex = provinceIndex < 0 ? categoryIndex : categoryIndex < 0 ? provinceIndex : Math.Min(provinceIndex, categoryIndex);
             return markerIndex < 0 ? _notes : _notes[..markerIndex].TrimEnd('\r', '\n');
         }
-        set
-        {
-            var province = ReadProvince(_notes);
-            _notes = ComposeNotes(value, province);
-        }
+        set => _notes = ComposeNotes(value, ReadMarker(_notes, ProvinceMarker), ReadMarker(_notes, MinisterCategoryMarker));
     }
     [NotMapped]
     public string Province
     {
-        get => ReadProvince(_notes);
-        set => _notes = ComposeNotes(Notes, value);
+        get => ReadMarker(_notes, ProvinceMarker);
+        set => _notes = ComposeNotes(Notes, value, MinisterCategory);
     }
-    private static string ReadProvince(string? rawNotes)
+    [NotMapped]
+    public string MinisterCategory
+    {
+        get => ReadMarker(_notes, MinisterCategoryMarker);
+        set => _notes = ComposeNotes(Notes, Province, value);
+    }
+    private static string ReadMarker(string? rawNotes, string marker)
     {
         if (string.IsNullOrEmpty(rawNotes)) return "";
-        var markerIndex = rawNotes.LastIndexOf(ProvinceMarker, StringComparison.Ordinal);
-        return markerIndex < 0 ? "" : Uri.UnescapeDataString(rawNotes[(markerIndex + ProvinceMarker.Length)..]);
+        var markerIndex = rawNotes.LastIndexOf(marker, StringComparison.Ordinal);
+        if (markerIndex < 0) return "";
+        var valueStart = markerIndex + marker.Length;
+        var nextMarker = rawNotes.IndexOf('\u001F', valueStart);
+        var value = nextMarker < 0 ? rawNotes[valueStart..] : rawNotes[valueStart..nextMarker];
+        return Uri.UnescapeDataString(value);
     }
-    private static string ComposeNotes(string? notes, string? province)
+    private static string ComposeNotes(string? notes, string? province, string? ministerCategory)
     {
-        var markerIndex = notes?.LastIndexOf(ProvinceMarker, StringComparison.Ordinal) ?? -1;
-        var cleanNotes = markerIndex < 0 ? (notes ?? "") : notes![..markerIndex].TrimEnd('\r', '\n');
-        if (string.IsNullOrWhiteSpace(province)) return cleanNotes;
-        var marker = ProvinceMarker + Uri.EscapeDataString(province.Trim());
-        return cleanNotes.Length == 0 ? marker : cleanNotes + "\n" + marker;
+        var cleanNotes = notes ?? "";
+        foreach (var marker in new[] { ProvinceMarker, MinisterCategoryMarker })
+        {
+            var markerIndex = cleanNotes.LastIndexOf(marker, StringComparison.Ordinal);
+            if (markerIndex >= 0) cleanNotes = cleanNotes[..markerIndex].TrimEnd('\r', '\n');
+        }
+        var metadata = new List<string>();
+        if (!string.IsNullOrWhiteSpace(province)) metadata.Add(ProvinceMarker + Uri.EscapeDataString(province.Trim()));
+        if (!string.IsNullOrWhiteSpace(ministerCategory)) metadata.Add(MinisterCategoryMarker + Uri.EscapeDataString(ministerCategory.Trim()));
+        return metadata.Count == 0 ? cleanNotes : (cleanNotes.Length == 0 ? "" : cleanNotes + "\n") + string.Join("\n", metadata);
     }
     public string Status { get; set; } = "before";
     public bool PublishToAll { get; set; }
