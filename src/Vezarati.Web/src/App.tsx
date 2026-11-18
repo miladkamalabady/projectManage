@@ -54,7 +54,6 @@ function loginWithSso(code: string): Promise<AuthUser> {
     for (let attempt = 0; attempt < 3; attempt++) {
       sessionResponse = await fetch("/api/auth/me", { credentials: "include", cache: "no-store" });
       if (sessionResponse.ok) return await sessionResponse.json() as AuthUser;
-      if (sessionResponse.status === 403) throw new Error("شما دسترسی به این سامانه ندارید.");
       if (sessionResponse.status !== 401) break;
       await new Promise(resolve => setTimeout(resolve, 200));
     }
@@ -586,9 +585,9 @@ export default function App() {
         .catch(cause => { sessionStorage.removeItem("vezarati.pendingSsoCode"); if (active) setError(cause instanceof Error ? cause.message : "ورود یکپارچه ناموفق بود."); })
         .finally(() => { if (active) setAuthReady(true); });
     } else {
-      fetch("/api/auth/me", { credentials: "include", cache: "no-store" }).then(async response => { if (response.status === 403) throw new Error("شما دسترسی به این سامانه ندارید."); if (!response.ok) throw new Error(); return response.json(); })
+      fetch("/api/auth/me", { credentials: "include", cache: "no-store" }).then(async response => { if (!response.ok) throw new Error("ورود لازم است."); return response.json(); })
         .then(user => { if (active) { if (window.location.pathname === "/" && user.role !== "ادمین") setTab("execution-calendar"); setAuthUser(user); setViewerId(user.nationalId); } })
-        .catch((cause: Error) => { if (active) { setAuthUser(null); setViewerId(""); if (cause.message === "شما دسترسی به این سامانه ندارید.") setError(cause.message); } })
+        .catch(() => { if (active) { setAuthUser(null); setViewerId(""); } })
         .finally(() => { if (active) setAuthReady(true); });
     }
     return () => { active = false; };
@@ -2004,6 +2003,7 @@ export default function App() {
   if (!authReady) return <div className="auth-screen"><div className="auth-card"><ShieldCheck size={36}/><h1>ورود به سامانه پیگیری مصوبات</h1><p>در حال بررسی نشست ورود…</p></div></div>;
   if (!authUser) return <div className="auth-screen"><div className="auth-card"><ShieldCheck size={36}/><h1>ورود به سامانه پیگیری مصوبات</h1><p>{error || (new URLSearchParams(window.location.search).has("code") ? "ورود انجام نشد. لطفاً از درگاه سازمانی دوباره وارد شوید." : "برای ورود، از درگاه یکپارچه آموزش‌وپرورش به این صفحه بازگردید.")}</p></div></div>;
   if (!dashboardLoaded) return <div className="auth-screen app-loading-screen" role="status" aria-live="polite"><div className="auth-card"><div className="app-loading-spinner" aria-hidden="true"/><h1>دفتر وزارتی</h1>{error ? <><p>{error}</p><button type="button" className="primary" onClick={()=>void load()}>تلاش دوباره</button></> : <p>در حال بارگذاری مصوبات و اطلاعات سامانه…</p>}</div></div>;
+  if (!isAdmin && !dashboard?.resolutions.length) return <div className="auth-screen"><div className="auth-card access-denied-card"><ShieldCheck size={36}/><h1>شما دسترسی به این سامانه ندارید</h1><p>برای حساب کاربری «{authUser.displayName}» هیچ وظیفه‌ای ثبت یا ارجاع نشده است. در صورت نیاز، با دفتر وزارتی تماس بگیرید.</p><button type="button" className="primary" onClick={()=>void logout()}>خروج از حساب</button></div></div>;
   return <div className="shell">
     <aside className="sidebar">
       <div className="brand"><span className="brand-icon"><ShieldCheck /></span><div><b>دفتر وزارتی</b><small>پیگیری مصوبات</small></div></div>
