@@ -298,6 +298,8 @@ export default function App() {
   const [peopleQuery, setPeopleQuery] = useState("");
   const [adminUserQuery, setAdminUserQuery] = useState("");
   const [resolutionPage, setResolutionPage] = useState(1);
+  const [wallReportsRequested, setWallReportsRequested] = useState(false);
+  const [specialDetailId, setSpecialDetailId] = useState<number | null>(null);
   const [openResolutionReportsId, setOpenResolutionReportsId] = useState<number | null>(null);
   const [resolutionPageSize, setResolutionPageSize] = useState(10);
   const [archiveLoading, setArchiveLoading] = useState(false);
@@ -369,7 +371,7 @@ export default function App() {
   const [selectedDay, setSelectedDay] = useState(jalaliToday());
   const [calendarTargetId, setCalendarTargetId] = useState<number | null>(null);
   useEffect(() => { if (authUser?.role === "ادمین" && tab === "reports" && reportMainTab === "backup") void loadDatabaseBackups(); }, [authUser?.nationalId, authUser?.role, tab, reportMainTab]);
-  useEffect(() => { if (authUser?.role === "ادمین") void loadMinisterDirectiveCategories(); }, [authUser?.nationalId, authUser?.role]);
+  useEffect(() => { if (authUser?.role === "ادمین" && (tab === "special-followups" || (tab === "reports" && reportMainTab === "special"))) void loadMinisterDirectiveCategories(); }, [authUser?.nationalId, authUser?.role, tab, reportMainTab]);
 
   async function loadMinisterDirectiveCategories() {
     try {
@@ -471,31 +473,31 @@ export default function App() {
     }
   }
 
-  async function load() {
+  const [tabDataRevision, setTabDataRevision] = useState(0);
+  async function load(signal?: AbortSignal) {
     if (!authUser) return;
     setError("");
     try {
-      const [dashboardResponse, groupsResponse, usersResponse, notificationsResponse, baleSettingsResponse, meetingsResponse] = await Promise.all([
-        fetchApi("/api/dashboard"), fetchApi("/api/groups"), isAdmin ? fetchApi("/api/users") : Promise.resolve(new Response(JSON.stringify({ total: 0, completed: 0, delayed: 0, pending: 0, people: [] }), { status: 200 })), fetchApi("/api/notifications"), isAdmin ? fetchApi("/api/settings/bale-notifications") : Promise.resolve(new Response(JSON.stringify({ enabled: false, configured: false }), { status: 200 })), isAdmin ? fetchApi("/api/meetings") : Promise.resolve(new Response("[]", { status: 200 }))
-      ]);
-      for (const response of [dashboardResponse, groupsResponse, usersResponse, notificationsResponse, baleSettingsResponse, meetingsResponse]) if (!response.ok) throw new Error(response.status === 401 ? "نشست شما منقضی شده است." : "گرفتن اطلاعات از API ناموفق بود.");
-      const baleSettings = await baleSettingsResponse.json();
-      setBaleNotificationsEnabled(!!baleSettings.enabled);
-      setBaleNotificationsConfigured(!!baleSettings.configured);
-      const dashboardData = await dashboardResponse.json();
-      const resolutionData = asArray<Resolution>(dashboardData && typeof dashboardData === "object" ? dashboardData.resolutions : []);
-      const groupData = asGroups(await groupsResponse.json());
-      const userData = asArray<{ nationalId: string; displayName: string; title?: string; organizationUnit?: string; mobile?: string; province?: string | null; role?: string; canChangeRole?: boolean }>(await usersResponse.json());
-      const notificationData = asArray<UserNotification>(await notificationsResponse.json());
-      const meetingData = asArray<MeetingOption>(await meetingsResponse.json());
-      setMeetings(meetingData);
-      setDashboard(dashboardData && typeof dashboardData === "object" ? { ...dashboardData, groups: asGroups(dashboardData.groups), resolutions: asArray<Resolution>(dashboardData.resolutions) } : null);
+      const response = await fetchApi("/api/dashboard", { signal });
+      if (!response.ok) throw new Error("اطلاعات اصلی سامانه دریافت نشد.");
+      const data: Dashboard = await response.json();
+      if (signal?.aborted) return;
+      const groupData = asGroups(data.groups);
+      const resolutionData = asArray<Resolution>(data.resolutions);
+      setDashboard({ ...data, groups: groupData, resolutions: resolutionData });
       setResolutions(current => [...resolutionData, ...current.filter(item => item.isArchived)]);
-      setGroups(groupData);
-      setUsers(userData);
-      setNotifications(notificationData);
+      setGroups(current => groupData.map(group => ({
+        ...group,
+        members: group.members.map(member => ({
+          ...member,
+          mobile: current.find(item => item.id === group.id)?.members.find(item => item.id === member.id)?.mobile,
+        })),
+      })));
       setDashboardLoaded(true);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "خطا در دریافت اطلاعات"); }
+      setTabDataRevision(value => value + 1);
+    } catch (cause) {
+      if (!signal?.aborted) setError(cause instanceof Error ? cause.message : "خطا در دریافت اطلاعات");
+    }
   }
   function requestNewMeeting() { setTab("sessions"); setOpenMeetingRequest(value => value + 1); }
 
@@ -537,7 +539,7 @@ export default function App() {
   }
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
-    setAuthUser(null); setViewerId(""); setDashboard(null); setResolutions([]); setGroups([]); setReports(null); setReportsLoaded(false); setSubmissionsLoaded(false); summaryFetchStarted.current = false; submissionsFetchStarted.current = false; setReportsError(""); setReportSubmissions([]); setUsers([]); setNotifications([]);
+    setAuthUser(null); setViewerId(""); setDashboard(null); setDashboardLoaded(false); setResolutions([]); setGroups([]); setReports(null); setReportsLoaded(false); setSubmissionsLoaded(false); summaryFetchStarted.current = false; submissionsFetchStarted.current = false; setReportsError(""); setReportSubmissions([]); setUsers([]); setNotifications([]);
   }
   useEffect(() => {
     const handleExpiredSession = () => {
@@ -600,7 +602,42 @@ export default function App() {
   }, [authReady, authUser?.nationalId, isAdmin, tab]);
   useEffect(() => { const safe=normalizeJalaliMonth(calendarMonth); if(safe!==calendarMonth) setCalendarMonth(safe); }, [calendarMonth]);
   useEffect(() => { const normalized=normalizeJalaliDate(selectedDay); if(normalized!==selectedDay){setSelectedDay(normalized);setCalendarMonth(normalized.slice(0,7)+".01");} }, [selectedDay]);
-  useEffect(() => { if (authUser) void load(); }, [authUser?.nationalId]);
+  const reportNeedsDirectory = tab === "reports" && ["overview", "actions", "special", "provincial", "groups", "units", "people", "lookup", "resolution"].includes(reportMainTab);
+  const needsDirectory = isAdmin && (["wall", "resolutions", "sessions", "groups", "special-followups", "provincial-trips"].includes(tab) || reportNeedsDirectory);
+  const needsMeetings = isAdmin && (tab === "wall" || tab === "resolutions" ||
+    (tab === "reports" && ["overview", "people", "lookup"].includes(reportMainTab)));
+  const needsGroupDetails = isAdmin && tab === "groups";
+  const needsBaleSettings = isAdmin && tab === "reports" && reportMainTab === "bale";
+  useEffect(() => {
+    if (!authUser) return;
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
+  }, [authUser?.nationalId]);
+
+  useEffect(() => {
+    if (!authUser || !dashboardLoaded) return;
+    const controller = new AbortController();
+    async function read(path: string, apply: (data: unknown) => void) {
+      try {
+        const response = await fetchApi(path, { signal: controller.signal });
+        if (!response.ok) throw new Error();
+        const data: unknown = await response.json();
+        if (!controller.signal.aborted) apply(data);
+      } catch {
+        if (!controller.signal.aborted) setError("بخشی از اطلاعات صفحه دریافت نشد.");
+      }
+    }
+    if (needsDirectory) void read("/api/users", data => setUsers(asArray(data)));
+    if (needsMeetings) void read("/api/meetings", data => setMeetings(asArray(data)));
+    if (needsGroupDetails) void read("/api/groups", data => setGroups(asGroups(data)));
+    if (needsBaleSettings) void read("/api/settings/bale-notifications", data => {
+      const settings = data as { enabled?: boolean; configured?: boolean };
+      setBaleNotificationsEnabled(!!settings.enabled);
+      setBaleNotificationsConfigured(!!settings.configured);
+    });
+    return () => controller.abort();
+  }, [authUser?.nationalId, dashboardLoaded, needsDirectory, needsMeetings, needsGroupDetails, needsBaleSettings, tabDataRevision]);
   useEffect(() => {
     if (!authUser || !isAdmin || tab !== "reports" || reportMainTab !== "people" || peopleReportLoaded || peopleReportFetchStarted.current) return;
     peopleReportFetchStarted.current = true;
@@ -639,17 +676,21 @@ export default function App() {
   }, [authUser?.nationalId, isAdmin, tab, reportMainTab, dataQualityLoaded, dataQualityRetry]);
   useEffect(() => {
     if (!authUser || !isAdmin || (tab !== "reports" && tab !== "wall" && tab !== "resolutions" && tab !== "special-followups" && tab !== "provincial-trips") || (tab === "reports" && (reportMainTab === "backup" || reportMainTab === "quality"))) return;
-    const requestType = tab === "wall" || tab === "resolutions" || tab === "special-followups" || tab === "provincial-trips" ? "submissions" : reportMainTab === "overview" ? "summary" : (reportMainTab === "actions" || reportMainTab === "resolution" || reportMainTab === "special" || reportMainTab === "provincial") ? "submissions" : null;
+    const requestType = tab === "reports"
+      ? reportMainTab === "overview" ? "summary" : ["actions", "resolution", "special", "provincial"].includes(reportMainTab) ? "submissions" : null
+      : (tab === "wall" && wallReportsRequested) || (tab === "resolutions" && openResolutionReportsId !== null) ||
+        ((tab === "special-followups" || tab === "provincial-trips") && specialDetailId !== null) ? "submissions" : null;
     if (!requestType) { setReportsError(""); setReportsLoading(false); return; }
     const loaded = requestType === "summary" ? reportsLoaded : submissionsLoaded;
     const fetchingRef = requestType === "summary" ? summaryFetchStarted : submissionsFetchStarted;
     if (loaded || fetchingRef.current) return;
     let active = true;
+    const controller = new AbortController();
     const endpoint = requestType === "summary" ? "/api/reports?view=summary" : "/api/reports/submissions";
     fetchingRef.current = true;
     setReportsLoading(true);
     setReportsError("");
-    fetchApi(endpoint, { credentials: "include", cache: "no-store" }).then(async response => {
+    fetchApi(endpoint, { credentials: "include", cache: "no-store", signal: controller.signal }).then(async response => {
       const data = await response.json();
       if (!response.ok) throw new Error(data?.error || (requestType === "submissions" ? "گزارش‌های اقدامات دریافت نشد." : "گزارش مدیریتی دریافت نشد."));
       if (!active) return;
@@ -662,10 +703,10 @@ export default function App() {
       }
     }).catch(cause => {
       if (active) setReportsError(cause instanceof Error ? cause.message : "دریافت گزارش ناموفق بود.");
-      fetchingRef.current = false;
+      if (active) fetchingRef.current = false;
     }).finally(() => { if (active) setReportsLoading(false); });
-    return () => { active = false; fetchingRef.current = false; setReportsLoading(false); };
-  }, [authUser?.nationalId, isAdmin, tab, reportMainTab, reportsLoaded, submissionsLoaded, reportsRetryCount]);
+    return () => { active = false; controller.abort(); fetchingRef.current = false; setReportsLoading(false); };
+  }, [authUser?.nationalId, isAdmin, tab, reportMainTab, reportsLoaded, submissionsLoaded, reportsRetryCount, openResolutionReportsId, specialDetailId, wallReportsRequested]);
   useEffect(() => {
     if (!authUser || !isAdmin || tab !== "archive" || archiveLoaded || archiveFetchStarted.current) return;
     let active = true;
@@ -695,15 +736,16 @@ export default function App() {
     return () => { active = false; };
   }, [authUser?.nationalId]);
   useEffect(() => {
-    if (!isAdmin || tab !== "reports") return;
+    if (!isAdmin || tab !== "reports" || reportMainTab !== "bale") return;
     let active = true;
+    const controller = new AbortController();
     const params = new URLSearchParams({ page: String(baleMessagePage), pageSize: "20", status: baleMessageStatus });
     if (baleMessageQuery.trim()) params.set("q", baleMessageQuery.trim());
     if (baleMessageFrom) params.set("from", baleMessageFrom);
     if (baleMessageTo) params.set("to", baleMessageTo);
     setBaleMessageLoading(true);
     setBaleMessageError("");
-    fetchApi(`/api/reports/bale-messages?${params.toString()}`, { credentials: "include" })
+    fetchApi(`/api/reports/bale-messages?${params.toString()}`, { credentials: "include", signal: controller.signal })
       .then(async response => {
         const body = await response.json();
         if (!response.ok) throw new Error(body?.error || "گزارش ارسال‌های بله دریافت نشد.");
@@ -712,8 +754,20 @@ export default function App() {
       .then(result => { if (active) setBaleMessageReport(result); })
       .catch(cause => { if (active) setBaleMessageError(cause instanceof Error ? cause.message : "خطا در دریافت گزارش ارسال‌های بله"); })
       .finally(() => { if (active) setBaleMessageLoading(false); });
-    return () => { active = false; };
-  }, [isAdmin, tab, baleMessagePage, baleMessageStatus, baleMessageQuery, baleMessageFrom, baleMessageTo]);
+    return () => { active = false; controller.abort(); };
+  }, [isAdmin, tab, reportMainTab, baleMessagePage, baleMessageStatus, baleMessageQuery, baleMessageFrom, baleMessageTo]);
+  useEffect(() => {
+    if (!authUser || !dashboardLoaded || (tab !== "wall" && tab !== "notifications")) return;
+    const controller = new AbortController();
+    fetchApi("/api/notifications", { signal: controller.signal })
+      .then(async response => { if (response.ok) {
+        const data = await response.json();
+        if (!controller.signal.aborted) setNotifications(asArray<UserNotification>(data));
+      } })
+      .catch(() => { /* the notification feed retries while open */ });
+    return () => controller.abort();
+  }, [authUser?.nationalId, dashboardLoaded, tab, tabDataRevision]);
+
   useEffect(() => {
     if (!authUser || tab !== "notifications") return;
     let active = true;
@@ -1142,7 +1196,6 @@ export default function App() {
     }
   }
   const [tripResolution, setTripResolution] = useState<{ id: number; draft: boolean; title: string } | null>(null);
-  const [specialDetailId, setSpecialDetailId] = useState<number | null>(null);
   const [printTrip, setPrintTrip] = useState<Trip | null>(null);
 
   function openCreateResolution(meeting?: MeetingOption, isSpecialTracking = false, specialTrackingType: "minister" | "provincial" = "minister", trip?: Trip, draft = false) {
@@ -1906,7 +1959,7 @@ export default function App() {
 
 
   function renderResolutionCard(item: Resolution) {
-    return <ResolutionCard key={item.id} busy={busy} sentWarningIds={sentWarningKeys} onSendWarning={nationalIds=>sendResolutionWarnings(item.id,nationalIds)} anchorId={`resolution-${item.id}`} item={item} submittedReports={reportSubmissions} reportsLoading={reportsLoading} reportsError={reportsError} groups={groups} users={users} viewerId={viewerId} isAdmin={isAdmin} onStatus={(status,nationalId)=>void updateResolutionStatus(item.id,status,nationalId)} onUpload={file=>uploadAttachment(item.id,file)} eventDraft={eventDrafts[item.id] ?? ""} onEventChange={text=>setEventDrafts(current=>({...current,[item.id]:text}))} onEventSubmit={()=>void addResolutionEvent(item.id)} onReportDraftChange={text=>setReportDrafts(current=>({...current,[item.id]:text}))} reportDraft={reportDrafts[item.id] ?? (isAdmin ? "" : "مصوبه به طور صحیح و در موعد مقرر انجام شد")} submittedFading={fadingReportedResolutionIds.includes(item.id)} onReportSubmit={files=>submitCompletionReport(item.id,files)} periodicDraft={periodicDrafts[item.id] ?? ""} onPeriodicDraftChange={text=>setPeriodicDrafts(current=>({...current,[item.id]:text}))} onPeriodicSubmit={()=>void submitPeriodicReport(item.id)} onApproveAttachment={(attachmentId,approved)=>void request(`/api/attachments/${attachmentId}/approval`,"PATCH",{nationalId:viewerId,approvedForAll:approved})}/>;
+    return <ResolutionCard key={item.id} busy={busy} sentWarningIds={sentWarningKeys} onSendWarning={nationalIds=>sendResolutionWarnings(item.id,nationalIds)} anchorId={`resolution-${item.id}`} item={item} onOpenReports={() => setWallReportsRequested(true)} submittedReports={reportSubmissions} reportsLoading={reportsLoading} reportsError={reportsError} groups={groups} users={users} viewerId={viewerId} isAdmin={isAdmin} onStatus={(status,nationalId)=>void updateResolutionStatus(item.id,status,nationalId)} onUpload={file=>uploadAttachment(item.id,file)} eventDraft={eventDrafts[item.id] ?? ""} onEventChange={text=>setEventDrafts(current=>({...current,[item.id]:text}))} onEventSubmit={()=>void addResolutionEvent(item.id)} onReportDraftChange={text=>setReportDrafts(current=>({...current,[item.id]:text}))} reportDraft={reportDrafts[item.id] ?? (isAdmin ? "" : "مصوبه به طور صحیح و در موعد مقرر انجام شد")} submittedFading={fadingReportedResolutionIds.includes(item.id)} onReportSubmit={files=>submitCompletionReport(item.id,files)} periodicDraft={periodicDrafts[item.id] ?? ""} onPeriodicDraftChange={text=>setPeriodicDrafts(current=>({...current,[item.id]:text}))} onPeriodicSubmit={()=>void submitPeriodicReport(item.id)} onApproveAttachment={(attachmentId,approved)=>void request(`/api/attachments/${attachmentId}/approval`,"PATCH",{nationalId:viewerId,approvedForAll:approved})}/>;
   }
   function renderSpecialItems(items: Resolution[], tripTitle = "") {
     if (!items.length) return <p className="report-empty">موردی برای نمایش وجود ندارد.</p>;
@@ -2091,7 +2144,7 @@ export default function App() {
       {tab === "groups" && isAdmin && <ProvincialPoles api={fetchApi} provinces={iranProvinceOptions} users={users} />}
       {tab === "groups" && isAdmin && <div className="group-layout"><section className="panel"><h2>مدیریت گروه‌ها</h2><p>گروه‌ها را بسازید، اعضا را مدیریت کنید و گروه خالیِ بدون ارجاع را حذف کنید.</p>{groupDeleteError && <div className="notice" role="alert">{groupDeleteError}</div>}<label>افزودن گروه جدید<div className="inline-form"><input value={groupName} onChange={event=>setGroupName(event.target.value)} placeholder="نام گروه"/><button className="primary" disabled={busy||!groupName.trim()} onClick={async()=>{const name=groupName.trim();if(await request("/api/groups","POST",{name,category:"group"})){setGroupName("");}}}>افزودن گروه</button></div></label><label>گروه<select value={selectedGroup} onChange={event=>{setSelectedGroup(event.target.value);setSelectedPerson(null);}}><option value="">انتخاب گروه</option>{groups.filter(group=>!isIndividualRecipientGroup(group.name)).map(group=><option key={group.id} value={group.id}>{group.name} ({group.members.length} عضو)</option>)}</select></label>{selectedGroup&&<><label>دسته‌بندی<select disabled={busy} value={groups.find(group=>String(group.id)===selectedGroup)?.category || (isResolutionGroup(groups.find(group=>String(group.id)===selectedGroup)?.name || "") ? "group" : "unit")} onChange={event=>{const group=groups.find(item=>String(item.id)===selectedGroup);if(group)void changeGroupCategory(group,event.target.value as "group"|"unit");}}><option value="group">گروه</option><option value="unit">معاونت/واحد</option></select></label><div className="members">{(groups.find(group=>String(group.id)===selectedGroup)?.members??[]).map(member=><div className="member" key={member.id}><span className="avatar small">{member.displayName[0]}</span><div><b>{member.displayName}</b><small>{member.title||"سمت ثبت نشده"}</small>{displayLocation(member.organizationUnit)&&<small>{displayLocation(member.organizationUnit)}</small>}<small className="member-mobile">{member.mobile||"موبایل ثبت نشده"}</small></div><button className="icon-btn" title="حذف عضو از گروه" onClick={()=>void request(`/api/groups/${selectedGroup}/members/${member.nationalId}`,"DELETE")}><X size={17}/></button></div>)}</div><button type="button" className="secondary wide" disabled={busy} onClick={()=>{const group=groups.find(item=>String(item.id)===selectedGroup);if(group)void deleteGroup(group);}}>حذف گروه انتخاب‌شده</button></>}</section><section className="panel"><h2>افزودن عضو با کد ملی یا نام</h2><p>با کد ملی یا نام و نام خانوادگی جستجو کنید؛ سمت از اطلاعات پست کاربر به‌روز می‌شود.</p><label>گروه<select value={selectedGroup} onChange={event => setSelectedGroup(event.target.value)}><option value="">انتخاب گروه</option>{groups.filter(group=>isResolutionGroup(group.name,group.category)).map(group => <option key={group.id} value={group.id}>{groupDisplayName(group.name)}</option>)}</select></label><label>جستجوی شخص<input value={memberSearch} onChange={event => void searchMembers(event.target.value)} placeholder="کد ملی یا نام و نام خانوادگی" /></label>{memberSearching && <div className="selected-person">در حال جستجو…</div>}{memberSearchMessage && <div className="member-search-message">{memberSearchMessage}</div>}{memberMatches.length > 0 && <div className="member-search-results">{memberMatches.map(person => <button type="button" key={person.nationalId} className={selectedPerson?.nationalId === person.nationalId ? "selected" : ""} onClick={() => { setSelectedPerson(person); setMemberSearch(person.displayName); setNationalId(person.nationalId); setMemberMatches([]); }}><span>{person.displayName}</span>{isAdmin && /[0-9۰-۹٠-٩]/.test(memberSearch) && <small>{person.nationalId}</small>}</button>)}</div>}{selectedPerson && <div className="selected-person profile-editor"><b>انتخاب‌شده: {selectedPerson.displayName}</b><div className="person-name-fields"><label>پست / سمت<input value={selectedPerson.title||""} onChange={event=>setSelectedPerson({...selectedPerson,title:event.target.value})}/></label><label>معاونت / مرکز / استان<input value={selectedPerson.organizationUnit||""} onChange={event=>setSelectedPerson({...selectedPerson,organizationUnit:event.target.value})}/></label></div><button type="button" className="secondary" disabled={busy} onClick={async()=>{if(await request(`/api/users/${encodeURIComponent(selectedPerson.nationalId)}/profile`,"PATCH",{title:selectedPerson.title||"",organizationUnit:selectedPerson.organizationUnit||""})) { setSelectedPerson({...selectedPerson}); }}}>ذخیره اطلاعات پست و محل مسئولیت</button></div>}<button className="primary wide" disabled={busy || !selectedGroup || !selectedPerson} onClick={() => void addMember()}>افزودن عضو به گروه</button><div className="members">{(groups.find(group => String(group.id) === selectedGroup)?.members ?? []).map(member => <div className="member" key={member.id}><span className="avatar small">{member.displayName[0]}</span><div><b>{member.displayName}</b><small>{member.title || "سمت ثبت نشده"}</small><small className="member-mobile">{member.mobile||"موبایل ثبت نشده"}</small></div><button className="icon-btn" title="حذف عضو" onClick={() => void request(`/api/groups/${selectedGroup}/members/${member.nationalId}`, "DELETE")}><X size={17} /></button></div>)}</div></section><section className="panel"><div className="section-head"><div><h2>معاونت‌ها و مسئولان</h2><p>معاونت‌ها در این فهرست جدا از گروه‌های اصلی هستند؛ واحدهای بدون مسئول مشخص علامت‌گذاری می‌شوند.</p></div></div>{groupDeleteError && <div className="notice" role="alert">{groupDeleteError}</div>}<label>افزودن معاونت یا واحد جدید<div className="inline-form"><input value={newUnitName} onChange={event=>setNewUnitName(event.target.value)} placeholder="نام معاونت یا واحد"/><button className="primary" disabled={busy||!newUnitName.trim()} onClick={async()=>{const name=newUnitName.trim();if(await request("/api/groups","POST",{name,category:"unit"})){setNewUnitName("");setSelectedUnit("");}}}>افزودن</button></div></label><label>معاونت یا واحد<select value={selectedUnit} onChange={event=>{setSelectedUnit(event.target.value);setSelectedPerson(null);}}><option value="">انتخاب معاونت/واحد</option>{groups.filter(unit=>!isResolutionGroup(unit.name, unit.category)&&!isIndividualRecipientGroup(unit.name)).map(unit=><option key={unit.id} value={unit.id}>{unit.name} — {unit.members.length ? "مسئول مشخص شده" : "⚠ مسئول مشخص نشده"}</option>)}</select></label>{selectedUnit && (()=>{const unit=groups.find(group=>String(group.id)===selectedUnit);return <><label>دسته‌بندی<select disabled={busy} value={unit?.category || "unit"} onChange={event=>{if(unit)void changeGroupCategory(unit,event.target.value as "group"|"unit");}}><option value="unit">معاونت/واحد</option><option value="group">گروه</option></select></label>{unit?.members.length ? <div className="selected-person">مسئول مشخص شده: <b>{unit.members.map(member=>member.displayName).join("، ")}</b></div> : <div className="notice" role="status">برای این معاونت/واحد هنوز مسئولی مشخص نشده است.</div>}</>;})()}<label>جستجوی مسئول<input value={memberSearch} onChange={event=>void searchMembers(event.target.value)} placeholder="کد ملی یا نام و نام خانوادگی"/></label>{memberSearching&&<div className="selected-person">در حال جستجو…</div>}{memberSearchMessage&&<div className="member-search-message">{memberSearchMessage}</div>}{memberMatches.length>0&&<div className="member-search-results">{memberMatches.map(person=><button type="button" key={person.nationalId} className={selectedPerson?.nationalId===person.nationalId?"selected":""} onClick={()=>{setSelectedPerson(person);setMemberSearch(person.displayName);setNationalId(person.nationalId);setMemberMatches([]);}}><span>{person.displayName}</span><small>{person.title||"سمت ثبت نشده"}{displayLocation(person.organizationUnit) ? " · "+displayLocation(person.organizationUnit) : ""}</small></button>)}</div>}{selectedPerson&&<div className="selected-person">مسئول انتخاب‌شده: <b>{selectedPerson.displayName}</b><small>{selectedPerson.title||"سمت ثبت نشده"}{displayLocation(selectedPerson.organizationUnit) ? " · "+displayLocation(selectedPerson.organizationUnit) : ""}</small></div>}<button className="primary wide" disabled={busy||!selectedUnit||!selectedPerson} onClick={()=>void addUnitResponsible()}>افزودن مسئول به معاونت/واحد</button><div className="members">{(groups.find(group=>String(group.id)===selectedUnit)?.members??[]).map(member=><div className="member" key={member.id}><span className="avatar small">{member.displayName[0]}</span><div><b>{member.displayName}</b><small>{member.title||"سمت ثبت نشده"}</small>{displayLocation(member.organizationUnit)&&<small>{displayLocation(member.organizationUnit)}</small>}<small className="member-mobile">{member.mobile||"موبایل ثبت نشده"}</small></div><button className="icon-btn" title="حذف مسئول از معاونت/واحد" onClick={()=>void request(`/api/groups/${selectedUnit}/members/${member.nationalId}`,"DELETE")}><X size={17}/></button></div>)}</div><button type="button" className="secondary wide" disabled={busy||!selectedUnit} onClick={()=>{const unit=groups.find(group=>String(group.id)===selectedUnit);if(unit)void deleteGroup(unit);}}>حذف معاونت/واحد انتخاب‌شده</button></section><section className="panel add-directory-person"><h2>افزودن کاربر جدید</h2><p>پست و معاونت، مرکز یا استانِ محل مسئولیت را برای هر فرد ثبت کنید.</p><label>کد ملی<input value={newPerson.nationalId} onChange={event => setNewPerson({ ...newPerson, nationalId: event.target.value })} inputMode="numeric" maxLength={11} /></label><div className="person-name-fields"><label>نام<input value={newPerson.firstName} onChange={event => setNewPerson({ ...newPerson, firstName: event.target.value })} /></label><label>نام خانوادگی<input value={newPerson.lastName} onChange={event => setNewPerson({ ...newPerson, lastName: event.target.value })} /></label></div><label>پست / سمت<input value={newPerson.title} onChange={event=>setNewPerson({...newPerson,title:event.target.value})} placeholder="مثلاً مدیرکل، رئیس مرکز"/></label><label>معاونت / مرکز / استان<input value={newPerson.organizationUnit} onChange={event=>setNewPerson({...newPerson,organizationUnit:event.target.value})} placeholder="واحدی که مسئول آن است"/></label><button className="primary wide" disabled={busy || newPerson.nationalId.trim().length < 8 || !newPerson.firstName.trim() || !newPerson.lastName.trim()} onClick={() => void createDirectoryPerson()}>ثبت کاربر</button></section><section className="panel role-management-panel"><div className="section-head"><div><h2>مدیریت کاربران و دسترسی ادمین</h2><p>با کد ملی کاربر را پیدا کنید، عنوان پست و موبایل را ویرایش کنید یا دسترسی ادمین را مدیریت کنید. دسترسی ادمین اصلی قابل لغو نیست.</p></div><span className="counter">{users.filter(user=>user.role==="ادمین").length} ادمین</span></div><div className="search"><Search size={16}/><input inputMode="numeric" dir="ltr" value={adminUserQuery} onChange={event=>setAdminUserQuery(event.target.value)} placeholder="جستجو با کد ملی"/></div><div className="role-user-list">{filteredRoleUsers.map(user=><div className="role-user-row" key={user.nationalId}><div className="role-user-identity"><b>{user.displayName}</b><small>{user.title||"سمت ثبت نشده"}</small><small className="role-national-id" dir="ltr">{user.nationalId}</small><small className="member-mobile">{user.mobile||"موبایل ثبت نشده"}</small></div><span className={`role-badge ${user.role==="ادمین"?"admin":""}`}>{user.role==="ادمین"?"دسترسی ادمین فعال":"دسترسی ادمین ندارد"}</span><div className="role-user-actions"><button type="button" className="secondary" disabled={busy} onClick={()=>void editUserTitle(user)}>ویرایش پست</button>{user.nationalId==="0534921973"?<span className="primary-admin-label">ادمین اصلی</span>:<button type="button" className={user.role==="ادمین"?"secondary":"primary"} disabled={busy||user.canChangeRole===false} title={user.canChangeRole===false?"نمی‌توانید دسترسی ادمین حساب فعلی خودتان را لغو کنید":""} onClick={()=>void request(`/api/users/${encodeURIComponent(user.nationalId)}/role`,"PATCH",{isAdmin:user.role!=="ادمین"})}>{user.role==="ادمین"?"لغو دسترسی ادمین":"اعطای دسترسی ادمین"}</button>}</div></div>)}{filteredRoleUsers.length===0&&<div className="report-empty">{adminUserQuery.trim().length<8?"برای جستجو، کد ملی را وارد کنید.":"کاربری با این کد ملی پیدا نشد."}</div>}</div></section></div>}
 
-      {tab === "reports" && isAdmin && <div className={`reports-page reports-tab-${reportMainTab} ${reportsError ? "has-load-error" : ""}`} aria-busy={reportsLoading}>{reportsLoading && <div className="panel reports-loading-notice" role="status"><span className="app-loading-spinner" aria-hidden="true"/><div><b>در حال بارگذاری گزارش‌ها</b><small>صفحه‌های دیگر مستقل از دریافت این گزارش‌ها در دسترس هستند.</small></div></div>}{reportsError && <div className="panel reports-error-notice" role="alert"><span>{reportsError}</span><button className="secondary" type="button" onClick={()=>{if(reportMainTab==="actions"||reportMainTab==="resolution"||reportMainTab==="special"||reportMainTab==="provincial"){submissionsFetchStarted.current=false;setSubmissionsLoaded(false);}else{summaryFetchStarted.current=false;setReportsLoaded(false);}setReportsError("");setReportsRetryCount(count=>count+1);}}>تلاش دوباره</button></div>}<div className="reports-main-tabs" role="tablist" aria-label="بخش‌های گزارش‌ها"><button type="button" role="tab" aria-selected={reportMainTab==="overview"} className={reportMainTab==="overview"?"active":""} onClick={()=>setReportMainTab("overview")}><LayoutDashboard size={16}/>نمای کلی</button><button type="button" role="tab" aria-selected={reportMainTab==="lookup"} className={reportMainTab==="lookup"?"active":""} onClick={()=>setReportMainTab("lookup")}><Search size={16}/>وضعیت سریع</button><button type="button" role="tab" aria-selected={reportMainTab==="resolution"} className={reportMainTab==="resolution"?"active":""} onClick={()=>setReportMainTab("resolution")}><ClipboardList size={16}/>وضعیت مصوبه</button><button type="button" role="tab" aria-selected={reportMainTab==="bale"} className={reportMainTab==="bale"?"active":""} onClick={()=>setReportMainTab("bale")}><Bell size={16}/>گزارش اطلاعیه‌ها</button><button type="button" role="tab" aria-selected={reportMainTab==="actions"} className={reportMainTab==="actions"?"active":""} onClick={()=>setReportMainTab("actions")}><FileText size={16}/>گزارش اقدامات</button><button type="button" role="tab" aria-selected={reportMainTab==="special"} className={reportMainTab==="special"?"active":""} onClick={()=>setReportMainTab("special")}><ClipboardList size={16}/>گزارش پیگیری‌های ویژه</button><button type="button" role="tab" aria-selected={reportMainTab==="provincial"} className={reportMainTab==="provincial"?"active":""} onClick={()=>setReportMainTab("provincial")}><MapPin size={16}/>سفرهای استانی</button><button type="button" role="tab" aria-selected={reportMainTab==="people"} className={reportMainTab==="people"?"active":""} onClick={()=>{setReportMainTab("people");setReportViewTab("people");}}><Users size={16}/>گزارش فردی</button><button type="button" role="tab" aria-selected={reportMainTab==="events"} className={reportMainTab==="events"?"active":""} onClick={()=>setReportMainTab("events")}><ClipboardList size={16}/>گزارش رویدادها</button><button type="button" role="tab" aria-selected={reportMainTab==="backup"} className={reportMainTab==="backup"?"active":""} onClick={()=>setReportMainTab("backup")}><Archive size={16}/>پشتیبان‌گیری</button><button type="button" role="tab" aria-selected={reportMainTab==="quality"} className={reportMainTab==="quality"?"active":""} onClick={()=>setReportMainTab("quality")}><ShieldCheck size={16}/>کیفیت داده</button></div>
+      {tab === "reports" && isAdmin && <div className={`reports-page reports-tab-${reportMainTab} ${reportsError ? "has-load-error" : ""}`} aria-busy={reportsLoading}>{reportsLoading && <div className="panel reports-loading-notice" role="status"><span className="app-loading-spinner" aria-hidden="true"/><div><b>در حال بارگذاری گزارش‌ها</b><small>صفحه‌های دیگر مستقل از دریافت این گزارش‌ها در دسترس هستند.</small></div></div>}{reportsError && <div className="panel reports-error-notice" role="alert"><span>{reportsError}</span><button className="secondary" type="button" onClick={()=>{if(reportMainTab==="actions"||reportMainTab==="resolution"||reportMainTab==="special"||reportMainTab==="provincial"){submissionsFetchStarted.current=false;setSubmissionsLoaded(false);}else{summaryFetchStarted.current=false;setReportsLoaded(false);}setReportsError("");setReportsRetryCount(count=>count+1);}}>تلاش دوباره</button></div>}<div className="reports-main-tabs" role="tablist" aria-label="بخش‌های گزارش‌ها"><button type="button" role="tab" aria-selected={reportMainTab==="overview"} className={reportMainTab==="overview"?"active":""} onClick={()=>setReportMainTab("overview")}><LayoutDashboard size={16}/>نمای کلی</button><button type="button" role="tab" aria-selected={reportMainTab==="lookup"} className={reportMainTab==="lookup"?"active":""} onClick={()=>setReportMainTab("lookup")}><Search size={16}/>وضعیت سریع</button><button type="button" role="tab" aria-selected={reportMainTab==="resolution"} className={reportMainTab==="resolution"?"active":""} onClick={()=>setReportMainTab("resolution")}><ClipboardList size={16}/>وضعیت مصوبه</button><button type="button" role="tab" aria-selected={reportMainTab==="bale"} className={reportMainTab==="bale"?"active":""} onClick={()=>setReportMainTab("bale")}><Bell size={16}/>گزارش اطلاعیه‌ها</button><button type="button" role="tab" aria-selected={reportMainTab==="actions"} className={reportMainTab==="actions"?"active":""} onClick={()=>setReportMainTab("actions")}><FileText size={16}/>گزارش اقدامات</button><button type="button" role="tab" aria-selected={reportMainTab==="special"} className={reportMainTab==="special"?"active":""} onClick={()=>setReportMainTab("special")}><ClipboardList size={16}/>گزارش پیگیری‌های ویژه</button><button type="button" role="tab" aria-selected={reportMainTab==="provincial"} className={reportMainTab==="provincial"?"active":""} onClick={()=>setReportMainTab("provincial")}><MapPin size={16}/>گزارش سفرهای استانی</button><button type="button" role="tab" aria-selected={reportMainTab==="people"} className={reportMainTab==="people"?"active":""} onClick={()=>{setReportMainTab("people");setReportViewTab("people");}}><Users size={16}/>گزارش فردی</button><button type="button" role="tab" aria-selected={reportMainTab==="events"} className={reportMainTab==="events"?"active":""} onClick={()=>setReportMainTab("events")}><ClipboardList size={16}/>گزارش رویدادها</button><button type="button" role="tab" aria-selected={reportMainTab==="backup"} className={reportMainTab==="backup"?"active":""} onClick={()=>setReportMainTab("backup")}><Archive size={16}/>پشتیبان‌گیری</button><button type="button" role="tab" aria-selected={reportMainTab==="quality"} className={reportMainTab==="quality"?"active":""} onClick={()=>setReportMainTab("quality")}><ShieldCheck size={16}/>کیفیت داده</button></div>
         {reportMainTab === "provincial" && <ProvincialTripReport resolutions={resolutions} submissions={reportSubmissions}
           groups={groups} users={users} loading={!submissionsLoaded && !reportsError} submissionsError={!!reportsError && !submissionsLoaded} />}
         <section className="panel special-followups-report" aria-busy={reportsLoading}>
@@ -2387,7 +2440,7 @@ function TaskCompletionReport({ groups, resolutions, users }: {
   </section>;
 }
 
-function ResolutionCard({ item, groups, users, viewerId, isAdmin, busy, onStatus, onUpload, eventDraft, onEventChange, onEventSubmit, onApproveAttachment, reportDraft, onReportDraftChange, onReportSubmit, submittedFading, sentWarningIds, onSendWarning, periodicDraft, onPeriodicDraftChange, onPeriodicSubmit, anchorId, submittedReports = [], reportsLoading, reportsError }: { anchorId?: string; submittedReports?: ResolutionReport[]; reportsLoading: boolean; reportsError: string; item: Resolution; groups: Group[]; users: DirectoryUser[]; viewerId: string; isAdmin: boolean; busy: boolean; onStatus: (status: string, nationalId?: string) => void; onUpload: (file: File) => Promise<void>; eventDraft: string; onEventChange: (text: string) => void; onEventSubmit: () => void; onApproveAttachment: (attachmentId: number, approved: boolean) => void; reportDraft: string; onReportDraftChange: (text: string) => void; onReportSubmit: (files: File[]) => Promise<boolean>; submittedFading?: boolean; sentWarningIds: string[]; onSendWarning: (nationalIds: string[]) => Promise<string[]>; periodicDraft: string; onPeriodicDraftChange: (text: string) => void; onPeriodicSubmit: () => void }) {
+function ResolutionCard({ item, groups, users, viewerId, isAdmin, busy, onStatus, onUpload, eventDraft, onEventChange, onEventSubmit, onApproveAttachment, reportDraft, onReportDraftChange, onReportSubmit, submittedFading, sentWarningIds, onSendWarning, periodicDraft, onPeriodicDraftChange, onPeriodicSubmit, anchorId, submittedReports = [], reportsLoading, reportsError, onOpenReports }: { onOpenReports?: () => void; anchorId?: string; submittedReports?: ResolutionReport[]; reportsLoading: boolean; reportsError: string; item: Resolution; groups: Group[]; users: DirectoryUser[]; viewerId: string; isAdmin: boolean; busy: boolean; onStatus: (status: string, nationalId?: string) => void; onUpload: (file: File) => Promise<void>; eventDraft: string; onEventChange: (text: string) => void; onEventSubmit: () => void; onApproveAttachment: (attachmentId: number, approved: boolean) => void; reportDraft: string; onReportDraftChange: (text: string) => void; onReportSubmit: (files: File[]) => Promise<boolean>; submittedFading?: boolean; sentWarningIds: string[]; onSendWarning: (nationalIds: string[]) => Promise<string[]>; periodicDraft: string; onPeriodicDraftChange: (text: string) => void; onPeriodicSubmit: () => void }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [progressFilter, setProgressFilter] = useState<"pending" | "completed">("pending");
   const [warningSelection, setWarningSelection] = useState<string[]>([]);
@@ -2440,7 +2493,7 @@ function ResolutionCard({ item, groups, users, viewerId, isAdmin, busy, onStatus
     <p>{item.text}</p>{item.notes && <div className="note">توضیحات: {item.notes}</div>}{isAdmin && members.length===1 && warningMembers.length===1 && <div className="single-member-warning"><span><b>{warningMembers[0].displayName}</b><small>{labels[statusFor(warningMembers[0].nationalId)]}</small></span><span className="warning-tooltip-wrap" title={sentWarningIdSet.has(warningMembers[0].nationalId)?"✅ هشدار ارسال شد؛ برای ارسال دوباره صفحه را تازه‌سازی کنید.":"ارسال هشدار از طریق بله"}><button type="button" className="warning-send-button warning-send-button-single" disabled={busy||sentWarningIdSet.has(warningMembers[0].nationalId)} onClick={()=>void sendWarning([warningMembers[0].nationalId])}><Bell size={15}/><span>{busy ? "در حال ارسال..." : sentWarningIdSet.has(warningMembers[0].nationalId) ? "ارسال شد" : "ارسال هشدار در بله"}</span></button>{warningTooltipIds.includes(warningMembers[0].nationalId)&&<span className="warning-sent-tooltip" role="status">✅ هشدار ارسال شد؛ برای ارسال دوباره صفحه را تازه‌سازی کنید.</span>}</span></div>}{item.status === "cancelled" && item.cancellationReason && <div className="note cancellation-note">توضیح لغو: {item.cancellationReason}</div>}{item.dueDate && <div className={`deadline-chip ${item.dueDate < today() && personalStatus !== "completed" ? "overdue" : ""}`}><CalendarDays size={14}/><span>زمان سررسید: {formatDate(item.dueDate, item.dueDateJalali?.replace(/\./g,"/"))}</span>{item.dueDate < today() && item.status !== "completed" && <b>گذشته</b>}</div>}
     {item.requiresPeriodicReport && !isAdmin && !isRejected && item.status !== "cancelled" && personalStatus !== "completed" && <div className="completion-report periodic-report-box"><div className="report-status-line"><b>گزارش مستمر</b><span className="report-approval pending">{frequencyLabels[item.reportFrequency || ""] || item.reportFrequency}</span></div><small>ارسال طبق دورهٔ مصوبه انجام می‌شود. موعدهای رسیده را می‌توانید ثبت کنید.</small><textarea rows={3} value={periodicDraft} onChange={event=>onPeriodicDraftChange(event.target.value)} placeholder="گزارش این دوره را وارد کنید…" /><button type="button" className="primary" disabled={!periodicDraft.trim()} onClick={onPeriodicSubmit}>ارسال گزارش دوره‌ای</button></div>}{!isAdmin && !isRejected && <div className="completion-report"><div className="report-status-line"><b>گزارش اقدام و درخواست تأیید</b>{personalProgress?.approvalStatus && personalProgress.approvalStatus !== "none" && <span className={`report-approval ${personalProgress.approvalStatus}`}>{personalProgress.approvalStatus === "pending" ? "در انتظار بررسی" : personalProgress.approvalStatus === "approved" ? "تأیید شده" : "نیازمند اصلاح"}</span>}</div>{personalProgress?.reportText && <div className="submitted-report"><p>{personalProgress.reportText}</p>{personalProgress.adminFeedback && <small>نظر ادمین: {personalProgress.adminFeedback}</small>}</div>}<textarea rows={3} value={reportDraft} onChange={event=>onReportDraftChange(event.target.value)} placeholder="اقدام انجام‌شده و نتیجه را شرح دهید…" /><label className="report-file-picker"><Paperclip size={15}/><span>پیوست فایل گزارش (اختیاری)</span><input type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.rtf,.odt,.ods,.odp,.jpg,.jpeg,.png,.gif,.webp,.bmp,.tif,.tiff,.zip,.rar,.7z,.tar,.gz,.mp3,.wav,.ogg,.m4a,.aac,.flac,.mp4,.mov,.avi,.mkv,.webm" onChange={event=>{setReportFiles(Array.from(event.target.files ?? []));event.target.value="";}} /></label>{reportFiles.length>0&&<div className="report-selected-files">{reportFiles.map((file,index)=><span key={file.name+index}><FileText size={13}/>{file.name}<button type="button" aria-label={"حذف "+file.name} onClick={()=>setReportFiles(current=>current.filter((_,i)=>i!==index))}>×</button></span>)}</div>}<button type="button" className="secondary" disabled={busy} onClick={()=>void onReportSubmit(reportFiles).then(ok=>{if(ok)setReportFiles([]);})}>ثبت و ارسال گزارش</button></div>}
     
-    {isAdmin && <details className="admin-submitted-reports"><summary>گزارش‌های ارسالی کاربران ({itemSubmittedReports.length})</summary>{reportsLoading ? <small>در حال دریافت گزارش‌ها…</small> : reportsError ? <small role="alert">{reportsError}</small> : itemSubmittedReports.length ? <div className="submitted-report-list">{itemSubmittedReports.map(report=><article className="submitted-report-entry" key={report.id}><div className="report-status-line"><b>{report.reportType === "periodic" ? "گزارش مستمر" : "گزارش اقدام"} · {report.userName}</b><span className={`report-approval ${report.approvalStatus}`}>{report.approvalStatus === "pending" ? "در انتظار بررسی" : report.approvalStatus === "rejected" ? "نیازمند اصلاح" : "تأیید شده"}</span></div><small>{formatDateTime(report.submittedAt)}{report.userTitle ? ` · ${report.userTitle}` : ""}</small><p>{report.text}</p>{report.adminFeedback && <small>نظر مدیر: {report.adminFeedback}</small>}{report.attachments?.length ? <div className="submitted-report-files">{report.attachments.map(file=><a key={file.id} href={`/api/attachments/${file.id}`} target="_blank" rel="noreferrer"><Paperclip size={13}/>{file.originalName}</a>)}</div> : null}</article>)}</div> : <small>برای این مصوبه هنوز گزارشی از کاربران ثبت نشده است.</small>}</details>}
+    {isAdmin && <details className="admin-submitted-reports" onToggle={event => { if (event.currentTarget.open) onOpenReports?.(); }}><summary>گزارش‌های ارسالی کاربران ({itemSubmittedReports.length})</summary>{reportsLoading ? <small>در حال دریافت گزارش‌ها…</small> : reportsError ? <small role="alert">{reportsError}</small> : itemSubmittedReports.length ? <div className="submitted-report-list">{itemSubmittedReports.map(report=><article className="submitted-report-entry" key={report.id}><div className="report-status-line"><b>{report.reportType === "periodic" ? "گزارش مستمر" : "گزارش اقدام"} · {report.userName}</b><span className={`report-approval ${report.approvalStatus}`}>{report.approvalStatus === "pending" ? "در انتظار بررسی" : report.approvalStatus === "rejected" ? "نیازمند اصلاح" : "تأیید شده"}</span></div><small>{formatDateTime(report.submittedAt)}{report.userTitle ? ` · ${report.userTitle}` : ""}</small><p>{report.text}</p>{report.adminFeedback && <small>نظر مدیر: {report.adminFeedback}</small>}{report.attachments?.length ? <div className="submitted-report-files">{report.attachments.map(file=><a key={file.id} href={`/api/attachments/${file.id}`} target="_blank" rel="noreferrer"><Paperclip size={13}/>{file.originalName}</a>)}</div> : null}</article>)}</div> : <small>برای این مصوبه هنوز گزارشی از کاربران ثبت نشده است.</small>}</details>}
     {(members.length > 1 || groupIds.size > 1) && <div className="group-progress">
       <button className="progress-summary" type="button" aria-expanded={detailsOpen} onClick={() => setDetailsOpen(open => { if(!open) setProgressFilter("pending"); return !open; })}>
         <span className="progress-summary-top"><b>پیشرفت افراد ارجاع‌شده</b><strong>{completionPercent}٪ اجرا شده</strong></span>
