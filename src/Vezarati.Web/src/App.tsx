@@ -41,8 +41,15 @@ function loginWithSso(code: string): Promise<AuthUser> {
   if (pendingSsoLogin?.code === code) return pendingSsoLogin.task;
   const task = (async () => {
     const response = await fetch("/api/auth/sso", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) });
-    const body = await response.text();
-    if (!response.ok) throw new Error(response.status === 401 ? "کد ورود نامعتبر یا منقضی شده است؛ دوباره از درگاه وارد شوید." : body || `ورود ناموفق بود (HTTP ${response.status}).`);
+    if (!response.ok) {
+      if (response.status === 401) throw new Error("کد ورود نامعتبر یا منقضی شده است؛ دوباره از درگاه وارد شوید.");
+      const problem = await response.json().catch(() => null);
+      const detail = [problem?.detail, problem?.error].find(value => typeof value === "string" && value.trim());
+      const fallback = response.status >= 500
+        ? "ورود به سامانه انجام نشد. دوباره تلاش کنید و در صورت تکرار با پشتیبانی تماس بگیرید."
+        : "درخواست ورود پذیرفته نشد. دوباره از درگاه وارد شوید.";
+      throw new Error(response.status === 500 ? fallback : detail || fallback);
+    }
     let sessionResponse: Response | null = null;
     for (let attempt = 0; attempt < 3; attempt++) {
       sessionResponse = await fetch("/api/auth/me", { credentials: "include", cache: "no-store" });

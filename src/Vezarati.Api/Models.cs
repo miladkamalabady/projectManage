@@ -299,7 +299,7 @@ public sealed class AppUser
     public string NationalId { get; set; } = "";
     public string DisplayName { get; set; } = "";
     public string Role { get; set; } = "کاربر";
-    public string Title { get; set; } = "";
+    public string? Title { get; set; } = "";
     public string OrganizationUnit { get; set; } = "";
     public string FirstName { get; set; } = "";
     public string LastName { get; set; } = "";
@@ -308,13 +308,13 @@ public sealed class AppUser
     public string BirthDate { get; set; } = "";
     public string PersianBirthDate { get; set; } = "";
     public string Mobile { get; set; } = "";
-    public bool MobileOverriddenByAdmin { get; set; }
+    public bool? MobileOverriddenByAdmin { get; set; } = false;
     public int? UserType { get; set; }
-    public string PersonnelCode { get; set; } = "";
-    public string OrgPositionCode { get; set; } = "";
-    public string OrgPositionDesc { get; set; } = "";
+    public string? PersonnelCode { get; set; } = "";
+    public string? OrgPositionCode { get; set; } = "";
+    public string? OrgPositionDesc { get; set; } = "";
     public int? OrgPositionTypeCode { get; set; }
-    public string OrgPositionTypeDesc { get; set; } = "";
+    public string? OrgPositionTypeDesc { get; set; } = "";
     public int? RegionId { get; set; }
     public DateTimeOffset? LastLoginAt { get; set; }
 }

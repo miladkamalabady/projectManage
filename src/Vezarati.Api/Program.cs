@@ -558,7 +558,13 @@ app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context
         if (!isSuccessful)
             logger.LogWarning("Medu SSO response did not match a supported success shape (has status: {HasStatus}, nested data: {HasNestedData}).", root.TryGetProperty("status", out _), hasNestedData);
         string ReadString(string key) => data.TryGetProperty(key, out var value) && value.ValueKind != JsonValueKind.Null ? value.ToString() : "";
-        int? ReadInt(string key) => data.TryGetProperty(key, out var value) && value.TryGetInt32(out var number) ? number : null;
+        int? ReadInt(string key)
+        {
+            if (!data.TryGetProperty(key, out var value)) return null;
+            if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number)) return number;
+            if (value.ValueKind == JsonValueKind.String && int.TryParse(NormalizeDigits(value.GetString() ?? ""), out var parsed)) return parsed;
+            return null;
+        }
         var nationalId = ReadString("nationalID").Trim();
         if (!isSuccessful || nationalId.Length is < 8 or > 11 || !nationalId.All(char.IsDigit))
             return Results.StatusCode(StatusCodes.Status401Unauthorized);
@@ -578,7 +584,7 @@ app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context
         user.Gender = ReadInt("gender");
         user.BirthDate = ReadString("birthDate");
         user.PersianBirthDate = ReadString("persianBirthDate");
-        if (!user.MobileOverriddenByAdmin) user.Mobile = ReadString("mobile");
+        if (user.MobileOverriddenByAdmin != true) user.Mobile = ReadString("mobile");
         user.UserType = ReadInt("userType");
         user.PersonnelCode = ReadString("personnelCode");
         user.OrgPositionCode = ReadString("orgPositionCode");
@@ -596,7 +602,7 @@ app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context
         var claims = new[]
         {
             new Claim(ClaimTypes.NameIdentifier, nationalId), new Claim(ClaimTypes.Name, displayName),
-            new Claim(ClaimTypes.Role, role), new Claim("title", user.Title), new Claim("regionId", user.RegionId?.ToString() ?? "")
+            new Claim(ClaimTypes.Role, role), new Claim("title", user.Title ?? ""), new Claim("regionId", user.RegionId?.ToString() ?? "")
         };
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme));
         await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal, new AuthenticationProperties { IsPersistent = true, ExpiresUtc = DateTimeOffset.UtcNow.AddHours(8) });
@@ -638,13 +644,13 @@ app.MapGet("/api/auth/me", async (HttpContext context, AppDb db) =>
             new Claim(ClaimTypes.NameIdentifier, id),
             new Claim(ClaimTypes.Name, user.DisplayName),
             new Claim(ClaimTypes.Role, user.Role),
-            new Claim("title", string.IsNullOrWhiteSpace(user.Title) ? user.OrgPositionDesc : user.Title),
+            new Claim("title", string.IsNullOrWhiteSpace(user.Title) ? user.OrgPositionDesc ?? "" : user.Title),
             new Claim("regionId", user.RegionId?.ToString() ?? "")
         };
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme));
         await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal, new AuthenticationProperties { IsPersistent = true, ExpiresUtc = DateTimeOffset.UtcNow.AddHours(8) });
     }
-    return Results.Ok(new { nationalId = id, displayName = user.DisplayName, role = user.Role, title = string.IsNullOrWhiteSpace(user.Title) ? user.OrgPositionDesc : user.Title, organizationUnit = user.OrganizationUnit, province = user.RegionId?.ToString(), mobile = user.Mobile });
+    return Results.Ok(new { nationalId = id, displayName = user.DisplayName, role = user.Role, title = string.IsNullOrWhiteSpace(user.Title) ? user.OrgPositionDesc ?? "" : user.Title, organizationUnit = user.OrganizationUnit, province = user.RegionId?.ToString(), mobile = user.Mobile });
 });
 app.MapGet("/api/push/public-key", (IConfiguration configuration) =>
 {
@@ -770,7 +776,7 @@ app.MapPost("/api/meetings", async (MeetingRequest request, AppDb db, HttpContex
     {
         var id = NormalizeDigits(attendee.NationalId.Trim());
         var person = directory[id];
-        meeting.Attendees.Add(new MeetingAttendee { NationalId = id, DisplayName = person.DisplayName, Title = string.IsNullOrWhiteSpace(person.Title) ? person.OrgPositionDesc : person.Title, IsPresent = attendee.IsPresent, AbsenceReason = attendee.IsPresent ? "" : attendee.AbsenceReason?.Trim() ?? "" });
+        meeting.Attendees.Add(new MeetingAttendee { NationalId = id, DisplayName = person.DisplayName, Title = string.IsNullOrWhiteSpace(person.Title) ? person.OrgPositionDesc ?? "" : person.Title, IsPresent = attendee.IsPresent, AbsenceReason = attendee.IsPresent ? "" : attendee.AbsenceReason?.Trim() ?? "" });
     }
     db.Meetings.Add(meeting);
     await db.SaveChangesAsync(context.RequestAborted);
@@ -797,7 +803,7 @@ app.MapPut("/api/meetings/{id:int}", async (int id, MeetingRequest request, AppD
     {
         var personId = NormalizeDigits(attendee.NationalId.Trim());
         var person = directory[personId];
-        meeting.Attendees.Add(new MeetingAttendee { MeetingId = id, NationalId = personId, DisplayName = person.DisplayName, Title = string.IsNullOrWhiteSpace(person.Title) ? person.OrgPositionDesc : person.Title, IsPresent = attendee.IsPresent, AbsenceReason = attendee.IsPresent ? "" : attendee.AbsenceReason?.Trim() ?? "" });
+        meeting.Attendees.Add(new MeetingAttendee { MeetingId = id, NationalId = personId, DisplayName = person.DisplayName, Title = string.IsNullOrWhiteSpace(person.Title) ? person.OrgPositionDesc ?? "" : person.Title, IsPresent = attendee.IsPresent, AbsenceReason = attendee.IsPresent ? "" : attendee.AbsenceReason?.Trim() ?? "" });
     }
     await db.SaveChangesAsync(context.RequestAborted);
     return Results.Ok(meeting);
@@ -1760,11 +1766,11 @@ app.MapGet("/api/users/search", async (string? q, AppDb db) =>
     
     var people = directory
         .Where(person => Normalize(person.DisplayName).Contains(normalized) ||
-            Normalize(string.IsNullOrWhiteSpace(person.Title) ? person.OrgPositionDesc : person.Title).Contains(normalized) ||
+            Normalize(string.IsNullOrWhiteSpace(person.Title) ? person.OrgPositionDesc ?? "" : person.Title).Contains(normalized) ||
             (digits.Length >= 2 && person.NationalId.Contains(digits)))
         .OrderBy(person => person.DisplayName)
         .Take(30)
-        .Select(person => new { person.NationalId, person.DisplayName, Title = string.IsNullOrWhiteSpace(person.Title) ? person.OrgPositionDesc : person.Title, person.OrganizationUnit })
+        .Select(person => new { person.NationalId, person.DisplayName, Title = string.IsNullOrWhiteSpace(person.Title) ? person.OrgPositionDesc ?? "" : person.Title, person.OrganizationUnit })
         .ToList();
     return Results.Ok(people);
 });
@@ -1823,7 +1829,7 @@ app.MapGet("/api/users", async (HttpContext context, AppDb db) =>
     var users = await db.Users.AsNoTracking().OrderBy(user => user.DisplayName).ToListAsync();
     return Results.Ok(users.Select(user =>
     {
-        var title = string.IsNullOrWhiteSpace(user.Title) ? user.OrgPositionDesc : user.Title;
+        var title = string.IsNullOrWhiteSpace(user.Title) ? user.OrgPositionDesc ?? "" : user.Title;
         return new
         {
             user.NationalId,
@@ -1983,7 +1989,7 @@ app.MapGet("/api/reports/data-quality", async (HttpContext context, AppDb db) =>
 
     var missingMobiles = users.Where(user => string.IsNullOrWhiteSpace(user.Mobile)).ToList();
     var usersWithoutTasks = users.Where(user => !assignedNationalIds.Contains(user.NationalId)).ToList();
-    static object UserSummary(AppUser user) => new { displayName = user.DisplayName, title = string.IsNullOrWhiteSpace(user.Title) ? user.OrgPositionDesc : user.Title, organizationUnit = user.OrganizationUnit };
+    static object UserSummary(AppUser user) => new { displayName = user.DisplayName, title = string.IsNullOrWhiteSpace(user.Title) ? user.OrgPositionDesc ?? "" : user.Title, organizationUnit = user.OrganizationUnit };
     static object ResolutionSummary(Resolution item) => new { id = item.Id, number = item.Number, text = item.Text, dueDate = item.DueDate, meetingDate = item.MeetingDate };
     return Results.Ok(new
     {
@@ -2031,7 +2037,7 @@ app.MapGet("/api/reports", async (HttpContext context, AppDb db, string? view, i
         ).ToList();
     }
     var directory = await db.Users.ToDictionaryAsync(u => u.NationalId, u => (DisplayName: u.DisplayName, Title: u.Title));
-    var userTitles = await db.Users.ToDictionaryAsync(u => u.NationalId, u => u.Title);
+    var userTitles = await db.Users.ToDictionaryAsync(u => u.NationalId, u => u.Title ?? "");
     var personRows = new List<(string NationalId, string DisplayName, string Title, string Status)>();
     foreach (var record in records)
     {
