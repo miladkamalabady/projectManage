@@ -54,6 +54,7 @@ function loginWithSso(code: string): Promise<AuthUser> {
     for (let attempt = 0; attempt < 3; attempt++) {
       sessionResponse = await fetch("/api/auth/me", { credentials: "include", cache: "no-store" });
       if (sessionResponse.ok) return await sessionResponse.json() as AuthUser;
+      if (sessionResponse.status === 403) throw new Error("شما دسترسی به این سامانه ندارید.");
       if (sessionResponse.status !== 401) break;
       await new Promise(resolve => setTimeout(resolve, 200));
     }
@@ -585,9 +586,9 @@ export default function App() {
         .catch(cause => { sessionStorage.removeItem("vezarati.pendingSsoCode"); if (active) setError(cause instanceof Error ? cause.message : "ورود یکپارچه ناموفق بود."); })
         .finally(() => { if (active) setAuthReady(true); });
     } else {
-      fetch("/api/auth/me", { credentials: "include", cache: "no-store" }).then(async response => { if (!response.ok) throw new Error("ورود لازم است."); return response.json(); })
+      fetch("/api/auth/me", { credentials: "include", cache: "no-store" }).then(async response => { if (response.status === 403) throw new Error("شما دسترسی به این سامانه ندارید."); if (!response.ok) throw new Error(); return response.json(); })
         .then(user => { if (active) { if (window.location.pathname === "/" && user.role !== "ادمین") setTab("execution-calendar"); setAuthUser(user); setViewerId(user.nationalId); } })
-        .catch(() => { if (active) { setAuthUser(null); setViewerId(""); } })
+        .catch((cause: Error) => { if (active) { setAuthUser(null); setViewerId(""); if (cause.message === "شما دسترسی به این سامانه ندارید.") setError(cause.message); } })
         .finally(() => { if (active) setAuthReady(true); });
     }
     return () => { active = false; };

@@ -575,6 +575,10 @@ app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context
         var position = ReadString("orgPositionDesc");
         var user = await db.Users.FirstOrDefaultAsync(item => item.NationalId == nationalId, context.RequestAborted);
         var role = nationalId == primaryAdminNationalId ? "ادمین" : user?.Role == "ادمین" ? "ادمین" : "کاربر";
+        var personnelCode = ReadString("personnelCode").Trim();
+        if (role != "ادمین" && string.IsNullOrWhiteSpace(personnelCode) &&
+            !await HasAssignedResolution(db, nationalId, context.RequestAborted))
+            return Results.Json(new { error = "شما دسترسی به این سامانه ندارید." }, statusCode: StatusCodes.Status403Forbidden);
         if (user is null) { user = new AppUser { NationalId = nationalId }; db.Users.Add(user); }
         user.DisplayName = displayName;
         user.Role = role;
@@ -586,7 +590,7 @@ app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context
         user.PersianBirthDate = ReadString("persianBirthDate");
         if (user.MobileOverriddenByAdmin != true) user.Mobile = ReadString("mobile");
         user.UserType = ReadInt("userType");
-        user.PersonnelCode = ReadString("personnelCode");
+        user.PersonnelCode = personnelCode;
         user.OrgPositionCode = ReadString("orgPositionCode");
         user.OrgPositionDesc = position;
         user.OrgPositionTypeCode = ReadInt("orgPositionTypeCode");
@@ -637,6 +641,12 @@ app.MapGet("/api/auth/me", async (HttpContext context, AppDb db) =>
     if (string.IsNullOrWhiteSpace(id)) return Results.Unauthorized();
     var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(item => item.NationalId == id);
     if (user is null) return Results.Unauthorized();
+    if (user.Role != "ادمین" && string.IsNullOrWhiteSpace(user.PersonnelCode) &&
+        !await HasAssignedResolution(db, id, context.RequestAborted))
+    {
+        await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+        return Results.Json(new { error = "شما دسترسی به این سامانه ندارید." }, statusCode: StatusCodes.Status403Forbidden);
+    }
     if (!string.Equals(context.User.FindFirstValue(ClaimTypes.Role), user.Role, StringComparison.Ordinal))
     {
         var claims = new[]
@@ -718,15 +728,15 @@ app.MapGet("/api/dashboard", async (HttpContext context, AppDb db) =>
     }
     var eventNames = await LoadPersonDisplayNames(db);
     foreach (var entry in records.SelectMany(resolution => resolution.Events)) entry.Text = NormalizeStatusEventText(entry, eventNames);
-    if (!isAdmin) foreach (var resolution in records)
+    var groupIds = groups.Where(g => g.Members.Any(m => m.NationalId == id)).Select(g => g.Id).ToHashSet();
+    var mine = isAdmin ? records : records.Where(r => !r.IsArchived && r.Status != "cancelled" && (r.PublishToAll || (r.GroupId.HasValue && groupIds.Contains(r.GroupId.Value)) || r.GroupAssignments.Any(a => groupIds.Contains(a.GroupId)) || r.Assignments.Any(a => a.NationalId == id))).ToList();
+    if (!isAdmin) foreach (var resolution in mine)
     {
         foreach (var progress in resolution.Progress.Where(progress => progress.NationalId != id)) { progress.ReportText = ""; progress.AdminFeedback = ""; progress.ApprovalStatus = "none"; progress.NationalId = ""; }
         foreach (var entry in resolution.Events) entry.NationalId = "";
         foreach (var assignment in resolution.Assignments) assignment.NationalId = "";
         foreach (var attachment in resolution.Attachments) attachment.UploadedBy = "";
     }
-    var groupIds = groups.Where(g => g.Members.Any(m => m.NationalId == id)).Select(g => g.Id).ToHashSet();
-    var mine = isAdmin ? records : records.Where(r => !r.IsArchived && r.Status != "cancelled" && (r.PublishToAll || (r.GroupId.HasValue && groupIds.Contains(r.GroupId.Value)) || r.GroupAssignments.Any(a => groupIds.Contains(a.GroupId)) || r.Assignments.Any(a => a.NationalId == id))).ToList();
     if (!isAdmin)
     {
         var mineIds = mine.Select(item => item.Id).ToList();
@@ -1813,6 +1823,15 @@ app.MapPost("/api/users", async (CreateDirectoryPerson request, AppDb db) =>
     await db.SaveChangesAsync();
     return Results.Created($"/api/users/{person.NationalId}", new { person.NationalId, person.DisplayName, person.Title, person.OrganizationUnit });
 });
+static Task<bool> HasAssignedResolution(AppDb db, string nationalId, CancellationToken cancellationToken)
+{
+    var groupIds = db.GroupMembers.Where(member => member.NationalId == nationalId).Select(member => member.GroupId);
+    return db.Resolutions.AnyAsync(item => !item.IsArchived && item.Status != "cancelled" &&
+        (item.Assignments.Any(assignment => assignment.NationalId == nationalId) ||
+         (item.GroupId.HasValue && groupIds.Contains(item.GroupId.Value)) ||
+         item.GroupAssignments.Any(assignment => groupIds.Contains(assignment.GroupId))), cancellationToken);
+}
+
 static string NormalizeDigits(string value)
 {
     var persian = "۰۱۲۳۴۵۶۷۸۹"; var arabic = "٠١٢٣٤٥٦٧٨٩";
