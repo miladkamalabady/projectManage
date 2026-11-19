@@ -1372,12 +1372,23 @@ app.MapGet("/api/reports/bale-messages", async (HttpContext context, AppDb db, s
     });
     return Results.Ok(new { total, page, pageSize, items });
 });
-app.MapGet("/api/reports/submissions", async (AppDb db) =>
+app.MapGet("/api/reports/submissions", async (AppDb db, string? q, string? person, string? province, int? unit, string? approval, DateOnly? from, DateOnly? to, int? page) =>
 {
-    // SQLite cannot reliably translate ordering for DateTimeOffset; sort after materializing.
-    var reports = (await db.ResolutionReports.Include(report => report.Resolution).ToListAsync())
-        .OrderByDescending(report => report.SubmittedAt)
-        .ToList();
+    var query = db.ResolutionReports.AsNoTracking().AsQueryable();
+    if (!string.IsNullOrWhiteSpace(q)) query = query.Where(report => report.Text.Contains(q) || report.UserName.Contains(q) || report.Resolution!.Number.Contains(q) || report.Resolution.Text.Contains(q) || report.ResolutionId.ToString() == q);
+    if (!string.IsNullOrWhiteSpace(person)) query = query.Where(report => report.NationalId.Contains(person) || report.UserName.Contains(person) || db.Users.Any(user => user.NationalId == report.NationalId && user.DisplayName.Contains(person)));
+    var provinceMarker = string.IsNullOrWhiteSpace(province) ? "" : "\u001Fprovince:" + Uri.EscapeDataString(province);
+    if (!string.IsNullOrWhiteSpace(province)) query = query.Where(report => db.Users.Any(user => user.NationalId == report.NationalId && (user.OrganizationUnit.Contains(province) || (user.Title != null && user.Title.Contains(province)))) || report.Resolution!.Notes.Contains(provinceMarker));
+    if (unit.HasValue) query = query.Where(report => db.GroupMembers.Any(member => member.GroupId == unit && member.NationalId == report.NationalId) || db.Users.Any(user => user.NationalId == report.NationalId && db.Groups.Any(group => group.Id == unit && group.Name == user.OrganizationUnit)));
+    if (approval == "approved") query = query.Where(report => report.ApprovalStatus == "approved");
+    if (approval == "unapproved") query = query.Where(report => report.ApprovalStatus != "approved");
+    if (from.HasValue) { var start = new DateTimeOffset(from.Value.ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(3.5)); query = query.Where(report => report.SubmittedAt >= start); }
+    if (to.HasValue) { var end = new DateTimeOffset(to.Value.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(3.5)); query = query.Where(report => report.SubmittedAt < end); }
+    var total = page.HasValue ? await query.CountAsync() : 0;
+    var ordered = query.Include(report => report.Resolution).OrderByDescending(report => report.SubmittedAt).ThenByDescending(report => report.Id);
+    var reports = page.HasValue
+        ? await ordered.Skip((Math.Max(1, page.Value) - 1) * 50).Take(50).ToListAsync()
+        : await ordered.ToListAsync();
     var directory = (await db.Users.AsNoTracking()
         .Select(person => new { person.NationalId, person.DisplayName, person.Title })
         .ToListAsync())
@@ -1400,7 +1411,7 @@ app.MapGet("/api/reports/submissions", async (AppDb db) =>
             file.UploadedAt
         })
         .ToListAsync();
-    return Results.Ok(reports.Select(report => new
+    var items = reports.Select(report => new
     {
         report.Id,
         report.ResolutionId,
@@ -1417,7 +1428,8 @@ app.MapGet("/api/reports/submissions", async (AppDb db) =>
         report.AdminFeedback,
         DueDate = report.ReportType == "periodic" ? report.PeriodKey.Split(':').LastOrDefault() : null,
         Attachments = attachments.Where(file => file.ResolutionReportId == report.Id).ToList()
-    }));
+    }).ToList();
+    return page.HasValue ? Results.Ok(new { items, total, page = Math.Max(1, page.Value), pageSize = 50 }) : Results.Ok((object)items);
 });
 
 app.MapPatch("/api/reports/submissions/{reportId:int}/review", async (int reportId, ReportReviewRequest request, HttpContext context, AppDb db) =>
