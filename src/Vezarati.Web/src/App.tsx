@@ -2068,7 +2068,7 @@ export default function App() {
       {(error || message) && <div className="api-toast-stack" aria-live="polite">{error && <div className="api-toast api-toast-error" role="alert"><span>{error}</span><div><button type="button" className="secondary" onClick={() => void load()}>تلاش دوباره</button><button type="button" className="api-toast-close" aria-label="بستن پیام" onClick={() => setError("")}>×</button></div></div>}{message && <div className="api-toast api-toast-message" role="status"><span>{message}</span><button type="button" className="api-toast-close" aria-label="بستن پیام" onClick={() => setMessage("")}>×</button></div>}</div>}
       <section className="metrics"><Metric icon={<ClipboardList />} label="کل مصوبات" value={mine.length} color="blue" active={wallStatusFilter === "all" && tab === "wall"} onClick={() => { setTab("wall"); setWallStatusFilter("all"); }} /><Metric icon={<CheckCheck />} label="اجراشده" value={completed} color="green" active={tab === "wall" && wallStatusFilter === "completed"} onClick={() => { setTab("wall"); setWallStatusFilter("completed"); }} /><Metric icon={<CircleAlert />} label="نیازمند پیگیری" value={pending} color="amber" active={tab === "wall" && wallStatusFilter === "pending"} onClick={() => { setTab("wall"); setWallStatusFilter("pending"); }} />{isAdmin && <Metric icon={<CalendarDays />} label="انجام نشده" value={delayed} color="red" active={tab === "wall" && wallStatusFilter === "delayed"} onClick={() => { setTab("wall"); setWallStatusFilter("delayed"); }} />}</section>
       {tab === "wall" && isAdmin && <TaskCompletionReport
-        groups={groups} resolutions={activeResolutions} users={users}
+        groups={groups} resolutions={activeResolutions} users={users} onOpenResolution={openWallTask}
       />}
       {tab === "wall" && !isAdmin && <section className="panel personal-completion-report"><div className="section-head"><div><span className="report-kicker">گزارش فردی</span><h2>درصد انجام مصوبه‌های شما</h2><p>محاسبه بر اساس مصوبه‌های فعالِ ارجاع‌شده به شما</p></div><span className="counter">{mine.length} مصوبه</span></div><div className="personal-report-stats"><div><span>انجام‌شده</span><b>{personalCompletionPercent}٪</b><small>{personalCounts.completed} از {mine.length}</small></div><div><span>انجام‌نشده</span><b>{personalRemainingPercent}٪</b><small>{Math.max(0, mine.length - personalCounts.completed)} از {mine.length}</small></div></div><div className="personal-report-track" role="progressbar" aria-label="درصد انجام مصوبه‌های شما" aria-valuemin={0} aria-valuemax={100} aria-valuenow={personalCompletionPercent}><span style={{ width: `${personalCompletionPercent}%` }} /></div></section>}
 
@@ -2367,10 +2367,12 @@ function ProvincialTripReport({ resolutions, submissions, groups, users, loading
   </section>;
 }
 
-function TaskCompletionReport({ groups, resolutions, users }: {
-  groups: Group[]; resolutions: Resolution[]; users: DirectoryUser[];
+function TaskCompletionReport({ groups, resolutions, users, onOpenResolution }: {
+  groups: Group[]; resolutions: Resolution[]; users: DirectoryUser[]; onOpenResolution: (item: Resolution) => void;
 }) {
   const [view, setView] = useState<"units" | "directors">("units");
+  const [selection, setSelection] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<"all" | "completed" | "remaining">("all");
   const rows = useMemo(() => {
     const directors = new Map<string, Member>();
     const units = groups.filter(group => !isResolutionGroup(group.name, group.category) && !isIndividualRecipientGroup(group.name));
@@ -2399,12 +2401,12 @@ function TaskCompletionReport({ groups, resolutions, users }: {
     }
 
     const unitRows = new Map(units.map(unit => [unit.id, {
-      id: unit.id, label: unit.name, detail: "", completed: 0, remaining: 0,
+      id: unit.id, label: unit.name, detail: "", completed: 0, remaining: 0, items: [] as { item: Resolution; done: boolean }[],
     }]));
     const usersById = new Map(users.map(user => [user.nationalId, user]));
     const directorRows = new Map(Array.from(directors, ([id, member]) => [id, {
       id, label: usersById.get(id)?.displayName || member.displayName,
-      detail: usersById.get(id)?.title || member.title, completed: 0, remaining: 0,
+      detail: usersById.get(id)?.title || member.title, completed: 0, remaining: 0, items: [] as { item: Resolution; done: boolean }[],
     }]));
 
     for (const item of resolutions) {
@@ -2425,7 +2427,10 @@ function TaskCompletionReport({ groups, resolutions, users }: {
       for (const personId of recipients) {
         const done = (progress.get(personId) ?? item.status) === "completed";
         const director = directorRows.get(personId);
-        if (director) director[done ? "completed" : "remaining"]++;
+        if (director) {
+          director[done ? "completed" : "remaining"]++;
+          director.items.push({ item, done });
+        }
         for (const unitId of unitIdsByPerson.get(personId) ?? []) {
           unitCompletion.set(unitId, (unitCompletion.get(unitId) ?? true) && done);
         }
@@ -2435,7 +2440,10 @@ function TaskCompletionReport({ groups, resolutions, users }: {
       }
       for (const [id, done] of unitCompletion) {
         const unit = unitRows.get(id);
-        if (unit) unit[done ? "completed" : "remaining"]++;
+        if (unit) {
+          unit[done ? "completed" : "remaining"]++;
+          unit.items.push({ item, done });
+        }
       }
     }
 
@@ -2448,6 +2456,8 @@ function TaskCompletionReport({ groups, resolutions, users }: {
   }, [groups, resolutions, users]);
 
   const visibleRows = rows[view];
+  const selectedRow = visibleRows.find(row => String(row.id) === selection);
+  const selectedItems = selectedRow?.items.filter(entry => statusFilter === "all" || entry.done === (statusFilter === "completed")) ?? [];
   const max = visibleRows.reduce((largest, row) => Math.max(largest, row.completed + row.remaining), 1);
   const number = new Intl.NumberFormat("fa-IR");
   return <section className="panel group-report-panel" aria-labelledby="wall-task-report-title"
@@ -2460,7 +2470,7 @@ function TaskCompletionReport({ groups, resolutions, users }: {
           : "وضعیت هر وظیفه بر اساس پیشرفت فردی اعضای گروه مدیران کل محاسبه می‌شود."}</p>
       </div>
       <select aria-label="تفکیک گزارش وظایف" value={view}
-        onChange={event => setView(event.target.value === "directors" ? "directors" : "units")}>
+        onChange={event => { setView(event.target.value === "directors" ? "directors" : "units"); setSelection(null); setStatusFilter("all"); }}>
         <option value="units">معاونت‌ها و واحدها</option>
         <option value="directors">مدیران کل</option>
       </select>
@@ -2472,6 +2482,8 @@ function TaskCompletionReport({ groups, resolutions, users }: {
       </div>
       <div className="group-report-list" role="list" style={{ maxHeight: 320, overflowY: "auto" }}>
         {visibleRows.map(row => <div key={row.id} role="listitem">
+          <button type="button" className="task-chart-drilldown" aria-expanded={selection === String(row.id)}
+            aria-controls="task-chart-resolutions" onClick={() => { setSelection(String(row.id)); setStatusFilter("all"); }}>
           <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: "4px 14px", marginBottom: 5 }}>
             <span><b>{row.label}</b>{row.detail && <small> · {row.detail}</small>}</span>
             <small>{number.format(row.completed)} انجام‌شده · {number.format(row.remaining)} مانده</small>
@@ -2480,8 +2492,29 @@ function TaskCompletionReport({ groups, resolutions, users }: {
             <span className="completed-segment" style={{ width: `${row.completed * 100 / max}%` }} />
             <span className="pending-segment" style={{ width: `${row.remaining * 100 / max}%` }} />
           </div>
+          </button>
         </div>)}
       </div>
+      {selectedRow && <section id="task-chart-resolutions" aria-label={`مصوبات ${selectedRow.label}`}>
+        <div className="section-head"><h3>مصوبات {selectedRow.label}</h3>
+          <button type="button" className="secondary" onClick={() => setSelection(null)}>بستن فهرست</button>
+        </div>
+        <label>وضعیت مصوبات<select value={statusFilter} onChange={event => setStatusFilter(event.target.value as typeof statusFilter)}>
+          <option value="all">همه ({selectedRow.items.length})</option>
+          <option value="completed">انجام‌شده ({selectedRow.completed})</option>
+          <option value="remaining">مانده ({selectedRow.remaining})</option>
+        </select></label>
+        {selectedItems.length ? <div className="table-wrap"><table>
+          <thead><tr><th>شماره</th><th>مصوبه</th><th>تاریخ</th><th>مهلت</th><th>وضعیت در این ردیف</th><th>جزئیات</th></tr></thead>
+          <tbody>{selectedItems.map(({item, done}) => <tr key={item.id}>
+            <td>{item.number}<small>شناسه {item.id}</small></td><td>{item.text}</td>
+            <td>{formatDate(item.meetingDate, item.meetingDateJalali)}</td>
+            <td>{item.dueDate ? formatDate(item.dueDate, item.dueDateJalali) : "—"}</td>
+            <td>{done ? "انجام‌شده" : "مانده"}</td>
+            <td><button type="button" className="secondary" onClick={() => onOpenResolution(item)}>مشاهده مصوبه</button></td>
+          </tr>)}</tbody>
+        </table></div> : <p className="report-empty">مصوبه‌ای برای این وضعیت وجود ندارد.</p>}
+      </section>}
     </> : <p className="report-empty">{view === "units" ? "معاونت یا واحدی ثبت نشده است." : "عضوی در گروه مدیران کل ثبت نشده است."}</p>}
   </section>;
 }

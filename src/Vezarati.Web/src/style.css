@@ -970,3 +970,7 @@
   .provincial-print th,.provincial-print td{border:1px solid #b7b7b7;padding:8px;text-align:right;white-space:pre-wrap;overflow-wrap:anywhere}
   .provincial-print tr{break-inside:avoid}
 }
+
+.task-chart-drilldown{display:block;width:100%;text-align:inherit;color:inherit;font:inherit;background:transparent;border:1px solid transparent;border-radius:8px;padding:8px;cursor:pointer}
+.task-chart-drilldown:hover,.task-chart-drilldown[aria-expanded="true"]{background:var(--surface,#f0f6f4);border-color:#9fbfb2}
+.task-chart-drilldown:focus-visible{outline:2px solid #36845c;outline-offset:2px}
