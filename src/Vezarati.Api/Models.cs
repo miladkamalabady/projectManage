@@ -28,6 +28,7 @@ public sealed class Resolution
     public string CancellationReason { get; set; } = "";
     public string Number { get; set; } = "";
     public string Text { get; set; } = "";
+    private const string PriorityMarker = "\u001Fpriority:";
     private const string ProvinceMarker = "\u001Fprovince:";
     private const string MinisterCategoryMarker = "\u001Fminister-category:";
     private string _notes = "";
@@ -37,22 +38,29 @@ public sealed class Resolution
         {
             var provinceIndex = _notes.LastIndexOf(ProvinceMarker, StringComparison.Ordinal);
             var categoryIndex = _notes.LastIndexOf(MinisterCategoryMarker, StringComparison.Ordinal);
-            var markerIndex = provinceIndex < 0 ? categoryIndex : categoryIndex < 0 ? provinceIndex : Math.Min(provinceIndex, categoryIndex);
+            var priorityIndex = _notes.LastIndexOf(PriorityMarker, StringComparison.Ordinal);
+            var markerIndex = new[] { provinceIndex, categoryIndex, priorityIndex }.Where(index => index >= 0).DefaultIfEmpty(-1).Min();
             return markerIndex < 0 ? _notes : _notes[..markerIndex].TrimEnd('\r', '\n');
         }
-        set => _notes = ComposeNotes(value, ReadMarker(_notes, ProvinceMarker), ReadMarker(_notes, MinisterCategoryMarker));
+        set => _notes = ComposeNotes(value, ReadMarker(_notes, ProvinceMarker), ReadMarker(_notes, MinisterCategoryMarker), ReadMarker(_notes, PriorityMarker));
     }
     [NotMapped]
     public string Province
     {
         get => ReadMarker(_notes, ProvinceMarker);
-        set => _notes = ComposeNotes(Notes, value, MinisterCategory);
+        set => _notes = ComposeNotes(Notes, value, MinisterCategory, ReadMarker(_notes, PriorityMarker));
     }
     [NotMapped]
     public string MinisterCategory
     {
         get => ReadMarker(_notes, MinisterCategoryMarker);
-        set => _notes = ComposeNotes(Notes, Province, value);
+        set => _notes = ComposeNotes(Notes, Province, value, ReadMarker(_notes, PriorityMarker));
+    }
+    [NotMapped]
+    public string Priority
+    {
+        get => ReadMarker(_notes, PriorityMarker) is "آنی" or "فوری" ? ReadMarker(_notes, PriorityMarker) : "عادی";
+        set => _notes = ComposeNotes(Notes, Province, MinisterCategory, value);
     }
     private static string ReadMarker(string? rawNotes, string marker)
     {
@@ -62,12 +70,12 @@ public sealed class Resolution
         var valueStart = markerIndex + marker.Length;
         var nextMarker = rawNotes.IndexOf('\u001F', valueStart);
         var value = nextMarker < 0 ? rawNotes[valueStart..] : rawNotes[valueStart..nextMarker];
-        return Uri.UnescapeDataString(value);
+        return Uri.UnescapeDataString(value.TrimEnd('\r', '\n'));
     }
-    private static string ComposeNotes(string? notes, string? province, string? ministerCategory)
+    private static string ComposeNotes(string? notes, string? province, string? ministerCategory, string? priority)
     {
         var cleanNotes = notes ?? "";
-        foreach (var marker in new[] { ProvinceMarker, MinisterCategoryMarker })
+        foreach (var marker in new[] { ProvinceMarker, MinisterCategoryMarker, PriorityMarker })
         {
             var markerIndex = cleanNotes.LastIndexOf(marker, StringComparison.Ordinal);
             if (markerIndex >= 0) cleanNotes = cleanNotes[..markerIndex].TrimEnd('\r', '\n');
@@ -75,6 +83,7 @@ public sealed class Resolution
         var metadata = new List<string>();
         if (!string.IsNullOrWhiteSpace(province)) metadata.Add(ProvinceMarker + Uri.EscapeDataString(province.Trim()));
         if (!string.IsNullOrWhiteSpace(ministerCategory)) metadata.Add(MinisterCategoryMarker + Uri.EscapeDataString(ministerCategory.Trim()));
+        if (priority is "آنی" or "فوری") metadata.Add(PriorityMarker + Uri.EscapeDataString(priority));
         return metadata.Count == 0 ? cleanNotes : (cleanNotes.Length == 0 ? "" : cleanNotes + "\n") + string.Join("\n", metadata);
     }
     public string Status { get; set; } = "before";
