@@ -1050,3 +1050,15 @@
 .event-action-report-body { margin-top:8px; padding:12px; border:1px solid #dce8e2; border-radius:8px; background:#f7faf8; }
 .event-action-report-heading { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
 .event-action-report-body p { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.9; }
+
+.attachment-image-dialog { width:min(1100px,94vw); max-width:94vw; max-height:92dvh; padding:0; border:0; border-radius:14px; background:#fff; color:#304b43; box-shadow:0 20px 70px #0005; direction:rtl; }
+.attachment-image-dialog::backdrop { background:rgba(12,24,30,.78); }
+.attachment-image-dialog>section { display:flex; flex-direction:column; max-height:92dvh; }
+.attachment-image-dialog header { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:12px 16px; border-bottom:1px solid #e5ebec; }
+.attachment-image-dialog header b { overflow-wrap:anywhere; min-width:0; font-size:13px; }
+.attachment-image-dialog header button { flex-shrink:0; }
+.attachment-image-stage { min-height:100px; overflow:auto; padding:12px; text-align:center; background:#f1f4f5; }
+.attachment-image-stage img { display:block; width:auto; height:auto; max-width:100%; max-height:calc(92dvh - 150px); object-fit:contain; margin:auto; }
+.attachment-image-stage img[hidden] { display:none; }
+.attachment-image-dialog footer { padding:10px 16px; text-align:center; }
+.attachment-image-dialog footer a { color:#26765e; font-size:12px; }
