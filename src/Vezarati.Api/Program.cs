@@ -719,6 +719,7 @@ app.MapPost("/api/auth/logout", async (HttpContext context) =>
     return Results.NoContent();
 });
 
+app.MapGet("/api/resolutions/{id:int}/events/{eventId:int}/report", EventReports.Read);
 DashboardTasks.Map(app);
 AdminStatus.Map(app);
 app.MapGet("/api/dashboard", async (HttpContext context, AppDb db, bool? details, bool? statistics) =>

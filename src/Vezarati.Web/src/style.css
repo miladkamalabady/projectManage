@@ -1044,3 +1044,9 @@
 @media(max-width:420px) {
   .report-task-row-meta .report-task-expand-label { width:100%; margin-right:0; }
 }
+
+.report-task-events>div>.event-action-report { grid-column:1/-1; }
+.event-action-report>button { font-size:11px; padding:5px 10px; }
+.event-action-report-body { margin-top:8px; padding:12px; border:1px solid #dce8e2; border-radius:8px; background:#f7faf8; }
+.event-action-report-heading { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+.event-action-report-body p { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.9; }
