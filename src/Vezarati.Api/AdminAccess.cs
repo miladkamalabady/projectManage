@@ -5,19 +5,20 @@ using Vezarati.Api.Models;
 
 static class AdminAccess
 {
+    public const string Council = "ادمین مصوبات شورای معاونین";
     public const string Full = "ادمین";
     public const string Provincial = "ادمین استانی";
     public const string Minister = "ادمین دستورات ویژه وزیر";
     public static bool IsAdmin(ClaimsPrincipal user) => IsAdminRole(user.FindFirstValue(ClaimTypes.Role));
-    public static bool IsAdminRole(string? role) => role is Full or Provincial or Minister;
+    public static bool IsAdminRole(string? role) => role is Full or Provincial or Minister or Council;
     public static string? Scope(ClaimsPrincipal user) => user.FindFirstValue(ClaimTypes.Role) switch
     {
-        Provincial => "provincial", Minister => "minister", _ => null
+        Council => "council", Provincial => "provincial", Minister => "minister", _ => null
     };
     public static IQueryable<Resolution> Filter(IQueryable<Resolution> query, ClaimsPrincipal user)
     {
         var scope = Scope(user);
-        return scope is null ? query : scope == "provincial"
+        return scope is null ? query : scope == "council" ? query.Where(item => !item.IsSpecialTracking) : scope == "provincial"
             ? query.Where(item => item.IsSpecialTracking && item.SpecialTrackingType == "provincial")
             : query.Where(item => item.IsSpecialTracking && item.SpecialTrackingType != "provincial");
     }
@@ -30,6 +31,8 @@ static class AdminAccess
         var read = HttpMethods.IsGet(context.Request.Method);
         if (path.StartsWith("/api/auth/") || path.StartsWith("/api/push/")) return true;
         if (read && (path is "/api/dashboard" or "/api/resolutions" or "/api/groups" or "/api/users" or "/api/users/search" or "/api/reports/submissions")) return true;
+        if (scope == "council" && (path.StartsWith("/api/meetings") || path.StartsWith("/api/attendance") ||
+            (read && (path == "/api/reports" || path.StartsWith("/api/reports/people/"))))) return true;
         if (path.StartsWith("/api/provincial-trips") || path.StartsWith("/api/provincial-poles")) return scope == "provincial";
         if (path == "/api/settings/minister-directive-categories") return scope == "minister";
         if (path == "/api/resolutions" && HttpMethods.IsPost(context.Request.Method))
@@ -55,6 +58,8 @@ static class AdminAccess
         {
             using var json = await JsonDocument.ParseAsync(context.Request.Body, cancellationToken: context.RequestAborted);
             var root = json.RootElement;
+            if (scope == "council")
+                return !root.TryGetProperty("isSpecialTracking", out var councilSpecial) || councilSpecial.ValueKind == JsonValueKind.False;
             return root.TryGetProperty("isSpecialTracking", out var special) && special.ValueKind == JsonValueKind.True &&
                 root.TryGetProperty("specialTrackingType", out var type) && type.GetString() == scope;
         }
