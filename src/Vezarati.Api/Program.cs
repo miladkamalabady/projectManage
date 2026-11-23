@@ -910,8 +910,43 @@ app.MapGet("/api/attendance/report", async (string? from, string? to, AppDb db) 
     return Results.Ok(new { meetings });
 });
 
-app.MapGet("/api/resolutions", async (HttpContext context, AppDb db) =>
+app.MapGet("/api/resolutions", async (HttpContext context, AppDb db, string? view) =>
 {
+    if (view == "report-index")
+    {
+        if (!AdminAccess.IsAdmin(context.User)) return Results.Forbid();
+        var index = await AdminAccess.Filter(db.Resolutions.AsNoTracking(), context.User)
+            .Where(item => !item.IsArchived).AsSplitQuery()
+            .OrderByDescending(item => item.MeetingDate).ThenByDescending(item => item.Id)
+            .Select(item => new {
+                item.Id, item.Number, item.Text, item.Notes, item.Status, item.MeetingId,
+                MeetingTitle = item.Meeting == null ? "" : item.Meeting.Title,
+                item.MeetingDate, item.MeetingDateJalali, item.StartDate, item.StartDateJalali,
+                item.DueDate, item.DueDateJalali, item.GroupId, item.PublishToAll,
+                item.IsConfidential, item.IsSpecialTracking, item.SpecialTrackingType,
+                item.ProvincialTripId, item.IsCommitteeDraft, item.ProvincialPoleName,
+                Assignments = item.Assignments.Select(person => new { person.NationalId }).ToList(),
+                GroupAssignments = item.GroupAssignments.Select(group => new { group.GroupId }).ToList(),
+                Progress = item.Progress.Select(person => new {
+                    person.NationalId, person.Status, person.ApprovalStatus, person.UpdatedAt,
+                    HasSubmittedReport = person.ReportText != ""
+                }).ToList(),
+                SubmittedReportNationalIds = db.ResolutionReports.Where(report => report.ResolutionId == item.Id)
+                    .Select(report => report.NationalId).Distinct().ToList()
+            }).ToListAsync(context.RequestAborted);
+        // Province, category and priority share the legacy Notes column. Decode after the narrow projection.
+        return Results.Ok(index.Select(item => {
+            var metadata = Resolution.FromStoredNotes(item.Notes);
+            return new {
+                item.Id, item.Number, item.Text, Notes = metadata.Notes, metadata.Province, metadata.MinisterCategory, metadata.Priority,
+                item.Status, item.MeetingId, item.MeetingTitle, item.MeetingDate, item.MeetingDateJalali,
+                item.StartDate, item.StartDateJalali, item.DueDate, item.DueDateJalali, item.GroupId, item.PublishToAll,
+                item.IsConfidential, item.IsSpecialTracking, item.SpecialTrackingType,
+                item.ProvincialTripId, item.IsCommitteeDraft, item.ProvincialPoleName,
+                item.Assignments, item.GroupAssignments, item.Progress, item.SubmittedReportNationalIds
+            };
+        }));
+    }
     await ResolutionStatusUpdater.RefreshResolutionStatuses(db);
     var id = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
     var isAdmin = AdminAccess.IsAdmin(context.User);

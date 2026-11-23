@@ -990,3 +990,7 @@
 .resolution-wizard-steps [aria-current="step"]{background:#e1f1e9;color:#1d593f;font-weight:700}
 .wizard-meeting-summary{padding:10px;border:1px solid #c4d8cc;border-radius:8px}
 .resolution-wizard-stage{margin-bottom:12px}
+
+.report-resolution-title{display:block;padding:0;border:0;background:transparent;color:inherit;font:inherit;text-align:inherit;cursor:pointer;white-space:normal}
+.report-resolution-title:hover{text-decoration:underline}
+.report-resolution-title:focus-visible{outline:2px solid #36845c;outline-offset:3px}

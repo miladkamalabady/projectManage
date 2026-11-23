@@ -28,6 +28,7 @@ public sealed class Resolution
     public string CancellationReason { get; set; } = "";
     public string Number { get; set; } = "";
     public string Text { get; set; } = "";
+    public static Resolution FromStoredNotes(string? notes) => new() { _notes = notes ?? "" };
     private const string PriorityMarker = "\u001Fpriority:";
     private const string ProvinceMarker = "\u001Fprovince:";
     private const string MinisterCategoryMarker = "\u001Fminister-category:";
