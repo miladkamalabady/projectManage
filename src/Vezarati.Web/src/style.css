@@ -974,3 +974,12 @@
 .task-chart-drilldown{display:block;width:100%;text-align:inherit;color:inherit;font:inherit;background:transparent;border:1px solid transparent;border-radius:8px;padding:8px;cursor:pointer}
 .task-chart-drilldown:hover,.task-chart-drilldown[aria-expanded="true"]{background:var(--surface,#f0f6f4);border-color:#9fbfb2}
 .task-chart-drilldown:focus-visible{outline:2px solid #36845c;outline-offset:2px}
+
+.voice-textarea{width:100%;min-width:0}
+.voice-textarea textarea{width:100%;box-sizing:border-box}
+.voice-textarea-tools{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:6px}
+.voice-textarea-tools button{display:inline-flex;align-items:center;gap:5px}
+.voice-textarea-tools button[aria-pressed="true"]{color:#a12b2b;border-color:#b64b4b}
+.voice-textarea-tools small{font-size:11px}
+.voice-textarea-interim{font-size:12px;opacity:.8;white-space:pre-wrap}
+.voice-textarea-error{font-size:12px;color:#b53535}
