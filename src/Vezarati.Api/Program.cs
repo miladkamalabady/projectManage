@@ -2078,58 +2078,7 @@ app.MapPut("/api/settings/minister-directive-categories", async (MinisterDirecti
     return Results.Ok(categories);
 });
 
-app.MapGet("/api/reports/data-quality", async (HttpContext context, AppDb db) =>
-{
-    if (!AdminAccess.IsAdmin(context.User)) return Results.Forbid();
-
-    var users = await db.Users.AsNoTracking()
-        .OrderBy(user => user.DisplayName)
-        .ToListAsync(context.RequestAborted);
-    var resolutions = await db.Resolutions.AsNoTracking()
-        .Where(item => !item.IsArchived && item.Status != "cancelled")
-        .Include(item => item.Assignments)
-        .Include(item => item.Progress)
-        .Include(item => item.Group).ThenInclude(group => group!.Members)
-        .Include(item => item.GroupAssignments).ThenInclude(assignment => assignment.Group).ThenInclude(group => group!.Members)
-        .ToListAsync(context.RequestAborted);
-
-    var assignedNationalIds = new HashSet<string>(StringComparer.Ordinal);
-    var withoutDueDate = new List<Resolution>();
-    var withoutSpecificAssignees = new List<Resolution>();
-    foreach (var item in resolutions)
-    {
-        var directIds = item.Assignments.Select(assignment => assignment.NationalId)
-            .Concat(item.Group?.Members.Select(member => member.NationalId) ?? Enumerable.Empty<string>())
-            .Concat(item.GroupAssignments.SelectMany(assignment => assignment.Group?.Members.Select(member => member.NationalId) ?? Enumerable.Empty<string>()))
-            .Concat(item.Progress.Select(progress => progress.NationalId))
-            .Where(id => !string.IsNullOrWhiteSpace(id))
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
-        assignedNationalIds.UnionWith(directIds);
-        if (item.PublishToAll) assignedNationalIds.UnionWith(users.Select(user => user.NationalId));
-        if (!item.DueDate.HasValue) withoutDueDate.Add(item);
-        if (directIds.Count == 0) withoutSpecificAssignees.Add(item);
-    }
-
-    var missingMobiles = users.Where(user => string.IsNullOrWhiteSpace(user.Mobile)).ToList();
-    var usersWithoutTasks = users.Where(user => !assignedNationalIds.Contains(user.NationalId)).ToList();
-    static object UserSummary(AppUser user) => new { displayName = user.DisplayName, title = string.IsNullOrWhiteSpace(user.Title) ? user.OrgPositionDesc ?? "" : user.Title, organizationUnit = user.OrganizationUnit };
-    static object ResolutionSummary(Resolution item) => new { id = item.Id, number = item.Number, text = item.Text, dueDate = item.DueDate, meetingDate = item.MeetingDate };
-    return Results.Ok(new
-    {
-        checkedAt = DateTimeOffset.UtcNow,
-        usersTotal = users.Count,
-        usersWithoutMobileCount = missingMobiles.Count,
-        usersWithoutMobile = missingMobiles.Take(40).Select(UserSummary),
-        usersWithoutTasksCount = usersWithoutTasks.Count,
-        usersWithoutTasks = usersWithoutTasks.Take(40).Select(UserSummary),
-        resolutionsTotal = resolutions.Count,
-        resolutionsWithoutDueDateCount = withoutDueDate.Count,
-        resolutionsWithoutDueDate = withoutDueDate.OrderByDescending(item => item.Id).Take(40).Select(ResolutionSummary),
-        resolutionsWithoutSpecificAssigneesCount = withoutSpecificAssignees.Count,
-        resolutionsWithoutSpecificAssignees = withoutSpecificAssignees.OrderByDescending(item => item.Id).Take(40).Select(ResolutionSummary)
-    });
-});
+app.MapGet("/api/reports/data-quality", DataQualityReport.Read);
 
 app.MapGet("/api/reports", async (HttpContext context, AppDb db, string? view, int? page, int? pageSize, string? q, string? status) =>
 {
