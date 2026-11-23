@@ -120,14 +120,19 @@ static class DashboardTasks
                 people.UnionWith(directory.Where(user => Normalize(user.OrganizationUnit ?? "") == Normalize(name)).Select(user => user.NationalId));
             }
             var personIds = people.ToList();
+            return await ReadPersonReports(db, resolutionId, personIds, context.RequestAborted);
+    }
+
+    public static async Task<IResult> ReadPersonReports(AppDb db, int resolutionId, List<string> personIds, CancellationToken ct)
+    {
             var reports = await db.ResolutionReports.AsNoTracking().Where(report => report.ResolutionId == resolutionId && personIds.Contains(report.NationalId))
-                .OrderByDescending(report => report.SubmittedAt).ThenByDescending(report => report.Id).ToListAsync(context.RequestAborted);
+                .OrderByDescending(report => report.SubmittedAt).ThenByDescending(report => report.Id).ToListAsync(ct);
             var progress = await db.Progress.AsNoTracking().Where(item => item.ResolutionId == resolutionId && personIds.Contains(item.NationalId) && item.ReportText != "")
-                .ToListAsync(context.RequestAborted);
+                .ToListAsync(ct);
             var files = await db.Attachments.AsNoTracking().Where(file => file.ResolutionId == resolutionId)
-                .Select(file => new { file.Id, file.ResolutionReportId, file.UploadedBy, file.OriginalName }).ToListAsync(context.RequestAborted);
+                .Select(file => new { file.Id, file.ResolutionReportId, file.UploadedBy, file.OriginalName }).ToListAsync(ct);
             var names = await db.Users.AsNoTracking().Where(user => personIds.Contains(user.NationalId))
-                .ToDictionaryAsync(user => user.NationalId, user => user.DisplayName, context.RequestAborted);
+                .ToDictionaryAsync(user => user.NationalId, user => user.DisplayName, ct);
             var items = reports.Select(report => new {
                 key = "report-" + report.Id, userName = names.GetValueOrDefault(report.NationalId, report.UserName),
                 text = report.Text, submittedAt = report.SubmittedAt, reportType = report.ReportType,

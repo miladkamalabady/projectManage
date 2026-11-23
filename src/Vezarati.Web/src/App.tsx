@@ -1,3 +1,4 @@
+import AdminStatusDashboard from "./AdminStatusDashboard";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import DatePicker from "react-multi-date-picker";
 import MeetingsPage from "./MeetingsPage";
@@ -528,7 +529,7 @@ export default function App() {
     if (!authUser) return;
     setError("");
     try {
-      const response = await fetchApi("/api/dashboard", { signal });
+      const response = await fetchApi(isAdmin ? "/api/dashboard?statistics=false" : "/api/dashboard", { signal });
       if (!response.ok) throw new Error("اطلاعات اصلی سامانه دریافت نشد.");
       const data: Dashboard = await response.json();
       if (signal?.aborted) return;
@@ -2214,7 +2215,7 @@ export default function App() {
   return <div className="shell">
     <aside className="sidebar">
       <div className="brand"><span className="brand-icon"><ShieldCheck /></span><div><b>دفتر وزارتی</b><small>پیگیری مصوبات</small></div></div>
-      <nav>{[["wall", LayoutDashboard, "پیگیری"], ["execution-calendar", CalendarDays, "تقویم اجرایی"], ["assistant", MessageCircle, "دستیار وظایف"], ["notifications", Bell, `اعلان‌ها ${notifications.filter(item=>!item.isRead).length ? "(" + notifications.filter(item=>!item.isRead).length + ")" : ""}`], ["resolutions", ClipboardList, "مصوبات شورای معاونین"], ["special-followups", MapPin, "دستورات وزیر"], ["provincial-trips", MapPin, "سفرهای استانی وزیر"], ...(isAdmin ? [["sessions", CalendarDays, "جلسات و حضور و غیاب"], ["archive", Archive, "بایگانی"], ["groups", Users, "کاربران و گروه‌ها"], ["reports", FileText, "گزارش‌ها"]] : [])].filter(([key]) => !adminScope || (adminScope === "council" ? ["wall", "resolutions", "sessions", "archive", "execution-calendar", "reports"].includes(String(key)) : key === "reports" || key === (adminScope === "provincial" ? "provincial-trips" : "special-followups"))).map(([key, Icon, title]: any) => <a key={key} href={pathForTab(key)} className={"nav " + (tab === key ? "active" : "")} aria-current={tab === key ? "page" : undefined} onClick={event => { event.preventDefault(); if (tab !== key) setTab(key); }}><Icon size={18} />{title}</a>)}</nav>
+      <nav>{[["wall", LayoutDashboard, "پیگیری"], ["execution-calendar", CalendarDays, "تقویم اجرایی"], ["assistant", MessageCircle, "دستیار وظایف"], ["notifications", Bell, `اعلان‌ها ${notifications.filter(item=>!item.isRead).length ? "(" + notifications.filter(item=>!item.isRead).length + ")" : ""}`], ["resolutions", ClipboardList, "مصوبات شورای معاونین"], ["special-followups", MapPin, "دستورات وزیر"], ["provincial-trips", MapPin, "سفرهای استانی وزیر"], ...(isAdmin ? [["sessions", CalendarDays, "جلسات و حضور و غیاب"], ["archive", Archive, "بایگانی"], ["groups", Users, "کاربران و گروه‌ها"], ["reports", FileText, "گزارش‌ها"]] : [])].filter(([key]) => !adminScope || (adminScope === "council" ? ["wall", "resolutions", "sessions", "archive", "execution-calendar", "reports"].includes(String(key)) : key === "reports" || key === (adminScope === "provincial" ? "provincial-trips" : "special-followups"))).reduce((sections: any, item: any) => { sections[isAdmin && ["sessions", "archive", "groups", "execution-calendar", "assistant"].includes(String(item[0])) ? 1 : 0].push(item); return sections; }, [[], []]).map((items: any[], index: number) => { const links = items.map(([key, Icon, title]: any) => <a key={key} href={pathForTab(key)} className={"nav " + (tab === key ? "active" : "")} aria-current={tab === key ? "page" : undefined} onClick={event => { event.preventDefault(); if (tab !== key) setTab(key); }}><Icon size={18} />{title}</a>); return index === 0 ? <Fragment key={index}>{links}</Fragment> : links.length > 0 ? <details key={index} className="nav-tools" open={items.some(([key]: any) => key === tab) || undefined}><summary>مدیریت و ابزارها</summary>{links}</details> : null; })}</nav>
       <div className="sidebar-foot">محیط پیگیری اجرایی<br /><span>دفتر وزارتی</span></div>
     </aside>
 
@@ -2247,15 +2248,8 @@ export default function App() {
         <form className="assistant-chat-form" onSubmit={event=>{event.preventDefault();void sendAssistantMessage();}}><textarea value={assistantInput} onChange={event=>setAssistantInput(event.target.value)} onKeyDown={event=>{if(event.key==="Enter"&&!event.shiftKey){event.preventDefault();void sendAssistantMessage();}}} placeholder="مثلاً: برای مصوبه ۱۲ چه اقدامی از من مانده؟" maxLength={2000} rows={2}/><button className="primary" type="submit" disabled={!assistantInput.trim()||assistantSending}><Send size={16}/>{assistantSending?"در حال پاسخ":"ارسال"}</button></form>
       </section>}
       {(error || message) && <div className="api-toast-stack" aria-live="polite">{error && <div className="api-toast api-toast-error" role="alert"><span>{error}</span><div><button type="button" className="secondary" onClick={() => void load()}>تلاش دوباره</button><button type="button" className="api-toast-close" aria-label="بستن پیام" onClick={() => setError("")}>×</button></div></div>}{message && <div className="api-toast api-toast-message" role="status"><span>{message}</span><button type="button" className="api-toast-close" aria-label="بستن پیام" onClick={() => setMessage("")}>×</button></div>}</div>}
-      <section className="metrics"><Metric icon={<ClipboardList />} label="کل مصوبات" value={isAdmin ? dashboard?.summary?.total ?? mine.length : mine.length} color="blue" active={wallStatusFilter === "all" && tab === "wall"} onClick={() => { setTab(isAdmin ? "resolutions" : "wall"); if (isAdmin) setResolutionStatusFilter("all"); setWallStatusFilter("all"); }} /><Metric icon={<CheckCheck />} label="اجراشده" value={completed} color="green" active={tab === "wall" && wallStatusFilter === "completed"} onClick={() => { setTab(isAdmin ? "resolutions" : "wall"); if (isAdmin) setResolutionStatusFilter("completed"); setWallStatusFilter("completed"); }} /><Metric icon={<CircleAlert />} label="نیازمند پیگیری" value={pending} color="amber" active={tab === "wall" && wallStatusFilter === "pending"} onClick={() => { setTab(isAdmin ? "resolutions" : "wall"); if (isAdmin) setResolutionStatusFilter("pending"); setWallStatusFilter("pending"); }} />{isAdmin && <Metric icon={<CalendarDays />} label="انجام نشده" value={delayed} color="red" active={tab === "wall" && wallStatusFilter === "delayed"} onClick={() => { setTab(isAdmin ? "resolutions" : "wall"); if (isAdmin) setResolutionStatusFilter("delayed"); setWallStatusFilter("delayed"); }} />}</section>
-      {tab === "wall" && isAdmin && <TaskCompletionReport
-        statistics={dashboard?.taskStatistics} revision={tabDataRevision}
-      />}
-      {tab === "wall" && isAdmin && <div className="home-shortcuts">
-        <button type="button" className="secondary" onClick={() => setTab("resolutions")}>مشاهده مصوبات</button>
-        <button type="button" className="secondary" onClick={() => setTab("sessions")}>جلسات و ثبت مصوبات</button>
-        <button type="button" className="secondary" onClick={() => setTab("reports")}>گزارش‌های ارسالی</button>
-      </div>}
+      {!(isAdmin && tab === "wall") && <section className="metrics"><Metric icon={<ClipboardList />} label="کل مصوبات" value={isAdmin ? dashboard?.summary?.total ?? mine.length : mine.length} color="blue" active={wallStatusFilter === "all" && tab === "wall"} onClick={() => { setTab(isAdmin ? "resolutions" : "wall"); if (isAdmin) setResolutionStatusFilter("all"); setWallStatusFilter("all"); }} /><Metric icon={<CheckCheck />} label="اجراشده" value={completed} color="green" active={tab === "wall" && wallStatusFilter === "completed"} onClick={() => { setTab(isAdmin ? "resolutions" : "wall"); if (isAdmin) setResolutionStatusFilter("completed"); setWallStatusFilter("completed"); }} /><Metric icon={<CircleAlert />} label="نیازمند پیگیری" value={pending} color="amber" active={tab === "wall" && wallStatusFilter === "pending"} onClick={() => { setTab(isAdmin ? "resolutions" : "wall"); if (isAdmin) setResolutionStatusFilter("pending"); setWallStatusFilter("pending"); }} />{isAdmin && <Metric icon={<CalendarDays />} label="انجام نشده" value={delayed} color="red" active={tab === "wall" && wallStatusFilter === "delayed"} onClick={() => { setTab(isAdmin ? "resolutions" : "wall"); if (isAdmin) setResolutionStatusFilter("delayed"); setWallStatusFilter("delayed"); }} />}</section>}
+      {tab === "wall" && isAdmin && <AdminStatusDashboard api={fetchApi} revision={tabDataRevision} provinces={iranProvinceOptions} formatDate={formatDate} formatDateTime={formatDateTime}/>}{tab === "wall" && isAdmin && <AdminTaskAnalytics revision={tabDataRevision}/>}
       {adminTaskId !== null && <div className="modal-backdrop" onClick={() => setAdminTaskId(null)}>
         <section className="modal" role="dialog" aria-modal="true" aria-label="جزئیات مصوبه" onClick={event => event.stopPropagation()}>
           <div className="modal-head"><h2>جزئیات مصوبه</h2><button type="button" className="icon-btn" aria-label="بستن" onClick={() => setAdminTaskId(null)}><X/></button></div>
@@ -2601,6 +2595,12 @@ function ProvincialTripReport({ resolutions, submissions, groups, users, loading
       })}</tbody>
     </table><div className="pagination"><button type="button" disabled={page<=1} onClick={()=>setPage(value=>value-1)}>قبلی</button><span>صفحه {page}</span><button type="button" disabled={page*50>=filtered.length} onClick={()=>setPage(value=>value+1)}>بعدی</button></div></div> : <p className="report-empty">{loading ? "در حال دریافت گزارش‌ها…" : "موردی با این فیلترها پیدا نشد."}</p>}
   </section>;
+}
+
+function AdminTaskAnalytics({revision}: {revision:number}) {
+  const [open,setOpen]=useState(false), [statistics,setStatistics]=useState<Dashboard["taskStatistics"]>(), [error,setError]=useState("");
+  useEffect(()=>{if(!open)return;const controller=new AbortController();setStatistics(undefined);setError("");fetchApi("/api/dashboard",{signal:controller.signal}).then(response=>{if(!response.ok)throw Error();return response.json();}).then(data=>{if(!controller.signal.aborted)setStatistics(data.taskStatistics);}).catch(error=>{if(error.name!=="AbortError")setError("دریافت آمار ناموفق بود؛ بخش را ببندید و دوباره باز کنید.");});return()=>controller.abort();},[open,revision]);
+  return <details className="panel admin-status" onToggle={event=>setOpen(event.currentTarget.open)}><summary>نمودار وضعیت معاونت‌ها و مدیران کل</summary>{open&&(error?<p role="alert">{error}</p>:statistics?<TaskCompletionReport statistics={statistics} revision={revision}/>:<p>در حال دریافت آمار…</p>)}</details>;
 }
 
 function TaskCompletionReport({ statistics, revision }: {

@@ -994,3 +994,27 @@
 .report-resolution-title{display:block;padding:0;border:0;background:transparent;color:inherit;font:inherit;text-align:inherit;cursor:pointer;white-space:normal}
 .report-resolution-title:hover{text-decoration:underline}
 .report-resolution-title:focus-visible{outline:2px solid #36845c;outline-offset:3px}
+
+.admin-status { margin-block:20px; padding:20px; }
+.status-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-block:16px; }
+.status-summary button { display:flex; flex-direction:column; gap:6px; padding:14px; }
+.status-summary b { font-size:24px; }
+.status-summary .selected { outline:2px solid var(--primary,#2563eb); }
+.status-toolbar { display:flex; flex-wrap:wrap; align-items:end; gap:12px; margin-block:16px; }
+.status-toolbar input { min-width:220px; flex:1; }
+.status-toolbar label { display:flex; flex-direction:column; gap:6px; }
+.status-toolbar [role=tablist] { display:flex; gap:6px; }
+.status-table-wrap { overflow-x:auto; }
+.admin-status table { width:100%; border-collapse:collapse; }
+.admin-status th,.admin-status td { padding:12px; text-align:right; border-bottom:1px solid #dbe2ea; vertical-align:top; }
+.admin-status td:first-child { min-width:230px; max-width:640px; }
+.admin-status small { display:block; color:#64748b; margin-top:5px; }
+.status-row-title { background:none; border:0; color:inherit; cursor:pointer; text-align:right; line-height:1.9; font:inherit; }
+.status-row-title:hover { text-decoration:underline; }
+.status-expanded { background:var(--surface,#f3f6fa); border-radius:10px; padding:12px; }
+.status-overdue td:last-child { color:#b45309; }
+.status-pagination { display:flex; align-items:center; justify-content:center; gap:14px; margin-block:16px; }
+.nav-tools summary { padding:14px; cursor:pointer; }
+.admin-status .submitted-report-entry p { white-space:pre-wrap; }
+.admin-status .submitted-report-entry a { display:block; margin-block:8px; }
+@media(max-width:650px) { .status-summary{grid-template-columns:repeat(2,minmax(0,1fr));} .admin-status{padding:10px;} .status-toolbar>*{max-width:100%;} }

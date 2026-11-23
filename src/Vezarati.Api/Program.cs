@@ -720,7 +720,8 @@ app.MapPost("/api/auth/logout", async (HttpContext context) =>
 });
 
 DashboardTasks.Map(app);
-app.MapGet("/api/dashboard", async (HttpContext context, AppDb db, bool? details) =>
+AdminStatus.Map(app);
+app.MapGet("/api/dashboard", async (HttpContext context, AppDb db, bool? details, bool? statistics) =>
 {
     if (AdminAccess.IsAdmin(context.User) && details != true)
     {
@@ -730,11 +731,11 @@ app.MapGet("/api/dashboard", async (HttpContext context, AppDb db, bool? details
             pending = group.Count(item => item.Status == "before" || item.Status == "in_progress"),
             delayed = group.Count(item => item.Status == "delayed")
         }).SingleOrDefaultAsync(context.RequestAborted);
-        var statistics = await DashboardTasks.Read(db, context.User, context.RequestAborted);
+        var taskStatistics = statistics == false ? null : await DashboardTasks.Read(db, context.User, context.RequestAborted);
         return Results.Ok(new {
             currentUser = new { nationalId = context.User.FindFirstValue(ClaimTypes.NameIdentifier), displayName = context.User.Identity!.Name, role = context.User.FindFirstValue(ClaimTypes.Role) },
             groups = Array.Empty<object>(), resolutions = Array.Empty<object>(), summary = counts,
-            taskStatistics = new { units = statistics.Units.Select(row => row.Summary), directors = statistics.Directors.Select(row => row.Summary) }
+            taskStatistics = taskStatistics == null ? null : new { units = taskStatistics.Units.Select(row => row.Summary), directors = taskStatistics.Directors.Select(row => row.Summary) }
         });
     }
     await ResolutionStatusUpdater.RefreshResolutionStatuses(db);
