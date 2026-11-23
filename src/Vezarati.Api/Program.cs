@@ -910,13 +910,35 @@ app.MapGet("/api/attendance/report", async (string? from, string? to, AppDb db) 
     return Results.Ok(new { meetings });
 });
 
-app.MapGet("/api/resolutions", async (HttpContext context, AppDb db, string? view) =>
+app.MapGet("/api/resolutions", async (HttpContext context, AppDb db, string? view, string? ids, string? q) =>
 {
-    if (view == "report-index")
+    if (view is "report-index" or "report-items")
     {
         if (!AdminAccess.IsAdmin(context.User)) return Results.Forbid();
-        var index = await AdminAccess.Filter(db.Resolutions.AsNoTracking(), context.User)
-            .Where(item => !item.IsArchived).AsSplitQuery()
+        var reportQuery = AdminAccess.Filter(db.Resolutions.AsNoTracking(), context.User).Where(item => !item.IsArchived);
+        var loadText = view == "report-items";
+        if (!string.IsNullOrWhiteSpace(q))
+        {
+            var search = q.Trim();
+            reportQuery = reportQuery.Where(item => item.Number.Contains(search) || item.Text.Contains(search) || item.Notes.Contains(search) || item.Id.ToString() == search);
+        }
+        if (loadText)
+        {
+            if (!string.IsNullOrWhiteSpace(ids))
+            {
+                var selectedIds = ids.Split(',').Select(value => int.TryParse(value, out var parsed) ? parsed : 0).Where(value => value > 0).Distinct().ToArray();
+                if (selectedIds.Length is 0 or > 50) return Results.BadRequest(new { error = "حداکثر ۵۰ مصوبه در هر درخواست انتخاب کنید." });
+                reportQuery = reportQuery.Where(item => selectedIds.Contains(item.Id));
+            }
+            else if (!string.IsNullOrWhiteSpace(q))
+            {
+                var term = q.Trim();
+                reportQuery = reportQuery.Where(item => item.Number.Contains(term) || item.Text.Contains(term) || item.Id.ToString() == term);
+                reportQuery = reportQuery.OrderByDescending(item => item.MeetingDate).ThenByDescending(item => item.Id).Take(50);
+            }
+            else return Results.BadRequest(new { error = "بخش یا عبارت جستجو را انتخاب کنید." });
+        }
+        var index = await reportQuery            .Where(item => !item.IsArchived).AsSplitQuery()
             .OrderByDescending(item => item.MeetingDate).ThenByDescending(item => item.Id)
             .Select(item => new {
                 item.Id, item.Number, item.Text, item.Notes, item.Status, item.MeetingId,
@@ -938,7 +960,7 @@ app.MapGet("/api/resolutions", async (HttpContext context, AppDb db, string? vie
         return Results.Ok(index.Select(item => {
             var metadata = Resolution.FromStoredNotes(item.Notes);
             return new {
-                item.Id, item.Number, item.Text, Notes = metadata.Notes, metadata.Province, metadata.MinisterCategory, metadata.Priority,
+                item.Id, item.Number, Text = loadText ? item.Text : "", Notes = loadText ? metadata.Notes : "", HasLoadedText = loadText, TopicKey = ResolutionReportTopics.Classify(item.Number + " " + item.Text + " " + metadata.Notes), metadata.Province, metadata.MinisterCategory, metadata.Priority,
                 item.Status, item.MeetingId, item.MeetingTitle, item.MeetingDate, item.MeetingDateJalali,
                 item.StartDate, item.StartDateJalali, item.DueDate, item.DueDateJalali, item.GroupId, item.PublishToAll,
                 item.IsConfidential, item.IsSpecialTracking, item.SpecialTrackingType,
