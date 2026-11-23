@@ -2034,39 +2034,39 @@ app.MapGet("/api/reports", async (HttpContext context, AppDb db, string? view, i
         }).SingleOrDefaultAsync();
         return Results.Ok(new { total = summary?.Total ?? 0, completed = summary?.Completed ?? 0, delayed = summary?.Delayed ?? 0, pending = summary?.Pending ?? 0, people = Array.Empty<object>() });
     }
-    var records = await db.Resolutions.Where(item => !item.IsArchived && !item.IsSpecialTracking).Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Group).ThenInclude(g => g!.Members).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).ThenInclude(g => g!.Members).ToListAsync();
+    var cancellationToken = context.RequestAborted;
+    var recordsQuery = db.Resolutions.AsNoTracking().Where(item => !item.IsArchived && !item.IsSpecialTracking);
     if (!isAdmin)
-    {
-        var memberGroupIds = (await db.GroupMembers.Where(member => member.NationalId == id).Select(member => member.GroupId).ToListAsync()).ToHashSet();
-        records = records.Where(record =>
-            record.PublishToAll ||
+        recordsQuery = recordsQuery.Where(record => record.PublishToAll ||
             record.Assignments.Any(assignment => assignment.NationalId == id) ||
             record.Progress.Any(progress => progress.NationalId == id) ||
-            record.Group?.Members.Any(member => member.NationalId == id) == true ||
-            record.GroupAssignments.Any(assignment =>
-                memberGroupIds.Contains(assignment.GroupId) ||
-                assignment.Group?.Members.Any(member => member.NationalId == id) == true)
-        ).ToList();
-    }
-    var directory = await db.Users.ToDictionaryAsync(u => u.NationalId, u => (DisplayName: u.DisplayName, Title: u.Title));
-    var userTitles = await db.Users.ToDictionaryAsync(u => u.NationalId, u => u.Title ?? "");
-    var personRows = new List<(string NationalId, string DisplayName, string Title, string Status)>();
-    foreach (var record in records)
+            db.GroupMembers.Any(member => member.NationalId == id &&
+                (record.GroupId == member.GroupId || record.GroupAssignments.Any(group => group.GroupId == member.GroupId))));
+    var records = await recordsQuery.Select(record => new { record.Id, record.Status }).ToListAsync(cancellationToken);
+    var participants = recordsQuery.SelectMany(record => record.Assignments.Select(assignment =>
+        new { ResolutionId = record.Id, assignment.NationalId }))
+        .Union(recordsQuery.SelectMany(record => db.GroupMembers.Where(member => member.GroupId == record.GroupId)
+            .Select(member => new { ResolutionId = record.Id, member.NationalId })))
+        .Union(recordsQuery.SelectMany(record => record.GroupAssignments.SelectMany(group =>
+            db.GroupMembers.Where(member => member.GroupId == group.GroupId)
+                .Select(member => new { ResolutionId = record.Id, member.NationalId }))));
+    if (!isAdmin) participants = participants.Where(person => person.NationalId == id);
+    var participantRows = await participants.ToListAsync(cancellationToken);
+    var progressRows = await recordsQuery.SelectMany(record => record.Progress.Select(progress =>
+        new { ResolutionId = record.Id, progress.NationalId, progress.Status }))
+        .Where(progress => isAdmin || progress.NationalId == id).ToListAsync(cancellationToken);
+    var progressByPerson = progressRows.ToDictionary(progress => (progress.ResolutionId, progress.NationalId), progress => progress.Status);
+    var directory = await db.Users.AsNoTracking().Select(user => new { user.NationalId, user.DisplayName, user.Title })
+        .ToDictionaryAsync(user => user.NationalId, cancellationToken);
+    var statusByResolution = records.ToDictionary(record => record.Id, record => record.Status);
+    var personRows = new List<(string NationalId, string DisplayName, string Title, string Status)>(participantRows.Count);
+    foreach (var participant in participantRows)
     {
-        var participants = (record.Group?.Members.Select(member => (NationalId: member.NationalId, DisplayName: member.DisplayName, Title: userTitles.GetValueOrDefault(member.NationalId, member.Title))) ?? Enumerable.Empty<(string NationalId, string DisplayName, string Title)>())
-            .Concat(record.GroupAssignments.SelectMany(assignment => assignment.Group!.Members.Select(member => (NationalId: member.NationalId, DisplayName: member.DisplayName, Title: userTitles.GetValueOrDefault(member.NationalId, member.Title)))))
-            .Concat(record.Assignments.Select(assignment =>
-            {
-                var person = directory.GetValueOrDefault(assignment.NationalId, (DisplayName: assignment.NationalId, Title: ""));
-                return (NationalId: assignment.NationalId, DisplayName: person.DisplayName, Title: userTitles.GetValueOrDefault(assignment.NationalId, person.Title));
-            }))
-            .DistinctBy(person => person.NationalId);
-
-        foreach (var person in participants)
-        {
-            var personStatus = record.Status == "completed" ? "completed" : record.Progress.FirstOrDefault(progress => progress.NationalId == person.NationalId)?.Status ?? record.Status;
-            personRows.Add((person.NationalId, person.DisplayName, person.Title, personStatus));
-        }
+        var baseStatus = statusByResolution[participant.ResolutionId];
+        var personalStatus = baseStatus == "completed" ? "completed"
+            : progressByPerson.GetValueOrDefault((participant.ResolutionId, participant.NationalId), baseStatus);
+        directory.TryGetValue(participant.NationalId, out var person);
+        personRows.Add((participant.NationalId, person?.DisplayName ?? participant.NationalId, person?.Title ?? "", personalStatus));
     }
 
     var rows = personRows
@@ -2081,7 +2081,7 @@ app.MapGet("/api/reports", async (HttpContext context, AppDb db, string? view, i
             Delayed = group.Count(person => person.Status == "delayed"),
             Pending = group.Count(person => person.Status is "before" or "in_progress")
         })
-        .OrderByDescending(person => person.Total).ToList();
+        .OrderByDescending(person => person.Total).ThenBy(person => person.NationalId).ToList();
     if (!isAdmin) rows = rows.Where(row => row.NationalId == id).ToList();
     var normalizedQuery = NormalizeDigits((q ?? "").Normalize(System.Text.NormalizationForm.FormKC))
         .Replace("ي", "ی").Replace("ى", "ی").Replace("ك", "ک")
