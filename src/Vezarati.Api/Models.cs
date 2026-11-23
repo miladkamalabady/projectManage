@@ -321,6 +321,7 @@ public sealed class AppUser
 
 public sealed class SetUserRoleRequest
 {
+    public string? Role { get; set; }
     public bool IsAdmin { get; set; }
 }
 

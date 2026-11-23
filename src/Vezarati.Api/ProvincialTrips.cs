@@ -81,7 +81,7 @@ static class ProvincialTrips
         {
             var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
             var query = db.ProvincialTrips.AsNoTracking();
-            if (!context.User.IsInRole("ادمین"))
+            if (!AdminAccess.IsAdmin(context.User))
                 query = query.Where(trip => db.Resolutions.Any(item => item.ProvincialTripId == trip.Id && !item.IsArchived &&
                     (item.PublishToAll || item.Assignments.Any(assignment => assignment.NationalId == userId) ||
                     db.GroupMembers.Any(member => member.NationalId == userId && (item.GroupId == member.GroupId ||

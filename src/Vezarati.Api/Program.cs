@@ -61,6 +61,21 @@ app.Use(async (context, next) =>
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             return;
         }
+        if (!isSso && !isScheduledOverdueJob && context.User.Identity?.IsAuthenticated == true)
+        {
+            var accessDb = context.RequestServices.GetRequiredService<AppDb>();
+            var currentId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var currentRole = await accessDb.Users.AsNoTracking().Where(user => user.NationalId == currentId)
+                .Select(user => user.Role).FirstOrDefaultAsync(context.RequestAborted);
+            var identity = (ClaimsIdentity)context.User.Identity;
+            foreach (var claim in identity.FindAll(ClaimTypes.Role).ToList()) identity.RemoveClaim(claim);
+            identity.AddClaim(new Claim(ClaimTypes.Role, currentRole ?? "کاربر"));
+            if (!await AdminAccess.CanRequest(context, accessDb))
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                return;
+            }
+        }
         var adminOnly =
             context.Request.Path.StartsWithSegments("/api/provincial-poles")
             || (context.Request.Path.StartsWithSegments("/api/provincial-trips") && !HttpMethods.IsGet(context.Request.Method))
@@ -90,7 +105,7 @@ app.Use(async (context, next) =>
                      || path.EndsWith("/archive", StringComparison.OrdinalIgnoreCase)
                      || path.EndsWith("/attachments/approval", StringComparison.OrdinalIgnoreCase)))));
 
-        if (adminOnly && !context.User.IsInRole("ادمین"))
+        if (adminOnly && !AdminAccess.IsAdmin(context.User))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             return;
@@ -238,7 +253,7 @@ app.MapPost("/api/assistant/chat", async (HttpContext context, JsonElement reque
         return Results.Problem("آدرس Ollama در تنظیمات معتبر نیست.", statusCode: StatusCodes.Status503ServiceUnavailable);
 
     var nationalId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
-    var isAdmin = context.User.IsInRole("ادمین");
+    var isAdmin = AdminAccess.IsAdmin(context.User);
     var groupIds = isAdmin ? new List<int>() : await db.GroupMembers.AsNoTracking()
         .Where(member => member.NationalId == nationalId)
         .Select(member => member.GroupId)
@@ -432,7 +447,7 @@ app.MapPost("/api/assistant/chat", async (HttpContext context, JsonElement reque
 
 app.MapGet("/api/admin/database/backups", (HttpContext context, IConfiguration configuration, IWebHostEnvironment environment) =>
 {
-    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    if (!AdminAccess.IsAdmin(context.User)) return Results.Forbid();
     var directory = DatabaseBackupManager.GetDirectory(configuration, environment);
     Directory.CreateDirectory(directory);
     var files = Directory.GetFiles(directory, "vezarati-*.bak")
@@ -446,7 +461,7 @@ app.MapGet("/api/admin/database/backups", (HttpContext context, IConfiguration c
 
 app.MapPost("/api/admin/database/backups", async (HttpContext context, AppDb db, IConfiguration configuration, IWebHostEnvironment environment, ILogger<Program> logger) =>
 {
-    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    if (!AdminAccess.IsAdmin(context.User)) return Results.Forbid();
     try
     {
         var backupId = Guid.NewGuid().ToString("N")[..8];
@@ -465,7 +480,7 @@ app.MapPost("/api/admin/database/backups", async (HttpContext context, AppDb db,
 
 app.MapPost("/api/admin/database/backups/restore", async (RestoreBackupRequest request, HttpContext context, IConfiguration configuration, IWebHostEnvironment environment, ILogger<Program> logger) =>
 {
-    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    if (!AdminAccess.IsAdmin(context.User)) return Results.Forbid();
     if (!DatabaseBackupManager.IsManagedFileName(request.FileName)) return Results.BadRequest(new { error = "نام فایل پشتیبان معتبر نیست." });
     var path = Path.Combine(DatabaseBackupManager.GetDirectory(configuration, environment), request.FileName);
     if (!System.IO.File.Exists(path)) return Results.NotFound(new { error = "نسخه پشتیبان موردنظر پیدا نشد." });
@@ -574,7 +589,7 @@ app.MapPost("/api/auth/sso", async (SsoLoginRequest request, HttpContext context
         var displayName = string.Join(" ", new[] { firstName, lastName }.Where(value => value.Length > 0));
         var position = ReadString("orgPositionDesc");
         var user = await db.Users.FirstOrDefaultAsync(item => item.NationalId == nationalId, context.RequestAborted);
-        var role = nationalId == primaryAdminNationalId ? "ادمین" : user?.Role == "ادمین" ? "ادمین" : "کاربر";
+        var role = nationalId == primaryAdminNationalId ? "ادمین" : AdminAccess.IsAdminRole(user?.Role) ? user!.Role : "کاربر";
         if (user is null) { user = new AppUser { NationalId = nationalId }; db.Users.Add(user); }
         user.DisplayName = displayName;
         user.Role = role;
@@ -708,9 +723,9 @@ app.MapGet("/api/dashboard", async (HttpContext context, AppDb db) =>
 {
     await ResolutionStatusUpdater.RefreshResolutionStatuses(db);
     var id = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
-    var isAdmin = context.User.IsInRole("ادمین");
+    var isAdmin = AdminAccess.IsAdmin(context.User);
     var groups = await db.Groups.Include(g => g.Members).ToListAsync();
-    var records = await db.Resolutions.AsNoTracking().Where(item => !item.IsArchived).Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Attachments.Where(attachment => isAdmin || (!attachment.ResolutionReportId.HasValue && (attachment.ApprovedForAll || attachment.Resolution!.IsCommitteeDraft)))) .Include(r => r.Events).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).Include(r => r.Meeting).ThenInclude(meeting => meeting!.Attachments).OrderByDescending(r => r.MeetingDate).ToListAsync();
+    var records = await AdminAccess.Filter(db.Resolutions.AsNoTracking(), context.User).Where(item => !item.IsArchived).Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Attachments.Where(attachment => isAdmin || (!attachment.ResolutionReportId.HasValue && (attachment.ApprovedForAll || attachment.Resolution!.IsCommitteeDraft)))) .Include(r => r.Events).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).Include(r => r.Meeting).ThenInclude(meeting => meeting!.Attachments).OrderByDescending(r => r.MeetingDate).ToListAsync();
     foreach (var resolution in records)
     {
         resolution.MeetingAttachments = resolution.Meeting?.Attachments ?? [];
@@ -811,7 +826,7 @@ app.MapPut("/api/meetings/{id:int}", async (int id, MeetingRequest request, AppD
 
 app.MapPost("/api/meetings/{id:int}/attachments", async (int id, HttpRequest request, AppDb db, HttpContext context, IWebHostEnvironment environment) =>
 {
-    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    if (!AdminAccess.IsAdmin(context.User)) return Results.Forbid();
     var form = await request.ReadFormAsync(context.RequestAborted);
     var file = form.Files.GetFile("file");
     if (file is null || file.Length == 0) return Results.BadRequest(new { error = "فایل صورت‌جلسه را انتخاب کنید." });
@@ -878,8 +893,8 @@ app.MapGet("/api/resolutions", async (HttpContext context, AppDb db) =>
 {
     await ResolutionStatusUpdater.RefreshResolutionStatuses(db);
     var id = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
-    var isAdmin = context.User.IsInRole("ادمین");
-    var records = await db.Resolutions.AsNoTracking().Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Attachments.Where(attachment => isAdmin || (!attachment.ResolutionReportId.HasValue && (attachment.ApprovedForAll || attachment.Resolution!.IsCommitteeDraft)))).Include(r => r.Events).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).Include(r => r.Meeting).ThenInclude(meeting => meeting!.Attachments).OrderByDescending(r => r.MeetingDate).ToListAsync();
+    var isAdmin = AdminAccess.IsAdmin(context.User);
+    var records = await AdminAccess.Filter(db.Resolutions.AsNoTracking(), context.User).Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Attachments.Where(attachment => isAdmin || (!attachment.ResolutionReportId.HasValue && (attachment.ApprovedForAll || attachment.Resolution!.IsCommitteeDraft)))).Include(r => r.Events).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).Include(r => r.Meeting).ThenInclude(meeting => meeting!.Attachments).OrderByDescending(r => r.MeetingDate).ToListAsync();
     foreach (var resolution in records)
     {
         resolution.MeetingAttachments = resolution.Meeting?.Attachments ?? [];
@@ -1045,7 +1060,7 @@ app.MapPut("/api/resolutions/{id:int}", async (int id, ResolutionCreate request,
 });
 app.MapDelete("/api/resolutions/{id:int}", async (int id, HttpContext context, AppDb db) =>
 {
-    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    if (!AdminAccess.IsAdmin(context.User)) return Results.Forbid();
     var record = await db.Resolutions.Include(item => item.Assignments).Include(item => item.Progress).Include(item => item.GroupAssignments).Include(item => item.Attachments).Include(item => item.Events).FirstOrDefaultAsync(item => item.Id == id);
     if (record is null) return Results.NotFound();
     if (record.IsCommitteeDraft && ProvincialTrips.DraftStatus(record.DueDate, ProvincialTrips.CurrentDate) == "closed")
@@ -1056,7 +1071,7 @@ app.MapDelete("/api/resolutions/{id:int}", async (int id, HttpContext context, A
 });
 app.MapPatch("/api/resolutions/{id:int}/status", async (int id, ResolutionStatusUpdate request, HttpContext context, AppDb db) =>
 {
-    var isAdmin = context.User.IsInRole("ادمین");
+    var isAdmin = AdminAccess.IsAdmin(context.User);
     if (isAdmin && !string.IsNullOrWhiteSpace(request.NationalId)) return Results.Json(new { error = "ادمین اجازه تغییر مستقیم وضعیت افراد را ندارد؛ گزارش را با ذکر دلیل رد کنید." }, statusCode: StatusCodes.Status403Forbidden);
     var nationalId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
     var record = await db.Resolutions.Include(r => r.Progress).FirstOrDefaultAsync(r => r.Id == id);
@@ -1114,20 +1129,20 @@ app.MapPatch("/api/resolutions/{id:int}/status", async (int id, ResolutionStatus
 });
 app.MapPatch("/api/resolutions/{id:int}/progress/bulk-status", (HttpContext context) =>
 {
-    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    if (!AdminAccess.IsAdmin(context.User)) return Results.Forbid();
     return Results.Json(new { error = "تغییر گروهی وضعیت افراد غیرفعال است؛ گزارش هر فرد را با ذکر دلیل رد کنید." }, statusCode: StatusCodes.Status403Forbidden);
 });
 
 app.MapPost("/api/resolutions/{id:int}/events", async (int id, ResolutionEventCreate request, HttpContext context, AppDb db) =>
 {
-    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    if (!AdminAccess.IsAdmin(context.User)) return Results.Forbid();
     var text = request.Text?.Trim() ?? "";
     var nationalId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
     if (text.Length == 0) return Results.BadRequest(new { error = "شرح رویداد را وارد کنید." });
     if (text.Length > 2000) return Results.BadRequest(new { error = "شرح رویداد حداکثر ۲۰۰۰ نویسه باشد." });
     var resolution = await db.Resolutions.Include(r => r.Progress).FirstOrDefaultAsync(r => r.Id == id);
     if (resolution is null) return Results.NotFound();
-    var isAdmin = context.User.IsInRole("ادمین");
+    var isAdmin = AdminAccess.IsAdmin(context.User);
     if (!isAdmin && resolution.Status == "cancelled") return Results.Conflict(new { error = "این مصوبه لغو شده است." });
     if (!isAdmin && resolution.Progress.Any(item => item.NationalId == nationalId && item.Status == "rejected")) return Results.Conflict(new { error = "وضعیت شما برای این مصوبه رد شده و امکان اقدام ندارید." });
     if (!isAdmin)
@@ -1311,7 +1326,7 @@ app.MapPost("/api/resolutions/{id:int}/reports", async (int id, ResolutionSubmis
 
 app.MapGet("/api/reports/bale-messages", async (HttpContext context, AppDb db, string? q, string? status, string? from, string? to, int page = 1, int pageSize = 20) =>
 {
-    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    if (!AdminAccess.IsAdmin(context.User)) return Results.Forbid();
     page = Math.Max(1, page);
     pageSize = Math.Clamp(pageSize, 1, 5000);
     var query = from message in db.BaleMessageQueue.AsNoTracking()
@@ -1372,9 +1387,10 @@ app.MapGet("/api/reports/bale-messages", async (HttpContext context, AppDb db, s
     });
     return Results.Ok(new { total, page, pageSize, items });
 });
-app.MapGet("/api/reports/submissions", async (AppDb db, string? q, string? person, string? province, int? unit, string? approval, DateOnly? from, DateOnly? to, int? page) =>
+app.MapGet("/api/reports/submissions", async (AppDb db, HttpContext context, string? q, string? person, string? province, int? unit, string? approval, DateOnly? from, DateOnly? to, int? page) =>
 {
-    var query = db.ResolutionReports.AsNoTracking().AsQueryable();
+    var allowedResolutions = AdminAccess.Filter(db.Resolutions, context.User).Select(item => item.Id);
+    var query = db.ResolutionReports.AsNoTracking().Where(report => allowedResolutions.Contains(report.ResolutionId));
     if (!string.IsNullOrWhiteSpace(q)) query = query.Where(report => report.Text.Contains(q) || report.UserName.Contains(q) || report.Resolution!.Number.Contains(q) || report.Resolution.Text.Contains(q) || report.ResolutionId.ToString() == q);
     if (!string.IsNullOrWhiteSpace(person)) query = query.Where(report => report.NationalId.Contains(person) || report.UserName.Contains(person) || db.Users.Any(user => user.NationalId == report.NationalId && user.DisplayName.Contains(person)));
     var provinceMarker = string.IsNullOrWhiteSpace(province) ? "" : "\u001Fprovince:" + Uri.EscapeDataString(province);
@@ -1434,7 +1450,7 @@ app.MapGet("/api/reports/submissions", async (AppDb db, string? q, string? perso
 
 app.MapPatch("/api/reports/submissions/{reportId:int}/review", async (int reportId, ReportReviewRequest request, HttpContext context, AppDb db) =>
 {
-    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    if (!AdminAccess.IsAdmin(context.User)) return Results.Forbid();
     if (request.Approved) return Results.BadRequest(new { error = "ادمین فقط می‌تواند گزارش را با ذکر دلیل رد کند." });
     if (string.IsNullOrWhiteSpace(request.Feedback)) return Results.BadRequest(new { error = "برای رد گزارش، علت را وارد کنید." });
     var report = await db.ResolutionReports.Include(item => item.Resolution).FirstOrDefaultAsync(item => item.Id == reportId);
@@ -1480,7 +1496,7 @@ app.MapPatch("/api/reports/submissions/{reportId:int}/review", async (int report
 
 app.MapPatch("/api/resolutions/{id:int}/completion-review", async (int id, CompletionReviewRequest request, HttpContext context, AppDb db) =>
 {
-    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    if (!AdminAccess.IsAdmin(context.User)) return Results.Forbid();
     if (request.Approved) return Results.BadRequest(new { error = "ادمین فقط می‌تواند گزارش را با ذکر دلیل رد کند." });
     if (string.IsNullOrWhiteSpace(request.Feedback)) return Results.BadRequest(new { error = "برای رد گزارش، علت را وارد کنید." });
     var progress = await db.Progress.FirstOrDefaultAsync(item => item.ResolutionId == id && item.NationalId == request.AssigneeNationalId);
@@ -1602,7 +1618,7 @@ app.MapPatch("/api/notifications/read-all", async (HttpContext context, AppDb db
 
 app.MapPost("/api/resolutions/{id:int}/attachments", async (int id, HttpRequest request, HttpContext context, AppDb db, IWebHostEnvironment environment) =>
 {
-    if (!context.User.IsInRole("ادمین")) return Results.BadRequest(new { error = "فایل را همراه گزارش اقدام ارسال کنید." });
+    if (!AdminAccess.IsAdmin(context.User)) return Results.BadRequest(new { error = "فایل را همراه گزارش اقدام ارسال کنید." });
     var form = await request.ReadFormAsync();
     var file = form.Files.GetFile("file");
     var nationalId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
@@ -1615,10 +1631,10 @@ app.MapPost("/api/resolutions/{id:int}/attachments", async (int id, HttpRequest 
     if (resolution is null) return Results.NotFound();
     if (resolution.IsCommitteeDraft && ProvincialTrips.DraftStatus(resolution.DueDate, ProvincialTrips.CurrentDate) == "closed")
         return ProvincialTrips.DraftActionUnavailable();
-    if (!context.User.IsInRole("ادمین") && resolution.Status == "cancelled") return Results.Conflict(new { error = "این مصوبه لغو شده است." });
-    if (!context.User.IsInRole("ادمین") && resolution.Progress.Any(item => item.NationalId == nationalId && item.Status == "rejected")) return Results.Conflict(new { error = "وضعیت شما برای این مصوبه رد شده و امکان اقدام ندارید." });
+    if (!AdminAccess.IsAdmin(context.User) && resolution.Status == "cancelled") return Results.Conflict(new { error = "این مصوبه لغو شده است." });
+    if (!AdminAccess.IsAdmin(context.User) && resolution.Progress.Any(item => item.NationalId == nationalId && item.Status == "rejected")) return Results.Conflict(new { error = "وضعیت شما برای این مصوبه رد شده و امکان اقدام ندارید." });
     if (string.IsNullOrWhiteSpace(nationalId)) return Results.BadRequest(new { error = "شناسه کاربر ارسال نشده است." });
-    if (!context.User.IsInRole("ادمین"))
+    if (!AdminAccess.IsAdmin(context.User))
     {
         var direct = await db.Assignments.AnyAsync(a => a.ResolutionId == id && a.NationalId == nationalId);
         var inGroup = await db.GroupMembers.AnyAsync(m => m.NationalId == nationalId &&
@@ -1657,8 +1673,8 @@ app.MapGet("/api/attachments/{id:int}", async (int id, HttpContext context, AppD
     var attachment = await db.Attachments.AsNoTracking().Include(a => a.Resolution).FirstOrDefaultAsync(a => a.Id == id);
     if (attachment is null) return Results.NotFound();
     var nationalId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
-    var canView = context.User.IsInRole("ادمین") || (attachment.ResolutionReportId.HasValue ? attachment.UploadedBy == nationalId : attachment.ApprovedForAll);
-    if (!context.User.IsInRole("ادمین") && attachment.Resolution?.IsCommitteeDraft == true)
+    var canView = AdminAccess.IsAdmin(context.User) || (attachment.ResolutionReportId.HasValue ? attachment.UploadedBy == nationalId : attachment.ApprovedForAll);
+    if (!AdminAccess.IsAdmin(context.User) && attachment.Resolution?.IsCommitteeDraft == true)
         canView = await db.Assignments.AnyAsync(item => item.ResolutionId == attachment.ResolutionId && item.NationalId == nationalId)
             || await db.GroupMembers.AnyAsync(member => member.NationalId == nationalId &&
                 (attachment.Resolution.GroupId == member.GroupId ||
@@ -1672,7 +1688,7 @@ app.MapGet("/api/attachments/{id:int}", async (int id, HttpContext context, AppD
 
 app.MapPatch("/api/attachments/{id:int}/approval", async (int id, AttachmentApprovalRequest request, HttpContext context, AppDb db) =>
 {
-    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    if (!AdminAccess.IsAdmin(context.User)) return Results.Forbid();
     var attachment = await db.Attachments.FirstOrDefaultAsync(item => item.Id == id);
     if (attachment is null) return Results.NotFound();
     if (attachment.ResolutionReportId.HasValue) return Results.Conflict(new { error = "پیوست گزارش اقدام خصوصی است و امکان نمایش آن برای همه وجود ندارد." });
@@ -1685,7 +1701,7 @@ app.MapGet("/api/groups", async (HttpContext context, AppDb db) =>
 {
     var groups = await db.Groups.Include(group => group.Members).OrderBy(group => group.Name).ToListAsync();
     var currentId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
-    var isAdmin = context.User.IsInRole("ادمین");
+    var isAdmin = AdminAccess.IsAdmin(context.User);
     var mobiles = await db.Users.AsNoTracking().ToDictionaryAsync(user => user.NationalId, user => user.Mobile);
     return Results.Ok(groups
         .Where(group => isAdmin || group.Members.Any(member => member.NationalId == currentId))
@@ -1710,7 +1726,7 @@ app.MapGet("/api/groups", async (HttpContext context, AppDb db) =>
 });
 app.MapPut("/api/groups/{id:int}/category", async (int id, GroupCategoryRequest request, HttpContext context, AppDb db) =>
 {
-    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    if (!AdminAccess.IsAdmin(context.User)) return Results.Forbid();
     if (request.Category is not ("group" or "unit")) return Results.BadRequest(new { error = "دسته‌بندی معتبر نیست." });
     var group = await db.Groups.FirstOrDefaultAsync(item => item.Id == id);
     if (group is null) return Results.NotFound(new { error = "گروه پیدا نشد." });
@@ -1754,7 +1770,7 @@ app.MapDelete("/api/groups/{id:int}", async (int id, AppDb db) =>
 });
 app.MapPost("/api/groups", async (GroupCreate request, HttpContext context, AppDb db) =>
 {
-    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    if (!AdminAccess.IsAdmin(context.User)) return Results.Forbid();
     var name = request.Name.Trim(); if (name.Length == 0) return Results.BadRequest(new { error = "نام گروه الزامی است." });
     if (request.Category is not ("group" or "unit")) return Results.BadRequest(new { error = "دسته‌بندی معتبر نیست." });
     if (await db.Groups.AnyAsync(g => g.Name == name)) return Results.Conflict(new { error = "این گروه قبلاً تعریف شده است." });
@@ -1837,7 +1853,7 @@ static string NormalizeDigits(string value)
 }
 app.MapGet("/api/users", async (HttpContext context, AppDb db) =>
 {
-    if (!context.User.IsInRole("ادمین")) return Results.StatusCode(StatusCodes.Status403Forbidden);
+    if (!AdminAccess.IsAdmin(context.User)) return Results.StatusCode(StatusCodes.Status403Forbidden);
     var users = await db.Users.AsNoTracking().OrderBy(user => user.DisplayName).ToListAsync();
     return Results.Ok(users.Select(user =>
     {
@@ -1857,7 +1873,7 @@ app.MapGet("/api/users", async (HttpContext context, AppDb db) =>
 });
 app.MapPatch("/api/users/{nationalId}/profile", async (string nationalId, UpdateUserProfileRequest request, HttpContext context, AppDb db) =>
 {
-    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    if (!AdminAccess.IsAdmin(context.User)) return Results.Forbid();
     var id = NormalizeDigits(nationalId.Trim());
     var user = await db.Users.FirstOrDefaultAsync(item => item.NationalId == id);
     if (user is null) return Results.NotFound(new { error = "کاربر پیدا نشد." });
@@ -1873,7 +1889,7 @@ app.MapPatch("/api/users/{nationalId}/mobile", async (string nationalId, UpdateM
 {
     var normalizedId = NormalizeDigits(nationalId.Trim());
     var currentId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
-    if (!context.User.IsInRole("ادمین") && !string.Equals(currentId, normalizedId, StringComparison.Ordinal))
+    if (!AdminAccess.IsAdmin(context.User) && !string.Equals(currentId, normalizedId, StringComparison.Ordinal))
         return Results.Forbid();
     var person = await db.Users.FirstOrDefaultAsync(user => user.NationalId == normalizedId);
     if (person is null) return Results.NotFound(new { error = "کاربر در فهرست اشخاص پیدا نشد." });
@@ -1898,12 +1914,16 @@ app.MapPatch("/api/users/{nationalId}/mobile", async (string nationalId, UpdateM
 });
 app.MapPatch("/api/users/{nationalId}/role", async (string nationalId, SetUserRoleRequest request, HttpContext context, AppDb db) =>
 {
+    if (!context.User.IsInRole(AdminAccess.Full)) return Results.Forbid();
+    var targetRole = request.Role ?? (request.IsAdmin ? AdminAccess.Full : "کاربر");
+    if (targetRole != "کاربر" && !AdminAccess.IsAdminRole(targetRole))
+        return Results.BadRequest(new { error = "سطح دسترسی معتبر نیست." });
     var normalizedId = NormalizeDigits(nationalId.Trim());
     var person = await db.Users.FirstOrDefaultAsync(user => user.NationalId == normalizedId);
     if (person is null) return Results.NotFound(new { error = "کاربر در فهرست اشخاص پیدا نشد." });
-    if (!request.IsAdmin && normalizedId == primaryAdminNationalId)
+    if (targetRole != AdminAccess.Full && normalizedId == primaryAdminNationalId)
         return Results.Conflict(new { error = "دسترسی ادمین اصلی قابل حذف نیست." });
-    if (!request.IsAdmin && normalizedId == context.User.FindFirstValue(ClaimTypes.NameIdentifier))
+    if (targetRole != AdminAccess.Full && normalizedId == context.User.FindFirstValue(ClaimTypes.NameIdentifier))
         return Results.Conflict(new { error = "نمی‌توانید دسترسی ادمین حساب فعلی خودتان را حذف کنید." });
 
     var account = await db.Users.FirstOrDefaultAsync(user => user.NationalId == normalizedId);
@@ -1912,19 +1932,19 @@ app.MapPatch("/api/users/{nationalId}/role", async (string nationalId, SetUserRo
         account = new AppUser { NationalId = normalizedId, DisplayName = person.DisplayName };
         db.Users.Add(account);
     }
-    if (!request.IsAdmin && account.Role == "ادمین")
+    if (targetRole != AdminAccess.Full && account.Role == "ادمین")
     {
         var adminCount = await db.Users.CountAsync(user => user.Role == "ادمین");
         if (adminCount <= 1) return Results.Conflict(new { error = "حداقل یک ادمین باید در سامانه باقی بماند." });
     }
     account.DisplayName = person.DisplayName;
-    account.Role = request.IsAdmin ? "ادمین" : "کاربر";
+    account.Role = targetRole;
     await db.SaveChangesAsync();
     return Results.Ok(new { nationalId = normalizedId, displayName = person.DisplayName, role = account.Role });
 });
 app.MapGet("/api/settings/bale-notifications", async (HttpContext context, AppDb db, IConfiguration configuration) =>
 {
-    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    if (!AdminAccess.IsAdmin(context.User)) return Results.Forbid();
     var setting = await db.Settings.AsNoTracking().FirstOrDefaultAsync(item => item.Key == "BaleNotificationsEnabled");
     var username = configuration["BALE_USERNAME"] ?? configuration["Bale:Username"];
     var password = configuration["BALE_PASSWORD"] ?? configuration["Bale:Password"];
@@ -1933,7 +1953,7 @@ app.MapGet("/api/settings/bale-notifications", async (HttpContext context, AppDb
 });
 app.MapPut("/api/settings/bale-notifications", async (BaleNotificationSettingRequest request, HttpContext context, AppDb db) =>
 {
-    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    if (!AdminAccess.IsAdmin(context.User)) return Results.Forbid();
     var setting = await db.Settings.FirstOrDefaultAsync(item => item.Key == "BaleNotificationsEnabled");
     if (setting is null)
         db.Settings.Add(new AppSetting { Key = "BaleNotificationsEnabled", Value = request.Enabled ? "true" : "false" });
@@ -1945,7 +1965,7 @@ app.MapPut("/api/settings/bale-notifications", async (BaleNotificationSettingReq
 
 app.MapGet("/api/settings/minister-directive-categories", async (HttpContext context, AppDb db) =>
 {
-    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    if (!AdminAccess.IsAdmin(context.User)) return Results.Forbid();
     const string key = "MinisterDirectiveCategories";
     var saved = await db.Settings.AsNoTracking().Where(setting => setting.Key == key).Select(setting => setting.Value).FirstOrDefaultAsync();
     var defaults = new List<string> { "دفتر مقام معظم رهبری", "دفتر ریاست جمهوری، نهاد، معاونان ریاست جمهوری", "وزارت خانه ها، سازمان ها، نهادهای دولتی", "نمایندگان مجلس", "قوه قضائیه، سازمان بازرسی", "مکاتبات داخلی وزارت خانه", "سایر مکاتبات" };
@@ -1954,7 +1974,7 @@ app.MapGet("/api/settings/minister-directive-categories", async (HttpContext con
 });
 app.MapPut("/api/settings/minister-directive-categories", async (MinisterDirectiveCategoriesRequest request, HttpContext context, AppDb db) =>
 {
-    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    if (!AdminAccess.IsAdmin(context.User)) return Results.Forbid();
     var categories = request.Categories.Select(item => item.Trim()).Where(item => item.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).Take(100).ToList();
     if (categories.Count == 0) return Results.BadRequest(new { error = "حداقل یک دسته‌بندی وارد کنید." });
     const string key = "MinisterDirectiveCategories";
@@ -1968,7 +1988,7 @@ app.MapPut("/api/settings/minister-directive-categories", async (MinisterDirecti
 
 app.MapGet("/api/reports/data-quality", async (HttpContext context, AppDb db) =>
 {
-    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    if (!AdminAccess.IsAdmin(context.User)) return Results.Forbid();
 
     var users = await db.Users.AsNoTracking()
         .OrderBy(user => user.DisplayName)
@@ -2022,7 +2042,7 @@ app.MapGet("/api/reports/data-quality", async (HttpContext context, AppDb db) =>
 app.MapGet("/api/reports", async (HttpContext context, AppDb db, string? view, int? page, int? pageSize, string? q, string? status) =>
 {
     var id = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
-    var isAdmin = context.User.IsInRole("ادمین");
+    var isAdmin = AdminAccess.IsAdmin(context.User);
     if (isAdmin && string.Equals(view, "summary", StringComparison.OrdinalIgnoreCase))
     {
         var summary = await db.Resolutions.Where(item => !item.IsArchived && !item.IsSpecialTracking).GroupBy(_ => 1).Select(group => new
@@ -2106,7 +2126,7 @@ app.MapGet("/api/reports", async (HttpContext context, AppDb db, string? view, i
 
 app.MapGet("/api/reports/people/{nationalId}/tasks", async (string nationalId, string? status, HttpContext context, AppDb db) =>
 {
-    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    if (!AdminAccess.IsAdmin(context.User)) return Results.Forbid();
     var groupIds = await db.GroupMembers.AsNoTracking().Where(member => member.NationalId == nationalId).Select(member => member.GroupId).ToListAsync();
     var records = await db.Resolutions.AsNoTracking()
         .Where(item => !item.IsArchived && !item.IsSpecialTracking &&
@@ -2136,7 +2156,7 @@ app.MapGet("/api/reports/people/{nationalId}/tasks", async (string nationalId, s
 });
 app.MapPost("/api/resolutions/{id:int}/warnings", async (int id, WarningRecipientsRequest request, AppDb db, HttpContext context) =>
 {
-    if (!context.User.IsInRole("ادمین")) return Results.Forbid();
+    if (!AdminAccess.IsAdmin(context.User)) return Results.Forbid();
     var nationalIds = (request.NationalIds ?? new List<string>())
         .Where(value => !string.IsNullOrWhiteSpace(value))
         .Select(value => NormalizeDigits(value.Trim()))
