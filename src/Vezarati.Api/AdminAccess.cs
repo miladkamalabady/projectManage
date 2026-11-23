@@ -33,7 +33,7 @@ static class AdminAccess
         if (read && (path is "/api/dashboard" or "/api/resolutions" or "/api/groups" or "/api/users" or "/api/users/search" or "/api/reports/submissions")) return true;
         if (scope == "council" && (path.StartsWith("/api/meetings") || path.StartsWith("/api/attendance") ||
             (read && (path == "/api/reports" || path.StartsWith("/api/reports/people/"))))) return true;
-        if (read && path == "/api/dashboard/tasks") return scope == "council";
+        if (read && (path == "/api/dashboard/tasks" || path == "/api/dashboard/task-reports")) return scope == "council";
         if (path.StartsWith("/api/provincial-trips") || path.StartsWith("/api/provincial-poles")) return scope == "provincial";
         if (path == "/api/settings/minister-directive-categories") return scope == "minister";
         if (path == "/api/resolutions" && HttpMethods.IsPost(context.Request.Method))

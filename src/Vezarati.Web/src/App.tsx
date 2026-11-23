@@ -2470,6 +2470,7 @@ function ProvincialTripReport({ resolutions, submissions, groups, users, loading
 function TaskCompletionReport({ statistics, revision, onOpenResolution }: {
   statistics?: { units: TaskStatistic[]; directors: TaskStatistic[] }; revision: number; onOpenResolution: (item: Resolution) => void;
 }) {
+  const [reportTarget, setReportTarget] = useState<{ kind: string; id: string; item: Resolution; label: string } | null>(null);
   const [view, setView] = useState<"units" | "directors">("units");
   const [selection, setSelection] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<"all" | "completed" | "remaining">("all");
@@ -2512,6 +2513,7 @@ function TaskCompletionReport({ statistics, revision, onOpenResolution }: {
         <option value="directors">مدیران کل</option>
       </select>
     </div>
+    {reportTarget && <TaskReportsDialog target={reportTarget} revision={revision} onClose={() => setReportTarget(null)}/>}
     {visibleRows.length ? <>
       <div className="chart-legend">
         <span><i className="legend-completed" />انجام‌شده</span>
@@ -2548,7 +2550,8 @@ function TaskCompletionReport({ statistics, revision, onOpenResolution }: {
             <td>{formatDate(item.meetingDate, item.meetingDateJalali)}</td>
             <td>{item.dueDate ? formatDate(item.dueDate, item.dueDateJalali) : "—"}</td>
             <td>{done ? "انجام‌شده" : "مانده"}</td>
-            <td><button type="button" className="secondary" onClick={() => onOpenResolution(item)}>مشاهده مصوبه</button></td>
+            <td><div className="provincial-actions"><button type="button" className="secondary" onClick={() => onOpenResolution(item)}>مشاهده مصوبه</button>
+            {done && <button type="button" className="secondary" onClick={() => setReportTarget({ kind: view, id: selection!, item, label: selectedRow.label })}>مشاهده گزارش</button>}</div></td>
           </tr>)}</tbody>
         </table></div> : <p className="report-empty">مصوبه‌ای برای این وضعیت وجود ندارد.</p>}
         <div className="pagination"><button type="button" disabled={loading || page<=1} onClick={()=>setPage(value=>value-1)}>قبلی</button>
@@ -2557,6 +2560,51 @@ function TaskCompletionReport({ statistics, revision, onOpenResolution }: {
       </section>}
     </> : <p className="report-empty">{view === "units" ? "معاونت یا واحدی ثبت نشده است." : "عضوی در گروه مدیران کل ثبت نشده است."}</p>}
   </section>;
+}
+
+function TaskReportsDialog({ target, revision, onClose }: {
+  target: { kind: string; id: string; item: Resolution; label: string }; revision: number; onClose: () => void;
+}) {
+  const [reports, setReports] = useState<{ key: string; userName: string; text: string; submittedAt: string; reportType: string; attachments: { id: number; originalName: string }[] }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [retry, setRetry] = useState(0);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null;
+    closeRef.current?.focus();
+    const key = (event: KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); } };
+    document.addEventListener("keydown", key);
+    return () => { document.removeEventListener("keydown", key); previous?.focus(); };
+  }, [onClose]);
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true); setError(""); setReports([]);
+    const params = new URLSearchParams({ kind: target.kind, id: target.id, resolutionId: String(target.item.id) });
+    fetchApi("/api/dashboard/task-reports?" + params, { signal: controller.signal })
+      .then(async response => {
+        if (!response.ok) throw new Error("گزارش‌های این مصوبه دریافت نشد.");
+        const data = await response.json();
+        if (!controller.signal.aborted) setReports(data);
+      }).catch(cause => { if (!controller.signal.aborted) setError(cause.message); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [target.kind, target.id, target.item.id, revision, retry]);
+  return <div className="modal-backdrop" onClick={onClose}>
+    <section className="modal" role="dialog" aria-modal="true" aria-label="گزارش‌های مصوبه" onClick={event => event.stopPropagation()}>
+      <div className="modal-head"><div><h2>گزارش‌های مصوبه {target.item.number}</h2><p>{target.label}</p></div>
+        <button type="button" ref={closeRef} className="icon-btn" aria-label="بستن گزارش‌ها" onClick={onClose}><X/></button></div>
+      <p>{target.item.text}</p>
+      {loading ? <p role="status">در حال دریافت گزارش‌ها…</p> : error ? <p role="alert">{error}<button type="button" className="secondary" onClick={() => setRetry(value => value + 1)}>تلاش دوباره</button></p>
+        : reports.length ? reports.map(report => <article className="submitted-report-entry" key={report.key}>
+          <b>{report.userName} · {report.reportType === "periodic" ? "گزارش دوره‌ای" : "گزارش اقدام"}</b>
+          <small>{report.reportType === "legacy" ? "زمان ثبت یا آخرین تغییر گزارش" : "تاریخ ارسال"} · {formatDateTime(report.submittedAt)}</small>
+          <p style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{report.text}</p>
+          {report.attachments.length ? <div className="report-attachment-list">{report.attachments.map(file =>
+            <a key={file.id} href={`/api/attachments/${file.id}`} target="_blank" rel="noreferrer"><Paperclip size={14}/>{file.originalName}</a>)}</div> : <small>پیوستی ثبت نشده است.</small>}
+        </article>) : <p className="report-empty">برای این مصوبه در این معاونت یا فرد گزارشی ثبت نشده است.</p>}
+    </section>
+  </div>;
 }
 
 function ResolutionCard({ item, groups, users, viewerId, isAdmin, busy, onStatus, onUpload, eventDraft, onEventChange, onEventSubmit, onApproveAttachment, reportDraft, onReportDraftChange, onReportSubmit, submittedFading, sentWarningIds, onSendWarning, periodicDraft, onPeriodicDraftChange, onPeriodicSubmit, anchorId, submittedReports = [], reportsLoading, reportsError, onOpenReports }: { onOpenReports?: () => void; anchorId?: string; submittedReports?: ResolutionReport[]; reportsLoading: boolean; reportsError: string; item: Resolution; groups: Group[]; users: DirectoryUser[]; viewerId: string; isAdmin: boolean; busy: boolean; onStatus: (status: string, nationalId?: string) => void; onUpload: (file: File) => Promise<void>; eventDraft: string; onEventChange: (text: string) => void; onEventSubmit: () => void; onApproveAttachment: (attachmentId: number, approved: boolean) => void; reportDraft: string; onReportDraftChange: (text: string) => void; onReportSubmit: (files: File[]) => Promise<boolean>; submittedFading?: boolean; sentWarningIds: string[]; onSendWarning: (nationalIds: string[]) => Promise<string[]>; periodicDraft: string; onPeriodicDraftChange: (text: string) => void; onPeriodicSubmit: () => void }) {

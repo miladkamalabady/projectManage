@@ -88,6 +88,7 @@ static class DashboardTasks
             var states = matching.ToDictionary(item => item.Id, item => item.Done);
             return Results.Ok(new { total = matching.Count, page = safePage, items = items.Select(item => new { item, done = states[item.Id] }) });
         });
+        app.MapGet("/api/dashboard/task-reports", ReadReports);
         app.MapGet("/api/resolutions/{id:int}", async (int id, HttpContext context, AppDb db) =>
         {
             if (!AdminAccess.IsAdmin(context.User)) return Results.Forbid();
@@ -101,4 +102,44 @@ static class DashboardTasks
             return Results.Ok(item);
         });
     }
+    public static async Task<IResult> ReadReports(HttpContext context, AppDb db, string kind, string id, int resolutionId)
+    {
+            if (!AdminAccess.IsAdmin(context.User)) return Results.Forbid();
+            if (kind is not ("units" or "directors")) return Results.BadRequest();
+            var snapshot = await Read(db, context.User, context.RequestAborted);
+            var row = (kind == "units" ? snapshot.Units : snapshot.Directors).FirstOrDefault(row => row.Id == id);
+            if (row is null || !row.Items.Any(item => item.Id == resolutionId && item.Done)) return Results.NotFound();
+            var people = new HashSet<string>();
+            if (kind == "directors") people.Add(id);
+            else
+            {
+                var unitId = int.Parse(id);
+                var name = await db.Groups.Where(group => group.Id == unitId).Select(group => group.Name).FirstAsync(context.RequestAborted);
+                people.UnionWith(await db.GroupMembers.Where(member => member.GroupId == unitId).Select(member => member.NationalId).ToListAsync(context.RequestAborted));
+                var directory = await db.Users.AsNoTracking().Select(user => new { user.NationalId, user.OrganizationUnit }).ToListAsync(context.RequestAborted);
+                people.UnionWith(directory.Where(user => Normalize(user.OrganizationUnit ?? "") == Normalize(name)).Select(user => user.NationalId));
+            }
+            var personIds = people.ToList();
+            var reports = await db.ResolutionReports.AsNoTracking().Where(report => report.ResolutionId == resolutionId && personIds.Contains(report.NationalId))
+                .OrderByDescending(report => report.SubmittedAt).ThenByDescending(report => report.Id).ToListAsync(context.RequestAborted);
+            var progress = await db.Progress.AsNoTracking().Where(item => item.ResolutionId == resolutionId && personIds.Contains(item.NationalId) && item.ReportText != "")
+                .ToListAsync(context.RequestAborted);
+            var files = await db.Attachments.AsNoTracking().Where(file => file.ResolutionId == resolutionId)
+                .Select(file => new { file.Id, file.ResolutionReportId, file.UploadedBy, file.OriginalName }).ToListAsync(context.RequestAborted);
+            var names = await db.Users.AsNoTracking().Where(user => personIds.Contains(user.NationalId))
+                .ToDictionaryAsync(user => user.NationalId, user => user.DisplayName, context.RequestAborted);
+            var items = reports.Select(report => new {
+                key = "report-" + report.Id, userName = names.GetValueOrDefault(report.NationalId, report.UserName),
+                text = report.Text, submittedAt = report.SubmittedAt, reportType = report.ReportType,
+                attachments = files.Where(file => file.ResolutionReportId == report.Id).Select(file => new { file.Id, file.OriginalName }).ToList()
+            }).ToList();
+            var reportedIds = reports.Select(report => report.NationalId).ToHashSet();
+            items.AddRange(progress.Where(item => !reportedIds.Contains(item.NationalId)).Select(item => new {
+                key = "legacy-" + item.NationalId, userName = names.GetValueOrDefault(item.NationalId, item.NationalId),
+                text = item.ReportText, submittedAt = item.UpdatedAt, reportType = "legacy",
+                attachments = files.Where(file => file.ResolutionReportId == null && file.UploadedBy == item.NationalId).Select(file => new { file.Id, file.OriginalName }).ToList()
+            }));
+            return Results.Ok(items.OrderByDescending(item => item.submittedAt));
+    }
+
 }
