@@ -2145,7 +2145,7 @@ export default function App() {
       {(error || message) && <div className="api-toast-stack" aria-live="polite">{error && <div className="api-toast api-toast-error" role="alert"><span>{error}</span><div><button type="button" className="secondary" onClick={() => void load()}>تلاش دوباره</button><button type="button" className="api-toast-close" aria-label="بستن پیام" onClick={() => setError("")}>×</button></div></div>}{message && <div className="api-toast api-toast-message" role="status"><span>{message}</span><button type="button" className="api-toast-close" aria-label="بستن پیام" onClick={() => setMessage("")}>×</button></div>}</div>}
       <section className="metrics"><Metric icon={<ClipboardList />} label="کل مصوبات" value={isAdmin ? dashboard?.summary?.total ?? mine.length : mine.length} color="blue" active={wallStatusFilter === "all" && tab === "wall"} onClick={() => { setTab(isAdmin ? "resolutions" : "wall"); if (isAdmin) setResolutionStatusFilter("all"); setWallStatusFilter("all"); }} /><Metric icon={<CheckCheck />} label="اجراشده" value={completed} color="green" active={tab === "wall" && wallStatusFilter === "completed"} onClick={() => { setTab(isAdmin ? "resolutions" : "wall"); if (isAdmin) setResolutionStatusFilter("completed"); setWallStatusFilter("completed"); }} /><Metric icon={<CircleAlert />} label="نیازمند پیگیری" value={pending} color="amber" active={tab === "wall" && wallStatusFilter === "pending"} onClick={() => { setTab(isAdmin ? "resolutions" : "wall"); if (isAdmin) setResolutionStatusFilter("pending"); setWallStatusFilter("pending"); }} />{isAdmin && <Metric icon={<CalendarDays />} label="انجام نشده" value={delayed} color="red" active={tab === "wall" && wallStatusFilter === "delayed"} onClick={() => { setTab(isAdmin ? "resolutions" : "wall"); if (isAdmin) setResolutionStatusFilter("delayed"); setWallStatusFilter("delayed"); }} />}</section>
       {tab === "wall" && isAdmin && <TaskCompletionReport
-        statistics={dashboard?.taskStatistics} revision={tabDataRevision} onOpenResolution={item => setAdminTaskId(item.id)}
+        statistics={dashboard?.taskStatistics} revision={tabDataRevision}
       />}
       {tab === "wall" && isAdmin && <div className="home-shortcuts">
         <button type="button" className="secondary" onClick={() => setTab("resolutions")}>مشاهده مصوبات</button>
@@ -2467,8 +2467,8 @@ function ProvincialTripReport({ resolutions, submissions, groups, users, loading
   </section>;
 }
 
-function TaskCompletionReport({ statistics, revision, onOpenResolution }: {
-  statistics?: { units: TaskStatistic[]; directors: TaskStatistic[] }; revision: number; onOpenResolution: (item: Resolution) => void;
+function TaskCompletionReport({ statistics, revision }: {
+  statistics?: { units: TaskStatistic[]; directors: TaskStatistic[] }; revision: number;
 }) {
   const [reportTarget, setReportTarget] = useState<{ kind: string; id: string; item: Resolution; label: string } | null>(null);
   const [view, setView] = useState<"units" | "directors">("units");
@@ -2550,7 +2550,7 @@ function TaskCompletionReport({ statistics, revision, onOpenResolution }: {
             <td>{formatDate(item.meetingDate, item.meetingDateJalali)}</td>
             <td>{item.dueDate ? formatDate(item.dueDate, item.dueDateJalali) : "—"}</td>
             <td>{done ? "انجام‌شده" : "مانده"}</td>
-            <td><div className="provincial-actions"><button type="button" className="secondary" onClick={() => onOpenResolution(item)}>مشاهده مصوبه</button>
+            <td><div className="provincial-actions">
             {done && <button type="button" className="secondary" onClick={() => setReportTarget({ kind: view, id: selection!, item, label: selectedRow.label })}>مشاهده گزارش</button>}</div></td>
           </tr>)}</tbody>
         </table></div> : <p className="report-empty">مصوبه‌ای برای این وضعیت وجود ندارد.</p>}
@@ -2594,7 +2594,6 @@ function TaskReportsDialog({ target, revision, onClose }: {
     <section className="modal" role="dialog" aria-modal="true" aria-label="گزارش‌های مصوبه" onClick={event => event.stopPropagation()}>
       <div className="modal-head"><div><h2>گزارش‌های مصوبه {target.item.number}</h2><p>{target.label}</p></div>
         <button type="button" ref={closeRef} className="icon-btn" aria-label="بستن گزارش‌ها" onClick={onClose}><X/></button></div>
-      <p>{target.item.text}</p>
       {loading ? <p role="status">در حال دریافت گزارش‌ها…</p> : error ? <p role="alert">{error}<button type="button" className="secondary" onClick={() => setRetry(value => value + 1)}>تلاش دوباره</button></p>
         : reports.length ? reports.map(report => <article className="submitted-report-entry" key={report.key}>
           <b>{report.userName} · {report.reportType === "periodic" ? "گزارش دوره‌ای" : "گزارش اقدام"}</b>
