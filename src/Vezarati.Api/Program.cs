@@ -719,13 +719,34 @@ app.MapPost("/api/auth/logout", async (HttpContext context) =>
     return Results.NoContent();
 });
 
-app.MapGet("/api/dashboard", async (HttpContext context, AppDb db) =>
+DashboardTasks.Map(app);
+app.MapGet("/api/dashboard", async (HttpContext context, AppDb db, bool? details) =>
 {
+    if (AdminAccess.IsAdmin(context.User) && details != true)
+    {
+        var query = AdminAccess.Filter(db.Resolutions.AsNoTracking(), context.User).Where(item => !item.IsArchived && !item.IsSpecialTracking);
+        var counts = await query.GroupBy(_ => 1).Select(group => new {
+            total = group.Count(), completed = group.Count(item => item.Status == "completed"),
+            pending = group.Count(item => item.Status == "before" || item.Status == "in_progress"),
+            delayed = group.Count(item => item.Status == "delayed")
+        }).SingleOrDefaultAsync(context.RequestAborted);
+        var statistics = await DashboardTasks.Read(db, context.User, context.RequestAborted);
+        return Results.Ok(new {
+            currentUser = new { nationalId = context.User.FindFirstValue(ClaimTypes.NameIdentifier), displayName = context.User.Identity!.Name, role = context.User.FindFirstValue(ClaimTypes.Role) },
+            groups = Array.Empty<object>(), resolutions = Array.Empty<object>(), summary = counts,
+            taskStatistics = new { units = statistics.Units.Select(row => row.Summary), directors = statistics.Directors.Select(row => row.Summary) }
+        });
+    }
     await ResolutionStatusUpdater.RefreshResolutionStatuses(db);
     var id = context.User.FindFirstValue(ClaimTypes.NameIdentifier)!;
     var isAdmin = AdminAccess.IsAdmin(context.User);
-    var groups = await db.Groups.Include(g => g.Members).ToListAsync();
-    var records = await AdminAccess.Filter(db.Resolutions.AsNoTracking(), context.User).Where(item => !item.IsArchived).Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Attachments.Where(attachment => isAdmin || (!attachment.ResolutionReportId.HasValue && (attachment.ApprovedForAll || attachment.Resolution!.IsCommitteeDraft)))) .Include(r => r.Events).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).Include(r => r.Meeting).ThenInclude(meeting => meeting!.Attachments).OrderByDescending(r => r.MeetingDate).ToListAsync();
+    var groups = await db.Groups.AsNoTracking().Where(group => isAdmin || group.Members.Any(member => member.NationalId == id))
+        .Include(group => group.Members.Where(member => isAdmin || member.NationalId == id)).ToListAsync(context.RequestAborted);
+    var records = await AdminAccess.Filter(db.Resolutions.AsNoTracking(), context.User).Where(item => !item.IsArchived && (isAdmin || (item.Status != "cancelled" &&
+            (item.PublishToAll || item.Assignments.Any(person => person.NationalId == id) ||
+             db.GroupMembers.Any(member => member.NationalId == id && (item.GroupId == member.GroupId ||
+                 item.GroupAssignments.Any(group => group.GroupId == member.GroupId)))))))
+        .AsSplitQuery().Include(r => r.Assignments).Include(r => r.Progress).Include(r => r.Attachments.Where(attachment => isAdmin || (!attachment.ResolutionReportId.HasValue && (attachment.ApprovedForAll || attachment.Resolution!.IsCommitteeDraft)))) .Include(r => r.Events).Include(r => r.GroupAssignments).ThenInclude(a => a.Group).Include(r => r.Meeting).ThenInclude(meeting => meeting!.Attachments).OrderByDescending(r => r.MeetingDate).ToListAsync();
     foreach (var resolution in records)
     {
         resolution.MeetingAttachments = resolution.Meeting?.Attachments ?? [];
@@ -1391,10 +1412,11 @@ app.MapGet("/api/reports/bale-messages", async (HttpContext context, AppDb db, s
     });
     return Results.Ok(new { total, page, pageSize, items });
 });
-app.MapGet("/api/reports/submissions", async (AppDb db, HttpContext context, string? q, string? person, string? province, int? unit, string? approval, string? priority, DateOnly? from, DateOnly? to, int? page) =>
+app.MapGet("/api/reports/submissions", async (AppDb db, HttpContext context, string? q, string? person, string? province, int? unit, string? approval, string? priority, DateOnly? from, DateOnly? to, int? page, int? resolutionId) =>
 {
     var allowedResolutions = AdminAccess.Filter(db.Resolutions, context.User).Select(item => item.Id);
     var query = db.ResolutionReports.AsNoTracking().Where(report => allowedResolutions.Contains(report.ResolutionId));
+    if (resolutionId.HasValue) query = query.Where(report => report.ResolutionId == resolutionId.Value);
     if (!string.IsNullOrWhiteSpace(priority))
     {
         if (priority is not ("آنی" or "فوری" or "عادی")) return Results.BadRequest(new { error = "اولویت معتبر نیست." });

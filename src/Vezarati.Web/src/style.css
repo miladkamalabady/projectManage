@@ -983,3 +983,10 @@
 .voice-textarea-tools small{font-size:11px}
 .voice-textarea-interim{font-size:12px;opacity:.8;white-space:pre-wrap}
 .voice-textarea-error{font-size:12px;color:#b53535}
+
+.resolution-wizard-stage[hidden]{display:none!important}
+.resolution-wizard-steps{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 16px}
+.resolution-wizard-steps span{padding:8px 12px;border:1px solid #aabbb3;border-radius:8px}
+.resolution-wizard-steps [aria-current="step"]{background:#e1f1e9;color:#1d593f;font-weight:700}
+.wizard-meeting-summary{padding:10px;border:1px solid #c4d8cc;border-radius:8px}
+.resolution-wizard-stage{margin-bottom:12px}
