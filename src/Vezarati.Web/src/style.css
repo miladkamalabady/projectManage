@@ -1062,3 +1062,13 @@
 .attachment-image-stage img[hidden] { display:none; }
 .attachment-image-dialog footer { padding:10px 16px; text-align:center; }
 .attachment-image-dialog footer a { color:#26765e; font-size:12px; }
+
+.report-mini-progress { display:inline-flex; flex-direction:column; gap:4px; width:155px; max-width:100%; vertical-align:middle; font-size:10px; font-weight:400; }
+.report-mini-progress-labels { display:flex; justify-content:space-between; gap:8px; white-space:nowrap; }
+.report-mini-progress-labels>span:first-child { color:#26765e; }
+.report-mini-progress-labels>span:last-child { color:#7b6650; }
+.report-mini-progress-track { display:block; height:5px; width:100%; border-radius:5px; background:#e7e3dd; overflow:hidden; }
+.report-mini-progress-track>span { display:block; height:100%; background:#369b75; border-radius:5px; }
+.resolution-actions>.report-mini-progress { flex-basis:100%; margin-block:3px 7px; }
+.admin-submitted-reports>summary>.report-mini-progress { margin-inline-start:12px; }
+.resolution-report-coverage { display:inline-flex; flex-direction:column; gap:6px; align-items:center; }
