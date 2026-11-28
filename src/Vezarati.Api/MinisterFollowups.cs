@@ -79,7 +79,17 @@ static class MinisterFollowups
         return Results.Ok(new { duplicate = false, queued, recipients = recipients.Count, missingMobile });
     }
 
-    public static async Task<IResult> Report(HttpContext context, AppDb db, string? q, string? status, string? from, string? to, bool print = false, int page = 1)
+    public static async Task<IResult> Reports(int id, HttpContext context, AppDb db)
+    {
+        if (!AdminAccess.IsAdmin(context.User)) return Results.Forbid();
+        var ct = context.RequestAborted;
+        if (!await AdminAccess.Filter(db.Resolutions.AsNoTracking(), context.User, db).AnyAsync(item => item.Id == id && item.IsSpecialTracking && item.SpecialTrackingType != "provincial", ct)) return Results.NotFound();
+        var people = await db.ResolutionReports.Where(report => report.ResolutionId == id).Select(report => report.NationalId)
+            .Union(db.Progress.Where(progress => progress.ResolutionId == id && progress.ReportText != "").Select(progress => progress.NationalId)).Distinct().ToListAsync(ct);
+        return await DashboardTasks.ReadPersonReports(db, id, people, ct);
+    }
+
+    public static async Task<IResult> Report(HttpContext context, AppDb db, string? q, string? status, string? from, string? to, bool print = false, int page = 1, string? category = null, string? priority = null, string? information = null, string? presence = null)
     {
         if (!AdminAccess.IsAdmin(context.User)) return Results.Forbid();
         if (status is not (null or "" or "all" or "completed" or "pending" or "overdue" or "info" or "cancelled")) return Results.BadRequest();
@@ -87,13 +97,32 @@ static class MinisterFollowups
         if (!string.IsNullOrWhiteSpace(from)) { if (!DateOnly.TryParseExact(from, "yyyy-MM-dd", out var parsed)) return Results.BadRequest(); fromDate = parsed; }
         if (!string.IsNullOrWhiteSpace(to)) { if (!DateOnly.TryParseExact(to, "yyyy-MM-dd", out var parsed)) return Results.BadRequest(); toDate = parsed; }
         if (fromDate > toDate) return Results.BadRequest();
+        if (priority is not (null or "" or "آنی" or "فوری" or "عادی") || information is not (null or "" or "all" or "info" or "action") || presence is not (null or "" or "all" or "has" or "missing")) return Results.BadRequest();
         var ct = context.RequestAborted;
         var today = ProvincialTrips.CurrentDate;
         var query = AdminAccess.Filter(db.Resolutions.AsNoTracking(), context.User, db)
             .Where(item => item.IsSpecialTracking && item.SpecialTrackingType != "provincial" && !item.IsArchived);
         if (fromDate.HasValue) query = query.Where(item => item.MeetingDate >= fromDate.Value);
         if (toDate.HasValue) query = query.Where(item => item.MeetingDate <= toDate.Value);
-        if (!string.IsNullOrWhiteSpace(q)) query = query.Where(item => item.Number.Contains(q) || item.Text.Contains(q));
+        if (!string.IsNullOrWhiteSpace(category))
+        {
+            var marker = "\u001Fminister-category:" + Uri.EscapeDataString(category);
+            query = query.Where(item => item.Notes.EndsWith(marker) || item.Notes.Contains(marker + "\n"));
+        }
+        if (priority is "آنی" or "فوری")
+        {
+            var marker = "\u001Fpriority:" + Uri.EscapeDataString(priority);
+            query = query.Where(item => item.Notes.Contains(marker));
+        }
+        else if (priority == "عادی") query = query.Where(item => !item.Notes.Contains("\u001Fpriority:"));
+        if (information == "info") query = query.Where(item => item.IsForInformation);
+        if (information == "action") query = query.Where(item => !item.IsForInformation);
+        if (presence == "has") query = query.Where(item => item.Progress.Any(progress => progress.ReportText != "") || db.ResolutionReports.Any(report => report.ResolutionId == item.Id));
+        if (presence == "missing") query = query.Where(item => !item.Progress.Any(progress => progress.ReportText != "") && !db.ResolutionReports.Any(report => report.ResolutionId == item.Id));
+        if (!string.IsNullOrWhiteSpace(q)) query = query.Where(item => item.Number.Contains(q) || item.Id.ToString() == q || item.Text.Contains(q) || item.Notes.Contains(q) ||
+            item.Assignments.Any(person => db.Users.Any(user => user.NationalId == person.NationalId && (user.DisplayName.Contains(q) || (user.Title ?? "").Contains(q) || user.OrganizationUnit.Contains(q)))) ||
+            item.GroupAssignments.Any(group => group.Group!.Name.Contains(q)) || (item.Group != null && item.Group.Name.Contains(q)) ||
+            db.ResolutionReports.Any(report => report.ResolutionId == item.Id && (report.Text.Contains(q) || report.UserName.Contains(q))) || item.Progress.Any(progress => progress.ReportText.Contains(q)));
         query = status switch {
             "info" => query.Where(item => item.IsForInformation),
             "completed" => query.Where(item => !item.IsForInformation && item.Status == "completed"),
@@ -109,7 +138,8 @@ static class MinisterFollowups
         page = Math.Max(1, page);
         if (!print) selected = selected.Skip((page - 1) * 50).Take(50);
         var records = await selected.Select(item => new {
-            item.Id, item.Number, item.Text, item.Status, item.IsForInformation, item.MeetingDate, item.DueDate,
+            item.Id, item.Number, item.Text, item.Notes, item.Status, item.IsForInformation, item.MeetingDate, item.DueDate,
+            reportsCount = db.ResolutionReports.Count(report => report.ResolutionId == item.Id) + item.Progress.Count(progress => progress.ReportText != "" && !db.ResolutionReports.Any(report => report.ResolutionId == item.Id && report.NationalId == progress.NationalId)),
             followups = item.Events.Count(entry => entry.Text.StartsWith(EventPrefix)),
             lastFollowup = item.Events.Where(entry => entry.Text.StartsWith(EventPrefix)).Max(entry => (DateTimeOffset?)entry.CreatedAt),
             completedAt = db.ResolutionReports.Where(report => report.ResolutionId == item.Id && report.ReportType == "completion").Max(report => (DateTimeOffset?)report.SubmittedAt) ?? item.UpdatedAt,
@@ -120,10 +150,11 @@ static class MinisterFollowups
         var personIds = records.SelectMany(item => item.people).Distinct().ToList();
         var names = await db.Users.Where(user => personIds.Contains(user.NationalId)).ToDictionaryAsync(user => user.NationalId, user => user.DisplayName, ct);
         var items = records.Select(item => {
+            var metadata = Resolution.FromStoredNotes(item.Notes);
             var closed = item.IsForInformation || item.Status is "completed" or "cancelled";
             var reference = item.Status == "completed" && item.completedAt.HasValue ? DateOnly.FromDateTime(item.completedAt.Value.ToOffset(TimeSpan.FromHours(3.5)).DateTime) : today;
             var elapsed = item.DueDate.HasValue ? reference.DayNumber - item.DueDate.Value.DayNumber : 0;
-            return new { item.Id, item.Number, item.Text, item.Status, item.IsForInformation, item.MeetingDate, item.DueDate, item.followups, item.lastFollowup,
+            return new { item.Id, item.Number, item.Text, item.reportsCount, category = metadata.MinisterCategory, priority = metadata.Priority, notes = metadata.Notes, item.Status, item.IsForInformation, item.MeetingDate, item.DueDate, item.followups, item.lastFollowup,
                 overdueDays = item.IsForInformation || item.Status == "cancelled" ? (int?)0 : item.Status == "completed" && !item.completedAt.HasValue ? null : Math.Max(0, elapsed),
                 remainingDays = closed || !item.DueDate.HasValue ? (int?)null : Math.Max(0, -elapsed),
                 routing = item.PublishToAll ? "همه کاربران" : string.Join("، ", item.groups.Append(item.legacyGroup).Concat(item.people.Select(id => names.GetValueOrDefault(id, id))).Where(value => value != "").Distinct()) };

@@ -727,6 +727,7 @@ app.MapPost("/api/auth/logout", async (HttpContext context) =>
 app.MapGet("/api/resolutions/{id:int}/events/{eventId:int}/report", EventReports.Read);
 app.MapPost("/api/resolutions/{id:int}/refollow", MinisterFollowups.Send);
 app.MapGet("/api/reports/minister-status", MinisterFollowups.Report);
+app.MapGet("/api/resolutions/{id:int}/minister-reports", MinisterFollowups.Reports);
 DashboardTasks.Map(app);
 AdminStatus.Map(app);
 app.MapGet("/api/dashboard", async (HttpContext context, AppDb db, bool? details, bool? statistics) =>

@@ -135,13 +135,13 @@ static class DashboardTasks
                 .ToDictionaryAsync(user => user.NationalId, user => user.DisplayName, ct);
             var items = reports.Select(report => new {
                 key = "report-" + report.Id, userName = names.GetValueOrDefault(report.NationalId, report.UserName),
-                text = report.Text, submittedAt = report.SubmittedAt, reportType = report.ReportType,
+                text = report.Text, submittedAt = report.SubmittedAt, reportType = report.ReportType, report.ApprovalStatus, report.AdminFeedback,
                 attachments = files.Where(file => file.ResolutionReportId == report.Id).Select(file => new { file.Id, file.OriginalName }).ToList()
             }).ToList();
             var reportedIds = reports.Select(report => report.NationalId).ToHashSet();
             items.AddRange(progress.Where(item => !reportedIds.Contains(item.NationalId)).Select(item => new {
                 key = "legacy-" + item.NationalId, userName = names.GetValueOrDefault(item.NationalId, item.NationalId),
-                text = item.ReportText, submittedAt = item.UpdatedAt, reportType = "legacy",
+                text = item.ReportText, submittedAt = item.UpdatedAt, reportType = "legacy", item.ApprovalStatus, item.AdminFeedback,
                 attachments = files.Where(file => file.ResolutionReportId == null && file.UploadedBy == item.NationalId).Select(file => new { file.Id, file.OriginalName }).ToList()
             }));
             return Results.Ok(items.OrderByDescending(item => item.submittedAt));

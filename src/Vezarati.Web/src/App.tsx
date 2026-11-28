@@ -246,7 +246,7 @@ export default function App() {
   const [managerLoading, setManagerLoading] = useState(false);
   const [managerError, setManagerError] = useState("");
   const [reportPriority, setReportPriority] = useState("");
-  const [reportMainTab, setReportMainTab] = useState<"overview" | "bale" | "actions" | "special" | "provincial" | "groups" | "units" | "people" | "events" | "lookup" | "resolution" | "backup" | "quality" | "minister-status">("overview");
+  const [reportMainTab, setReportMainTab] = useState<"overview" | "bale" | "actions" | "special" | "provincial" | "groups" | "units" | "people" | "events" | "lookup" | "resolution" | "backup" | "quality">("overview");
   const [quickReportQuery, setQuickReportQuery] = useState("");
   const [quickReportSelection, setQuickReportSelection] = useState("");
   const [quickReportTaskFilter, setQuickReportTaskFilter] = useState("all");
@@ -292,13 +292,13 @@ export default function App() {
     if (!adminScope) return;
     if (adminScope === "council") {
       if (!["wall", "resolutions", "sessions", "archive", "execution-calendar", "reports"].includes(tab)) setTab("wall");
-      if (["special", "provincial", "bale", "quality", "backup", "minister-status"].includes(reportMainTab)) setReportMainTab("overview");
+      if (["special", "provincial", "bale", "quality", "backup"].includes(reportMainTab)) setReportMainTab("overview");
       return;
     }
     const home = adminScope === "provincial" ? "provincial-trips" : "special-followups";
     if (tab !== home && tab !== "reports") setTab(home);
     const report = adminScope === "provincial" ? "provincial" : "special";
-    if (reportMainTab !== report && !(adminScope === "minister" && reportMainTab === "minister-status")) setReportMainTab(report);
+    if (reportMainTab !== report) setReportMainTab(report);
   }, [adminScope, tab, reportMainTab]);
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [dashboardLoaded, setDashboardLoaded] = useState(false);
@@ -326,11 +326,6 @@ export default function App() {
   const [resolutionPersonFilter, setResolutionPersonFilter] = useState("");
   const [resolutionReportFilter, setResolutionReportFilter] = useState("all");
   const [resolutionConfidentialFilter, setResolutionConfidentialFilter] = useState("all");
-  const [specialReportSearch, setSpecialReportSearch] = useState("");
-  const [specialReportStatus, setSpecialReportStatus] = useState("all");
-  const [specialReportPresence, setSpecialReportPresence] = useState("all");
-  const [specialReportInformation, setSpecialReportInformation] = useState("all");
-  const [specialReportCategory, setSpecialReportCategory] = useState("all");
   const [ministerDirectiveCategories, setMinisterDirectiveCategories] = useState<string[]>(["دفتر مقام معظم رهبری", "دفتر ریاست جمهوری، نهاد، معاونان ریاست جمهوری", "وزارت خانه ها، سازمان ها، نهادهای دولتی", "نمایندگان مجلس", "قوه قضائیه، سازمان بازرسی", "مکاتبات داخلی وزارت خانه", "سایر مکاتبات"]);
   const [ministerDirectiveCategoriesDraft, setMinisterDirectiveCategoriesDraft] = useState("دفتر مقام معظم رهبری\nدفتر ریاست جمهوری، نهاد، معاونان ریاست جمهوری\nوزارت خانه ها، سازمان ها، نهادهای دولتی\nنمایندگان مجلس\nقوه قضائیه، سازمان بازرسی\nمکاتبات داخلی وزارت خانه\nسایر مکاتبات");
   const [resolutionStatusFilter, setResolutionStatusFilter] = useState("all");
@@ -525,7 +520,6 @@ export default function App() {
     }
   }
 
-  const [specialSearchMatches, setSpecialSearchMatches] = useState<{ term: string; ids: number[] }>({ term: "", ids: [] });
   const [reportTexts, setReportTexts] = useState<Record<number, Pick<Resolution, "text" | "notes" | "hasLoadedText">>>({});
   const [scopePage, setScopePage] = useState(1);
   const [scopeLoading, setScopeLoading] = useState(false);
@@ -697,7 +691,7 @@ export default function App() {
   useEffect(() => { setReportPriority(""); }, [reportMainTab]);
   const desiredResolutionListMode = tab === "reports" && reportMainTab !== "events" ? "report-index" : "full";
   useEffect(() => {
-    if (!authUser || !dashboardLoaded || !isAdmin || tab === "wall" || tab === "groups" || tab === "notifications" || tab === "archive" || (resolutionListLoaded && resolutionListMode === desiredResolutionListMode) || (tab === "reports" && ["actions","people","quality","backup","bale"].includes(reportMainTab))) return;
+    if (!authUser || !dashboardLoaded || !isAdmin || tab === "wall" || tab === "groups" || tab === "notifications" || tab === "archive" || (resolutionListLoaded && resolutionListMode === desiredResolutionListMode) || (tab === "reports" && ["actions","people","quality","backup","bale","special"].includes(reportMainTab))) return;
     const controller = new AbortController();
     fetchApi("/api/resolutions" + (desiredResolutionListMode === "report-index" ? "?view=report-index" : ""), { signal: controller.signal })
       .then(async response => {
@@ -739,11 +733,11 @@ export default function App() {
     return () => controller.abort();
   }, [adminTaskId, detailRetry, tabDataRevision]);
 
-  const reportNeedsDirectory = tab === "reports" && ["overview", "actions", "special", "provincial", "groups", "units", "people", "lookup", "resolution"].includes(reportMainTab);
+  const reportNeedsDirectory = tab === "reports" && ["overview", "actions", "provincial", "groups", "units", "people", "lookup", "resolution"].includes(reportMainTab);
   const needsDirectory = isAdmin && (["resolutions", "sessions", "groups", "special-followups", "provincial-trips"].includes(tab) || modalOpen || adminTaskId !== null || reportNeedsDirectory);
   const needsMeetings = isAdmin && (modalOpen || tab === "resolutions" ||
     (tab === "reports" && ["overview", "people", "lookup"].includes(reportMainTab)));
-  const needsGroupDetails = isAdmin && (tab === "groups" || modalOpen || adminTaskId !== null || ["resolutions", "sessions", "reports", "special-followups", "provincial-trips"].includes(tab));
+  const needsGroupDetails = isAdmin && (tab === "groups" || modalOpen || adminTaskId !== null || (tab === "reports" && reportMainTab !== "special") || ["resolutions", "sessions", "special-followups", "provincial-trips"].includes(tab));
   const needsBaleSettings = isAdmin && tab === "reports" && reportMainTab === "bale";
   useEffect(() => {
     if (!authUser) return;
@@ -812,7 +806,7 @@ export default function App() {
       .finally(() => setDataQualityLoading(false));
   }, [authUser?.nationalId, isAdmin, tab, reportMainTab, dataQualityLoaded, dataQualityRetry]);
   useEffect(() => {
-    if (!authUser || !isAdmin || (tab !== "reports" && tab !== "wall" && tab !== "resolutions" && tab !== "special-followups" && tab !== "provincial-trips") || (tab === "reports" && (reportMainTab === "backup" || reportMainTab === "quality" || reportMainTab === "minister-status"))) return;
+    if (!authUser || !isAdmin || (tab !== "reports" && tab !== "wall" && tab !== "resolutions" && tab !== "special-followups" && tab !== "provincial-trips") || (tab === "reports" && (reportMainTab === "backup" || reportMainTab === "quality" || reportMainTab === "special"))) return;
     if (adminScope && adminScope !== "council" && (tab !== "reports" || reportMainTab !== (adminScope === "provincial" ? "provincial" : "special")) && specialDetailId === null) return;
     const requestType = adminTaskId !== null && wallReportsRequested ? "submissions" : tab === "reports"
       ? reportMainTab === "overview" ? "summary" : (reportMainTab === "resolution" ? selectedResolutionReportId !== null : ["special", "provincial"].includes(reportMainTab)) ? "submissions" : null
@@ -1912,39 +1906,6 @@ export default function App() {
     (specialFollowupStatusFilter === "all" || specialFollowupStatusOf(item) === specialFollowupStatusFilter)
     && (!ministerTerm || normalizeSearchText(toLatinDigits(`${item.id} ${item.number} ${item.text} ${item.notes} ${resolutionRoutingLabel(item, groups, users)}`)).includes(ministerTerm)));
   const specialDetail = specialItems.find(item => item.id === specialDetailId);
-  useEffect(() => {
-    if (tab !== "reports" || reportMainTab !== "special" || !specialReportSearch.trim()) return;
-    const controller = new AbortController();
-    const term = specialReportSearch.trim();
-    setSpecialSearchMatches({ term, ids: [] });
-    const timer = window.setTimeout(() => {
-      fetchApi("/api/resolutions?view=report-index&q=" + encodeURIComponent(toLatinDigits(term)), { signal: controller.signal })
-        .then(async response => {
-          if (!response.ok) throw new Error("جستجوی مصوبات انجام نشد.");
-          const items = asArray<Resolution>(await response.json());
-          if (!controller.signal.aborted) setSpecialSearchMatches({ term, ids: items.map(item=>item.id) });
-        }).catch(cause => { if (!controller.signal.aborted) setError(cause.message); });
-    },300);
-    return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [tab,reportMainTab,specialReportSearch]);
-  const specialFollowupReports = useMemo(() => {
-    const term = normalizeSearchText(toLatinDigits(specialReportSearch));
-    return reportResolutions.filter(item => {
-      if (item.isArchived || !item.isSpecialTracking || item.specialTrackingType === "provincial" || (reportPriority && (item.priority??"عادی")!==reportPriority)) return false;
-      if (specialReportStatus !== "all" && item.status !== specialReportStatus) return false;
-      if (specialReportInformation === "info" && !item.isForInformation || specialReportInformation === "action" && item.isForInformation) return false;
-      if (specialReportCategory !== "all" && (item.specialTrackingType !== "minister" || normalizeSearchText(item.ministerCategory || "") !== normalizeSearchText(specialReportCategory))) return false;
-      const submissions = reportSubmissions.filter(report => report.resolutionId === item.id);
-      const progressReports = (item.progress || []).filter(progress => progress.hasSubmittedReport || !!progress.reportText?.trim());
-      const hasReports = submissions.length + progressReports.length > 0;
-      if (specialReportPresence === "has" && !hasReports) return false;
-      if (specialReportPresence === "missing" && hasReports) return false;
-      const peopleText = resolutionRoutingLabel(item, groups, users);
-      const reportText = [...submissions.map(report => `${report.userName} ${report.userTitle || ""} ${report.text}`), ...progressReports.map(progress => `${users.find(user => user.nationalId === progress.nationalId)?.displayName || progress.nationalId} ${progress.reportText || ""}`)].join(" ");
-      const haystack = normalizeSearchText(toLatinDigits(`${item.number} ${item.id} ${item.province || ""} ${item.ministerCategory || ""} ${item.isForInformation?"جهت اطلاع":"جهت اقدام"} ${item.text} ${item.notes} ${item.status} ${item.meetingDate} ${peopleText} ${reportText}`));
-      return !term || haystack.includes(term) || (specialSearchMatches.term === specialReportSearch.trim() && specialSearchMatches.ids.includes(item.id));
-    });
-  }, [reportResolutions, specialSearchMatches, reportPriority, specialReportSearch, specialReportStatus, specialReportPresence, specialReportInformation, specialReportCategory, reportSubmissions, groups, users]);
   const overviewResolutions = activeResolutions.filter(item => (!overviewFrom || item.meetingDate >= overviewFrom) && (!overviewTo || item.meetingDate <= overviewTo));
   const overviewSummary = { total: overviewResolutions.length, completed: overviewResolutions.filter(item=>item.status==="completed").length, delayed: overviewResolutions.filter(item=>item.status==="delayed").length, pending: overviewResolutions.filter(item=>item.status==="before"||item.status==="in_progress").length };
   const overviewDenominator = Math.max(1,overviewSummary.completed+overviewSummary.delayed+overviewSummary.pending);
@@ -2182,9 +2143,8 @@ export default function App() {
     ? selectedTopic ? selectedTopicItems : selectedOverviewItems
     : ["groups","units"].includes(reportMainTab) ? groupScopeItems
     : reportMainTab === "lookup" && quickReportSelected ? Array.from(new Map(quickReportFilteredTasks.map(entry=>[entry.item.id,entry.item])).values())
-    : reportMainTab === "special" ? specialFollowupReports
     : [];
-  const reportScopeKey = [reportMainTab, overviewFrom, overviewTo, JSON.stringify(overviewDrilldown), selectedTopic, reportGroupDrilldown, quickReportSelection, quickReportTaskFilter, specialReportStatus, specialReportSearch, specialReportInformation, specialReportCategory, reportPriority].join("|");
+  const reportScopeKey = [reportMainTab, overviewFrom, overviewTo, JSON.stringify(overviewDrilldown), selectedTopic, reportGroupDrilldown, quickReportSelection, quickReportTaskFilter, reportPriority].join("|");
   useEffect(() => { setScopePage(1); }, [reportScopeKey]);
   const scopePageItems = scopedReportItems.slice((scopePage-1)*50,scopePage*50);
   const textRequestIds = reportMainTab === "provincial" ? provincialScopeIds : scopePageItems.map(item=>item.id);
@@ -2402,15 +2362,15 @@ export default function App() {
 onChange={event=>void changeDirectoryRole(user,event.target.value)}>
 <option value="کاربر">کاربر</option><option value="ادمین">ادمین کامل</option><option value="ادمین مصوبات شورای معاونین">ادمین مصوبات شورای معاونین</option><option value="ادمین استانی">ادمین استانی</option><option value="ادمین دستورات ویژه وزیر">ادمین دستورات ویژه وزیر</option><option value="رابط استانی دستورات ویژه وزیر">رابط استانی دستورات ویژه وزیر</option></select>}<select aria-label={"استان رابط "+user.displayName} disabled={busy||user.canChangeRole===false} value={liaisonProvinceDrafts[user.nationalId]??user.ministerLiaisonProvince??""} onChange={event=>setLiaisonProvinceDrafts(current=>({...current,[user.nationalId]:event.target.value}))}><option value="">انتخاب استان رابط</option>{iranProvinceOptions.map(province=><option key={province}>{province}</option>)}</select><button type="button" className="secondary" disabled={busy||user.canChangeRole===false||!(liaisonProvinceDrafts[user.nationalId]??user.ministerLiaisonProvince)} onClick={()=>void changeDirectoryRole(user,"رابط استانی دستورات ویژه وزیر")}>ثبت رابط استان</button></div></div>)}{filteredRoleUsers.length===0&&<div className="report-empty">{adminUserQuery.trim()?"کاربری با این جستجو پیدا نشد.":"ادمینی در فهرست کاربران ثبت نشده است."}</div>}</div></section></div>}
 
-      {tab === "reports" && isAdmin && <div className={`reports-page reports-tab-${reportMainTab} ${reportsError ? "has-load-error" : ""}`} aria-busy={reportsLoading}>{reportsLoading && <div className="panel reports-loading-notice" role="status"><span className="app-loading-spinner" aria-hidden="true"/><div><b>در حال بارگذاری گزارش‌ها</b><small>صفحه‌های دیگر مستقل از دریافت این گزارش‌ها در دسترس هستند.</small></div></div>}{reportsError && <div className="panel reports-error-notice" role="alert"><span>{reportsError}</span><button className="secondary" type="button" onClick={()=>{if(reportMainTab==="actions"||reportMainTab==="resolution"||reportMainTab==="special"||reportMainTab==="provincial"){submissionsFetchStarted.current=false;setSubmissionsLoaded(false);}else{summaryFetchStarted.current=false;setReportsLoaded(false);}setReportsError("");setReportsRetryCount(count=>count+1);}}>تلاش دوباره</button></div>}{["resolution","actions","special","provincial"].includes(reportMainTab) && <label>اولویت مصوبه<select value={reportPriority} onChange={event=>setReportPriority(event.target.value)}>
+      {tab === "reports" && isAdmin && <div className={`reports-page reports-tab-${reportMainTab} ${reportsError ? "has-load-error" : ""}`} aria-busy={reportsLoading&&reportMainTab!=="special"}>{reportsLoading && reportMainTab!=="special" && <div className="panel reports-loading-notice" role="status"><span className="app-loading-spinner" aria-hidden="true"/><div><b>در حال بارگذاری گزارش‌ها</b><small>صفحه‌های دیگر مستقل از دریافت این گزارش‌ها در دسترس هستند.</small></div></div>}{reportsError && reportMainTab!=="special" && <div className="panel reports-error-notice" role="alert"><span>{reportsError}</span><button className="secondary" type="button" onClick={()=>{if(reportMainTab==="actions"||reportMainTab==="resolution"||reportMainTab==="provincial"){submissionsFetchStarted.current=false;setSubmissionsLoaded(false);}else{summaryFetchStarted.current=false;setReportsLoaded(false);}setReportsError("");setReportsRetryCount(count=>count+1);}}>تلاش دوباره</button></div>}{["resolution","actions","provincial"].includes(reportMainTab) && <label>اولویت مصوبه<select value={reportPriority} onChange={event=>setReportPriority(event.target.value)}>
 <option value="">همه اولویت‌ها</option><option value="آنی">آنی</option><option value="فوری">فوری</option><option value="عادی">عادی</option>
 </select></label>}{(scopedReportItems.length>0 || reportMainTab==="provincial") && <div className="pagination">
 {scopeLoading&&<span role="status">در حال دریافت مصوبات بخش انتخاب‌شده…</span>}
 {scopeError&&<span role="alert">{scopeError}<button type="button" onClick={()=>setScopeRetry(value=>value+1)}>تلاش دوباره</button></span>}
 {reportMainTab!=="provincial"&&<><button type="button" disabled={scopePage<=1||scopeLoading} onClick={()=>setScopePage(page=>page-1)}>قبلی</button><span>صفحه {scopePage} · {scopedReportItems.length} مصوبه</span><button type="button" disabled={scopeLoading||scopePage*50>=scopedReportItems.length} onClick={()=>setScopePage(page=>page+1)}>بعدی</button></>}
 </div>}
-<div className="reports-main-tabs" role="tablist" aria-label="بخش‌های گزارش‌ها">{(!adminScope || adminScope === "council") && <button type="button" role="tab" aria-selected={reportMainTab==="overview"} className={reportMainTab==="overview"?"active":""} onClick={()=>setReportMainTab("overview")}><LayoutDashboard size={16}/>نمای کلی</button>}{(!adminScope || adminScope === "council") && <button type="button" role="tab" aria-selected={reportMainTab==="lookup"} className={reportMainTab==="lookup"?"active":""} onClick={()=>setReportMainTab("lookup")}><Search size={16}/>وضعیت سریع</button>}{(!adminScope || adminScope === "council") && <button type="button" role="tab" aria-selected={reportMainTab==="resolution"} className={reportMainTab==="resolution"?"active":""} onClick={()=>setReportMainTab("resolution")}><ClipboardList size={16}/>وضعیت مصوبه</button>}{(!adminScope || false) && <button type="button" role="tab" aria-selected={reportMainTab==="bale"} className={reportMainTab==="bale"?"active":""} onClick={()=>setReportMainTab("bale")}><Bell size={16}/>گزارش اطلاعیه‌ها</button>}{(!adminScope || adminScope === "council") && <button type="button" role="tab" aria-selected={reportMainTab==="actions"} className={reportMainTab==="actions"?"active":""} onClick={()=>setReportMainTab("actions")}><FileText size={16}/>گزارش اقدامات</button>}{(!adminScope || adminScope === "minister") && <button type="button" role="tab" aria-selected={reportMainTab==="special"} className={reportMainTab==="special"?"active":""} onClick={()=>setReportMainTab("special")}><ClipboardList size={16}/>گزارش پیگیری‌های ویژه</button>}{(!adminScope || adminScope === "minister") && <button type="button" role="tab" aria-selected={reportMainTab==="minister-status"} className={reportMainTab==="minister-status"?"active":""} onClick={()=>setReportMainTab("minister-status")}><FileText size={16}/>گزارش ارائه به وزیر</button>}{(!adminScope || adminScope === "provincial") && <button type="button" role="tab" aria-selected={reportMainTab==="provincial"} className={reportMainTab==="provincial"?"active":""} onClick={()=>setReportMainTab("provincial")}><MapPin size={16}/>گزارش سفرهای استانی</button>}{(!adminScope || adminScope === "council") && <button type="button" role="tab" aria-selected={reportMainTab==="people"} className={reportMainTab==="people"?"active":""} onClick={()=>{setReportMainTab("people");setReportViewTab("people");}}><Users size={16}/>گزارش فردی</button>}{(!adminScope || adminScope === "council") && <button type="button" role="tab" aria-selected={reportMainTab==="events"} className={reportMainTab==="events"?"active":""} onClick={()=>setReportMainTab("events")}><ClipboardList size={16}/>گزارش رویدادها</button>}{(!adminScope || false) && <button type="button" role="tab" aria-selected={reportMainTab==="backup"} className={reportMainTab==="backup"?"active":""} onClick={()=>setReportMainTab("backup")}><Archive size={16}/>پشتیبان‌گیری</button>}{(!adminScope || false) && <button type="button" role="tab" aria-selected={reportMainTab==="quality"} className={reportMainTab==="quality"?"active":""} onClick={()=>setReportMainTab("quality")}><ShieldCheck size={16}/>کیفیت داده</button>}</div>
-        {reportMainTab === "minister-status" && <MinisterStatusReport api={fetchApi} formatDate={formatDate} formatDateTime={formatDateTime}/>}
+<div className="reports-main-tabs" role="tablist" aria-label="بخش‌های گزارش‌ها">{(!adminScope || adminScope === "council") && <button type="button" role="tab" aria-selected={reportMainTab==="overview"} className={reportMainTab==="overview"?"active":""} onClick={()=>setReportMainTab("overview")}><LayoutDashboard size={16}/>نمای کلی</button>}{(!adminScope || adminScope === "council") && <button type="button" role="tab" aria-selected={reportMainTab==="lookup"} className={reportMainTab==="lookup"?"active":""} onClick={()=>setReportMainTab("lookup")}><Search size={16}/>وضعیت سریع</button>}{(!adminScope || adminScope === "council") && <button type="button" role="tab" aria-selected={reportMainTab==="resolution"} className={reportMainTab==="resolution"?"active":""} onClick={()=>setReportMainTab("resolution")}><ClipboardList size={16}/>وضعیت مصوبه</button>}{(!adminScope || false) && <button type="button" role="tab" aria-selected={reportMainTab==="bale"} className={reportMainTab==="bale"?"active":""} onClick={()=>setReportMainTab("bale")}><Bell size={16}/>گزارش اطلاعیه‌ها</button>}{(!adminScope || adminScope === "council") && <button type="button" role="tab" aria-selected={reportMainTab==="actions"} className={reportMainTab==="actions"?"active":""} onClick={()=>setReportMainTab("actions")}><FileText size={16}/>گزارش اقدامات</button>}{(!adminScope || adminScope === "minister") && <button type="button" role="tab" aria-selected={reportMainTab==="special"} className={reportMainTab==="special"?"active":""} onClick={()=>setReportMainTab("special")}><ClipboardList size={16}/>گزارش دستورات ویژه وزیر</button>}{(!adminScope || adminScope === "provincial") && <button type="button" role="tab" aria-selected={reportMainTab==="provincial"} className={reportMainTab==="provincial"?"active":""} onClick={()=>setReportMainTab("provincial")}><MapPin size={16}/>گزارش سفرهای استانی</button>}{(!adminScope || adminScope === "council") && <button type="button" role="tab" aria-selected={reportMainTab==="people"} className={reportMainTab==="people"?"active":""} onClick={()=>{setReportMainTab("people");setReportViewTab("people");}}><Users size={16}/>گزارش فردی</button>}{(!adminScope || adminScope === "council") && <button type="button" role="tab" aria-selected={reportMainTab==="events"} className={reportMainTab==="events"?"active":""} onClick={()=>setReportMainTab("events")}><ClipboardList size={16}/>گزارش رویدادها</button>}{(!adminScope || false) && <button type="button" role="tab" aria-selected={reportMainTab==="backup"} className={reportMainTab==="backup"?"active":""} onClick={()=>setReportMainTab("backup")}><Archive size={16}/>پشتیبان‌گیری</button>}{(!adminScope || false) && <button type="button" role="tab" aria-selected={reportMainTab==="quality"} className={reportMainTab==="quality"?"active":""} onClick={()=>setReportMainTab("quality")}><ShieldCheck size={16}/>کیفیت داده</button>}</div>
+        {reportMainTab === "special" && <MinisterStatusReport api={fetchApi} formatDate={formatDate} formatDateTime={formatDateTime} categories={ministerDirectiveCategories} categorySettings={authUser?.role!=="رابط استانی دستورات ویژه وزیر"?<details className="minister-category-settings"><summary>مدیریت دسته‌بندی دستورات وزیر</summary><p>هر دسته را در یک خط وارد کنید؛ تغییرات در فرم ثبت دستور و فیلتر گزارش اعمال می‌شود.</p><textarea rows={8} value={ministerDirectiveCategoriesDraft} onChange={event=>setMinisterDirectiveCategoriesDraft(event.target.value)} aria-label="دسته‌بندی‌های دستورات وزیر"/><button type="button" className="secondary" onClick={()=>void saveMinisterDirectiveCategories()}>ذخیره دسته‌بندی‌ها</button></details>:null}/>}
         {reportMainTab === "provincial" && <ProvincialTripReport resolutions={reportResolutions.filter(item=>!reportPriority||(item.priority??"عادی")===reportPriority)} submissions={reportSubmissions}
           groups={groups} users={users} onRequestTexts={setProvincialScopeIds} loading={!submissionsLoaded && !reportsError} submissionsError={!!reportsError && !submissionsLoaded} />}
         {["groups","units"].includes(reportMainTab) && reportGroupDrilldown !== null && <section className="panel">
@@ -2418,12 +2378,7 @@ onChange={event=>void changeDirectoryRole(user,event.target.value)}>
 {scopePageItems.map(item=><article className="submitted-report-entry" key={item.id}><b>مصوبه {item.number}</b><p>{item.hasLoadedText===false?"در حال دریافت متن…":item.text}</p></article>)}
 {!groupScopeItems.length&&<p>مصوبه‌ای برای این بخش ثبت نشده است.</p>}
 </section>}
-<section className="panel special-followups-report" aria-busy={reportsLoading}>
-          <div className="section-head"><div><span className="report-kicker">پیگیری‌های بدون جلسه</span><h2>گزارش دستورات وزیر</h2><p>درخواست‌ها، وضعیت اجرا و گزارش‌های ثبت‌شده</p></div><span className="counter">{specialFollowupReports.length} مورد</span></div>
-          <div className="toolbar special-followup-toolbar"><div className="search"><Search size={17}/><input value={specialReportSearch} onChange={event=>setSpecialReportSearch(event.target.value)} placeholder="جستجو در شماره، استان، شرح، ارجاع یا متن گزارش"/></div><label>نوع ارجاع<select value={specialReportInformation} onChange={event=>setSpecialReportInformation(event.target.value)}><option value="all">همه موارد</option><option value="info">جهت اطلاع</option><option value="action">جهت اقدام</option></select></label><label>دسته دستور<select value={specialReportCategory} onChange={event=>setSpecialReportCategory(event.target.value)}><option value="all">همه دسته‌ها</option>{ministerDirectiveCategories.map(category=><option key={category} value={category}>{category}</option>)}</select></label><label>وضعیت اجرا<select value={specialReportStatus} onChange={event=>setSpecialReportStatus(event.target.value)}><option value="all">همه وضعیت‌ها</option>{statusEntries.map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label><label>گزارش<select value={specialReportPresence} onChange={event=>setSpecialReportPresence(event.target.value)}><option value="all">همه</option><option value="has">گزارش دارد</option><option value="missing">بدون گزارش</option></select></label><button type="button" className="secondary" onClick={()=>{setSpecialReportSearch("");setSpecialReportStatus("all");setSpecialReportPresence("all");setSpecialReportCategory("all");}}>پاک‌کردن فیلترها</button></div>
-          {authUser?.role!=="رابط استانی دستورات ویژه وزیر"&&<details className="minister-category-settings"><summary>مدیریت دسته‌بندی دستورات وزیر</summary><p>هر دسته را در یک خط وارد کنید؛ تغییرات در فرم ثبت دستور و فیلتر گزارش اعمال می‌شود.</p><textarea rows={8} value={ministerDirectiveCategoriesDraft} onChange={event=>setMinisterDirectiveCategoriesDraft(event.target.value)} aria-label="دسته‌بندی‌های دستورات وزیر"/><button type="button" className="secondary" onClick={()=>void saveMinisterDirectiveCategories()}>ذخیره دسته‌بندی‌ها</button></details>}
-          {specialFollowupReports.length ? <div className="table-wrap"><table><thead><tr><th>نوع و تاریخ</th><th>دسته‌بندی</th><th>شماره</th><th>شرح دستور</th><th>ارجاع به</th><th>نوع ارجاع / وضعیت</th><th>گزارش‌ها</th></tr></thead><tbody>{scopePageItems.map(item=>{const submissions=reportSubmissions.filter(report=>report.resolutionId===item.id);const progressReports=(item.progress||[]).filter(progress=>!!progress.reportText?.trim());const count=submissions.length+progressReports.length;return <tr key={item.id}><td>{formatDate(item.meetingDate,item.meetingDateJalali?.replace(/\./g,"/"))}</td><td>{item.specialTrackingType==="provincial"?"—":item.ministerCategory||"—"}</td><td><b>{item.number}</b><small>شناسه یکتا: {item.id}</small></td><td><span>{("hasLoadedText" in item && item.hasLoadedText === false) ? "در حال دریافت متن…" : item.text}</span>{item.notes&&<small>{item.notes}</small>}</td><td>{resolutionRoutingLabel(item,groups,users)}</td><td>{item.isForInformation?<span className="information-only-badge">جهت اطلاع</span>:<span className={`status ${item.status}`}>{labels[item.status]||item.status}</span>}</td><td><details className="special-followup-report-details"><summary>مشاهده ({count})</summary>{progressReports.map((progress,index)=>{const user=users.find(person=>person.nationalId===progress.nationalId);return <article className="submitted-report-entry" key={"progress-"+index}><b>گزارش اقدام · {user?.displayName||progress.nationalId}</b><small>{user?.title||""}{progress.updatedAt?" · "+formatDateTime(progress.updatedAt):""}</small><p>{progress.reportText}</p>{progress.adminFeedback&&<small>نظر مدیر: {progress.adminFeedback}</small>}</article>})}{submissions.map(report=><article className="submitted-report-entry" key={"submission-"+report.id}><b>{report.reportType==="periodic"?"گزارش مستمر":"گزارش اقدام"} · {report.userName}</b><small>{formatDateTime(report.submittedAt)}{report.userTitle?" · "+report.userTitle:""}</small><p>{report.text}</p>{report.adminFeedback&&<small>نظر مدیر: {report.adminFeedback}</small>}{report.attachments?.map(file=><a className="special-followup-report-file" key={file.id} href={"/api/attachments/"+file.id} target="_blank" rel="noreferrer"><Paperclip size={13}/>{file.originalName}</a>)}</article>)}{count===0&&<small>هنوز گزارشی ثبت نشده است.</small>}</details></td></tr>;})}</tbody></table></div> : <div className="empty"><ClipboardList size={30}/><b>{activeResolutions.some(item=>item.isSpecialTracking)?"پیگیری ویژه‌ای با این فیلترها پیدا نشد":"پیگیری ویژه‌ای ثبت نشده است"}</b><span>{activeResolutions.some(item=>item.isSpecialTracking)?"فیلترها را تغییر دهید یا پاک کنید.":"برای شروع، از دکمهٔ «پیگیری‌های ویژه» استفاده کنید."}</span></div>}
-        </section>
+
         <section className="panel data-quality-panel" aria-busy={dataQualityLoading}>
           <div className="section-head"><div><span className="report-kicker">پایش اطلاعات</span><h2>کیفیت داده‌های سامانه</h2><p>مواردی که می‌توانند ارجاع، یادآوری بله یا گزارش مدیریتی را ناقص کنند.</p></div><button type="button" className="secondary" disabled={dataQualityLoading} onClick={()=>{dataQualityFetchStarted.current=false;setDataQualityLoaded(false);setDataQualityRetry(value=>value+1);}}>به‌روزرسانی</button></div>
           {dataQualityLoading&&<div className="data-quality-loading"><span className="app-loading-spinner"/>در حال بررسی اطلاعات...</div>}

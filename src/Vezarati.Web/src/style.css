@@ -1094,7 +1094,7 @@
 
 .minister-refollow-control { display:inline-flex; flex-direction:column; gap:6px; max-width:320px; }
 .minister-refollow-control small { white-space:normal; color:#526970; line-height:1.8; }
-.reports-tab-minister-status>.panel:not(.minister-status-report),.reports-tab-minister-status>.report-grid { display:none; }
+
 .minister-status-report { padding:22px; }
 .minister-report-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:20px 0; }
 .minister-report-summary>div { display:flex; flex-direction:column; gap:8px; padding:16px; border:1px solid #dce8e2; border-radius:10px; background:#f5f9f7; }
@@ -1124,3 +1124,8 @@
   .minister-status-print-sheet footer { margin-top:16px; border-top:1px solid #ccd9d3; padding-top:8px; }
 }
 @media print { .minister-status-print-sheet,.minister-status-print-sheet * { visibility:visible!important; } }
+.reports-tab-special>.panel:not(.minister-status-report),.reports-tab-special>.report-grid { display:none; }
+.minister-merged-reports { padding:12px; background:#f4f8f6; border-radius:10px; }
+.minister-merged-reports article+article { margin-top:12px; }
+.minister-merged-reports p { white-space:pre-wrap; }
+.minister-more-filters summary { cursor:pointer; color:#356754; padding:8px; }
