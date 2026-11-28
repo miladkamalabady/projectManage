@@ -5,19 +5,28 @@ using Vezarati.Api.Models;
 
 static class AdminAccess
 {
+    public const string MinisterLiaison = "رابط استانی دستورات ویژه وزیر";
     public const string Council = "ادمین مصوبات شورای معاونین";
     public const string Full = "ادمین";
     public const string Provincial = "ادمین استانی";
     public const string Minister = "ادمین دستورات ویژه وزیر";
     public static bool IsAdmin(ClaimsPrincipal user) => IsAdminRole(user.FindFirstValue(ClaimTypes.Role));
-    public static bool IsAdminRole(string? role) => role is Full or Provincial or Minister or Council;
+    public static bool IsAdminRole(string? role) => role is Full or Provincial or Minister or Council or MinisterLiaison;
     public static string? Scope(ClaimsPrincipal user) => user.FindFirstValue(ClaimTypes.Role) switch
     {
-        Council => "council", Provincial => "provincial", Minister => "minister", _ => null
+        MinisterLiaison => "minister-liaison", Council => "council", Provincial => "provincial", Minister => "minister", _ => null
     };
     public static IQueryable<Resolution> Filter(IQueryable<Resolution> query, ClaimsPrincipal user)
     {
         var scope = Scope(user);
+        if (scope == "minister-liaison")
+        {
+            var province = user.FindFirstValue("minister-province");
+            if (string.IsNullOrWhiteSpace(province)) return query.Where(_ => false);
+            var marker = "\u001Fprovince:" + Uri.EscapeDataString(province);
+            return query.Where(item => item.IsSpecialTracking && item.SpecialTrackingType != "provincial" &&
+                (item.Notes.EndsWith(marker) || item.Notes.Contains(marker + "\n")));
+        }
         return scope is null ? query : scope == "council" ? query.Where(item => !item.IsSpecialTracking) : scope == "provincial"
             ? query.Where(item => item.IsSpecialTracking && item.SpecialTrackingType == "provincial")
             : query.Where(item => item.IsSpecialTracking && item.SpecialTrackingType != "provincial");
@@ -36,7 +45,7 @@ static class AdminAccess
         if (read && context.Request.Path.StartsWithSegments("/api/dashboard/status")) return scope == "council";
         if (read && (path == "/api/dashboard/tasks" || path == "/api/dashboard/task-reports")) return scope == "council";
         if (path.StartsWith("/api/provincial-trips") || path.StartsWith("/api/provincial-poles")) return scope == "provincial";
-        if (path == "/api/settings/minister-directive-categories") return scope == "minister";
+        if (path == "/api/settings/minister-directive-categories") return scope == "minister" || (scope == "minister-liaison" && read);
         if (path == "/api/resolutions" && HttpMethods.IsPost(context.Request.Method))
             return await MatchesBody(context, scope);
         var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
@@ -62,6 +71,11 @@ static class AdminAccess
             var root = json.RootElement;
             if (scope == "council")
                 return !root.TryGetProperty("isSpecialTracking", out var councilSpecial) || councilSpecial.ValueKind == JsonValueKind.False;
+            if (scope == "minister-liaison")
+                return root.TryGetProperty("isSpecialTracking", out var liaisonSpecial) && liaisonSpecial.ValueKind == JsonValueKind.True &&
+                    root.TryGetProperty("specialTrackingType", out var liaisonType) && liaisonType.GetString() == "minister" &&
+                    root.TryGetProperty("province", out var liaisonProvince) && !string.IsNullOrWhiteSpace(context.User.FindFirstValue("minister-province")) &&
+                    liaisonProvince.GetString() == context.User.FindFirstValue("minister-province");
             return root.TryGetProperty("isSpecialTracking", out var special) && special.ValueKind == JsonValueKind.True &&
                 root.TryGetProperty("specialTrackingType", out var type) && type.GetString() == scope;
         }

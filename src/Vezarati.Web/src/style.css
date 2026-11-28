@@ -1078,3 +1078,16 @@
 .information-only-option input { width:auto; }
 .information-only-option small { color:#64748b; line-height:1.8; }
 .information-only-badge { display:inline-block; padding:4px 10px; background:#e8f0fb; color:#325d8e; border-radius:12px; font-size:11px; white-space:nowrap; }
+
+.user-management-head { padding:20px; margin-bottom:16px; }
+.user-management-head p { color:#64748b; }
+.user-management-layout { align-items:start; gap:16px; }
+.management-users { grid-template-columns:minmax(240px,300px) minmax(0,1fr); }
+.management-users>section:not(:nth-child(4)):not(:nth-child(5)),.management-groups>section:not(:nth-child(1)):not(:nth-child(2)),.management-units>section:not(:nth-child(3)),.management-poles { display:none; }
+.management-units { grid-template-columns:minmax(0,1fr); }
+.user-management-layout .role-user-list { display:grid; gap:10px; }
+.user-management-layout .role-user-row { padding:14px; border:1px solid #e2e8ea; border-radius:12px; background:#fbfcfd; gap:12px; flex-wrap:wrap; }
+.user-management-layout .role-user-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.user-management-layout .role-user-actions select { max-width:260px; }
+@media(max-width:900px) { .management-users { grid-template-columns:minmax(0,1fr); } }
+.management-users>.role-management-panel { grid-column:auto; }
