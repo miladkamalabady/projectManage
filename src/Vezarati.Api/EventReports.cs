@@ -8,7 +8,7 @@ static class EventReports
     {
         if (!AdminAccess.IsAdmin(context.User)) return Results.Forbid();
         var ct = context.RequestAborted;
-        if (!await AdminAccess.Filter(db.Resolutions.AsNoTracking(), context.User).AnyAsync(item => item.Id == id, ct)) return Results.NotFound();
+        if (!await AdminAccess.Filter(db.Resolutions.AsNoTracking(), context.User, db).AnyAsync(item => item.Id == id, ct)) return Results.NotFound();
         var entry = await db.Events.AsNoTracking().Where(item => item.Id == eventId && item.ResolutionId == id)
             .Select(item => new { item.NationalId, item.UserName, item.Text, item.CreatedAt }).SingleOrDefaultAsync(ct);
         if (entry is null || !IsActionReport(entry.Text)) return Results.NotFound();

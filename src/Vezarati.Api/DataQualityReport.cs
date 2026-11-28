@@ -5,7 +5,7 @@ using Vezarati.Api.Models;
 static class DataQualityReport
 {
     public static IQueryable<Resolution> Active(AppDb db, ClaimsPrincipal user) =>
-        AdminAccess.Filter(db.Resolutions.AsNoTracking(), user).Where(item => !item.IsArchived && item.Status != "cancelled");
+        AdminAccess.Filter(db.Resolutions.AsNoTracking(), user, db).Where(item => !item.IsArchived && item.Status != "cancelled");
 
     public static IQueryable<string> AssignedIds(AppDb db, IQueryable<Resolution> active)
     {

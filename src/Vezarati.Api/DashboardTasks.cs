@@ -17,7 +17,7 @@ static class DashboardTasks
     // Only identifiers and execution states are read. Resolution text, files, events and report bodies stay out of the statistics query.
     public static async Task<Snapshot> Read(AppDb db, ClaimsPrincipal user, CancellationToken ct)
     {
-        var query = AdminAccess.Filter(db.Resolutions.AsNoTracking(), user)
+        var query = AdminAccess.Filter(db.Resolutions.AsNoTracking(), user, db)
             .Where(item => !item.IsArchived && !item.IsSpecialTracking && item.Status != "cancelled");
         var records = await query.Select(item => new { item.Id, item.Status, item.PublishToAll }).ToListAsync(ct);
         var groups = await db.Groups.AsNoTracking().Select(item => new { item.Id, item.Name, item.Category }).ToListAsync(ct);
@@ -81,7 +81,7 @@ static class DashboardTasks
             var matching = row.Items.Where(item => status is null or "all" || item.Done == (status == "completed")).ToList();
             var ids = matching.Select(item => item.Id).ToList();
             var safePage = Math.Max(1, page);
-            var items = await AdminAccess.Filter(db.Resolutions.AsNoTracking(), context.User).Where(item => ids.Contains(item.Id))
+            var items = await AdminAccess.Filter(db.Resolutions.AsNoTracking(), context.User, db).Where(item => ids.Contains(item.Id))
                 .OrderByDescending(item => item.MeetingDate).ThenByDescending(item => item.Id).Skip((safePage - 1) * 50).Take(50)
                 .Select(item => new { item.Id, item.Number, item.Text, item.MeetingDate, item.MeetingDateJalali, item.DueDate, item.DueDateJalali })
                 .ToListAsync(context.RequestAborted);
@@ -92,7 +92,7 @@ static class DashboardTasks
         app.MapGet("/api/resolutions/{id:int}", async (int id, HttpContext context, AppDb db) =>
         {
             if (!AdminAccess.IsAdmin(context.User)) return Results.Forbid();
-            var item = await AdminAccess.Filter(db.Resolutions.AsNoTracking(), context.User).Where(item => item.Id == id)
+            var item = await AdminAccess.Filter(db.Resolutions.AsNoTracking(), context.User, db).Where(item => item.Id == id)
                 .AsSplitQuery().Include(item => item.Assignments).Include(item => item.GroupAssignments).Include(item => item.Progress)
                 .Include(item => item.Attachments).Include(item => item.Events).Include(item => item.Meeting).ThenInclude(meeting => meeting!.Attachments)
                 .FirstOrDefaultAsync(context.RequestAborted);

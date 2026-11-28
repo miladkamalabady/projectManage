@@ -14,7 +14,7 @@ static class AdminStatus
     public static async Task<Data> Read(AppDb db, ClaimsPrincipal user, string? type, string? priority, DateOnly? from,
         DateOnly? to, string? province, int? unit, CancellationToken ct, int? targetId = null)
     {
-        var query = AdminAccess.Filter(db.Resolutions.AsNoTracking(), user).Where(item => !item.IsForInformation && !item.IsArchived && item.Status != "cancelled" && !item.IsCommitteeDraft);
+        var query = AdminAccess.Filter(db.Resolutions.AsNoTracking(), user, db).Where(item => !item.IsForInformation && !item.IsArchived && item.Status != "cancelled" && !item.IsCommitteeDraft);
         if (targetId.HasValue) query = query.Where(item => item.Id == targetId.Value);
         query = type switch
         {
@@ -150,7 +150,7 @@ static class AdminStatus
             : Matches(entry, status)).ToList();
         if (term.Length > 0)
         {
-            var scope = AdminAccess.Filter(db.Resolutions.AsNoTracking(), context.User);
+            var scope = AdminAccess.Filter(db.Resolutions.AsNoTracking(), context.User, db);
             var ids = await scope.Where(item => item.Text.Contains(q!) || item.Number.Contains(q!) || item.Id.ToString() == q)
                 .Select(item => item.Id).ToListAsync(ct);
             var matchingPeople = data.People.Values.Where(person => Normalize(person.DisplayName + " " + person.NationalId).Contains(term)).Select(person => person.NationalId).ToHashSet();
@@ -159,7 +159,7 @@ static class AdminStatus
         var pageEntries = matching.OrderByDescending(entry => Overdue(entry)).ThenByDescending(entry => entry.Task.Date).ThenByDescending(entry => entry.Task.Id)
             .Skip((safePage-1)*50).Take(50).ToList();
         var pageIds = pageEntries.Select(entry => entry.Task.Id).ToList();
-        var titles = await AdminAccess.Filter(db.Resolutions.AsNoTracking(), context.User).Where(item => pageIds.Contains(item.Id))
+        var titles = await AdminAccess.Filter(db.Resolutions.AsNoTracking(), context.User, db).Where(item => pageIds.Contains(item.Id))
             .ToDictionaryAsync(item => item.Id, item => item.Text, ct);
         return Results.Ok(new { summary, total = matching.Count, page = safePage, items = pageEntries.Select(entry => {
             var personal = view == "person-tasks" ? entry.People.First(person => person.NationalId == personId) : null;
