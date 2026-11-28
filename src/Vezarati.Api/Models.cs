@@ -89,6 +89,7 @@ public sealed class Resolution
     }
     public string Status { get; set; } = "before";
     public bool PublishToAll { get; set; }
+    public bool IsForInformation { get; set; }
     public bool IsConfidential { get; set; }
     public bool IsSpecialTracking { get; set; }
     public string SpecialTrackingType { get; set; } = "minister";
@@ -377,6 +378,8 @@ public sealed class AppSetting
 
 public sealed class AppDb(DbContextOptions<AppDb> options, ILogger<AppDb> logger) : DbContext(options)
 {
+    public bool IncludeInformationOnly { get; set; }
+
     public DbSet<Resolution> Resolutions => Set<Resolution>();
     public DbSet<ProvincialPole> ProvincialPoles => Set<ProvincialPole>();
     public DbSet<PoleProvince> PoleProvinces => Set<PoleProvince>();
@@ -473,6 +476,8 @@ public sealed class AppDb(DbContextOptions<AppDb> options, ILogger<AppDb> logger
 
     protected override void OnModelCreating(ModelBuilder model)
     {
+        model.Entity<Resolution>().HasQueryFilter(item => !item.IsForInformation || IncludeInformationOnly);
+
         model.Entity<AppSetting>().ToTable("Settings").HasKey(x => x.Key);
         model.Entity<BaleQueuedMessage>().ToTable("BaleMessageQueue");
         model.Entity<BrowserPushSubscription>().ToTable("BrowserPushSubscriptions");
@@ -731,6 +736,7 @@ public static class SchemaCompatibility
         // EnsureCreatedAsync creates the schema for a new SQL Server database. Existing installations need additive compatibility columns.
         if (db.Database.IsSqlServer())
         {
+            await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.Resolutions', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.Resolutions', N'IsForInformation') IS NULL ALTER TABLE dbo.Resolutions ADD IsForInformation bit NOT NULL CONSTRAINT DF_Resolutions_IsForInformation DEFAULT 0;");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.ResolutionReports', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.ResolutionReports', N'ApprovalStatus') IS NULL ALTER TABLE dbo.ResolutionReports ADD ApprovalStatus nvarchar(max) NOT NULL CONSTRAINT DF_ResolutionReports_ApprovalStatus DEFAULT N'pending';");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.ResolutionReports', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.ResolutionReports', N'AdminFeedback') IS NULL ALTER TABLE dbo.ResolutionReports ADD AdminFeedback nvarchar(max) NOT NULL CONSTRAINT DF_ResolutionReports_AdminFeedback DEFAULT N'';");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.ResolutionAttachments', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.ResolutionAttachments', N'ResolutionReportId') IS NULL ALTER TABLE dbo.ResolutionAttachments ADD ResolutionReportId int NULL;");
@@ -781,6 +787,7 @@ public static class SchemaCompatibility
         await db.Database.ExecuteSqlRawAsync("CREATE TABLE IF NOT EXISTS BrowserPushQueue (Id INTEGER NOT NULL CONSTRAINT PK_BrowserPushQueue PRIMARY KEY AUTOINCREMENT, NationalId TEXT NOT NULL, Title TEXT NOT NULL, Text TEXT NOT NULL, Url TEXT NOT NULL, Status TEXT NOT NULL, Attempts INTEGER NOT NULL, CreatedAtUnixMs INTEGER NOT NULL, NextAttemptAtUnixMs INTEGER NOT NULL, LastError TEXT NOT NULL);");
         await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS IX_BrowserPushQueue_Status_NextAttemptAtUnixMs ON BrowserPushQueue (Status, NextAttemptAtUnixMs);");
         var columns = await ReadColumns(db, "Resolutions");
+        if (columns.Count > 0 && !columns.Contains("IsForInformation")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN IsForInformation INTEGER NOT NULL DEFAULT 0;");
         if (columns.Count > 0 && !columns.Contains("IsSpecialTracking")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN IsSpecialTracking INTEGER NOT NULL DEFAULT 0;");
         if (columns.Count > 0 && !columns.Contains("SpecialTrackingType")) await db.Database.ExecuteSqlRawAsync("ALTER TABLE Resolutions ADD COLUMN SpecialTrackingType TEXT NOT NULL DEFAULT 'minister';");
 

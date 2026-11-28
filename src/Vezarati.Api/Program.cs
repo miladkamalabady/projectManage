@@ -70,6 +70,7 @@ app.Use(async (context, next) =>
             var identity = (ClaimsIdentity)context.User.Identity;
             foreach (var claim in identity.FindAll(ClaimTypes.Role).ToList()) identity.RemoveClaim(claim);
             identity.AddClaim(new Claim(ClaimTypes.Role, currentRole ?? "کاربر"));
+            accessDb.IncludeInformationOnly = AdminAccess.IsAdmin(context.User);
             if (!await AdminAccess.CanRequest(context, accessDb))
             {
                 context.Response.StatusCode = StatusCodes.Status403Forbidden;
@@ -121,6 +122,7 @@ using (var scope = app.Services.CreateScope())
     Directory.CreateDirectory("data");
     await db.Database.EnsureCreatedAsync();
     await SchemaCompatibility.UpgradeAsync(db);
+    db.IncludeInformationOnly = true;
     await SeedData.Initialize(db, scope.ServiceProvider.GetRequiredService<IWebHostEnvironment>());
     await db.Database.ExecuteSqlRawAsync("UPDATE Resolutions SET StartDate = MeetingDate, StartDateJalali = MeetingDateJalali WHERE StartDate IS NULL;");
 }
@@ -947,7 +949,7 @@ app.MapGet("/api/resolutions", async (HttpContext context, AppDb db, string? vie
                 MeetingTitle = item.Meeting == null ? "" : item.Meeting.Title,
                 item.MeetingDate, item.MeetingDateJalali, item.StartDate, item.StartDateJalali,
                 item.DueDate, item.DueDateJalali, item.GroupId, item.PublishToAll,
-                item.IsConfidential, item.IsSpecialTracking, item.SpecialTrackingType,
+                item.IsForInformation, item.IsConfidential, item.IsSpecialTracking, item.SpecialTrackingType,
                 item.ProvincialTripId, item.IsCommitteeDraft, item.ProvincialPoleName,
                 Assignments = item.Assignments.Select(person => new { person.NationalId }).ToList(),
                 GroupAssignments = item.GroupAssignments.Select(group => new { group.GroupId }).ToList(),
@@ -965,7 +967,7 @@ app.MapGet("/api/resolutions", async (HttpContext context, AppDb db, string? vie
                 item.Id, item.Number, Text = loadText ? item.Text : "", Notes = loadText ? metadata.Notes : "", HasLoadedText = loadText, TopicKey = ResolutionReportTopics.Classify(item.Number + " " + item.Text + " " + metadata.Notes), metadata.Province, metadata.MinisterCategory, metadata.Priority,
                 item.Status, item.MeetingId, item.MeetingTitle, item.MeetingDate, item.MeetingDateJalali,
                 item.StartDate, item.StartDateJalali, item.DueDate, item.DueDateJalali, item.GroupId, item.PublishToAll,
-                item.IsConfidential, item.IsSpecialTracking, item.SpecialTrackingType,
+                item.IsForInformation, item.IsConfidential, item.IsSpecialTracking, item.SpecialTrackingType,
                 item.ProvincialTripId, item.IsCommitteeDraft, item.ProvincialPoleName,
                 item.Assignments, item.GroupAssignments, item.Progress, item.SubmittedReportNationalIds
             };
@@ -1027,7 +1029,7 @@ app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpC
     }
     var requestedPeople = request.People.Distinct().Where(personId => request.ProvincialTripId.HasValue || !coveredPeople.Contains(personId)).ToList();
 
-    var record = new Resolution { PublishToAll = request.PublishToAll, StartDate = request.StartDate, StartDateJalali = request.StartDate is null ? "" : (request.StartDateJalali ?? JalaliDate.FromGregorian(request.StartDate.GetValueOrDefault())), DueDate = request.DueDate, DueDateJalali = request.DueDate is null ? "" : (request.DueDateJalali ?? JalaliDate.FromGregorian(request.DueDate.GetValueOrDefault())), RequiresPeriodicReport = request.RequiresPeriodicReport, ReportFrequency = request.RequiresPeriodicReport ? request.ReportFrequency ?? "" : "", CancellationReason = request.CancellationReason?.Trim() ?? "", MeetingDate = request.MeetingDate, MeetingDateJalali = string.IsNullOrWhiteSpace(request.MeetingDateJalali) ? JalaliDate.FromGregorian(request.MeetingDate) : request.MeetingDateJalali, Number = request.Number.Trim(), Text = request.Text.Trim(), Notes = request.Notes?.Trim() ?? "", IsConfidential = request.IsConfidential, IsSpecialTracking = request.IsSpecialTracking, SpecialTrackingType = request.IsSpecialTracking ? ResolutionTracking.NormalizeType(request.SpecialTrackingType) : "minister", Province = request.IsSpecialTracking && ResolutionTracking.NormalizeType(request.SpecialTrackingType) == "provincial" ? request.Province!.Trim() : "", MinisterCategory = request.IsSpecialTracking && ResolutionTracking.NormalizeType(request.SpecialTrackingType) == "minister" ? request.MinisterCategory?.Trim() ?? "" : "", Status = ResolutionStatusUpdater.TimeBasedResolutionStatus(request.MeetingDate, request.StartDate.GetValueOrDefault(), request.DueDate, DateOnly.FromDateTime(DateTime.Today)), GroupId = request.GroupId, MeetingId = request.IsSpecialTracking ? null : request.MeetingId, CreatedAt = DateTimeOffset.UtcNow, CreatedBy = http.User.Identity?.Name ?? "کاربر" };
+    var record = new Resolution { IsForInformation = request.IsForInformation && request.IsSpecialTracking && ResolutionTracking.NormalizeType(request.SpecialTrackingType) == "minister", PublishToAll = request.PublishToAll, StartDate = request.StartDate, StartDateJalali = request.StartDate is null ? "" : (request.StartDateJalali ?? JalaliDate.FromGregorian(request.StartDate.GetValueOrDefault())), DueDate = request.DueDate, DueDateJalali = request.DueDate is null ? "" : (request.DueDateJalali ?? JalaliDate.FromGregorian(request.DueDate.GetValueOrDefault())), RequiresPeriodicReport = request.RequiresPeriodicReport, ReportFrequency = request.RequiresPeriodicReport ? request.ReportFrequency ?? "" : "", CancellationReason = request.CancellationReason?.Trim() ?? "", MeetingDate = request.MeetingDate, MeetingDateJalali = string.IsNullOrWhiteSpace(request.MeetingDateJalali) ? JalaliDate.FromGregorian(request.MeetingDate) : request.MeetingDateJalali, Number = request.Number.Trim(), Text = request.Text.Trim(), Notes = request.Notes?.Trim() ?? "", IsConfidential = request.IsConfidential, IsSpecialTracking = request.IsSpecialTracking, SpecialTrackingType = request.IsSpecialTracking ? ResolutionTracking.NormalizeType(request.SpecialTrackingType) : "minister", Province = request.IsSpecialTracking && ResolutionTracking.NormalizeType(request.SpecialTrackingType) == "provincial" ? request.Province!.Trim() : "", MinisterCategory = request.IsSpecialTracking && ResolutionTracking.NormalizeType(request.SpecialTrackingType) == "minister" ? request.MinisterCategory?.Trim() ?? "" : "", Status = ResolutionStatusUpdater.TimeBasedResolutionStatus(request.MeetingDate, request.StartDate.GetValueOrDefault(), request.DueDate, DateOnly.FromDateTime(DateTime.Today)), GroupId = request.GroupId, MeetingId = request.IsSpecialTracking ? null : request.MeetingId, CreatedAt = DateTimeOffset.UtcNow, CreatedBy = http.User.Identity?.Name ?? "کاربر" };
     record.Priority = request.Priority ?? "عادی";
     record.ProvincialTripId = request.ProvincialTripId;
     record.IsCommitteeDraft = request.IsCommitteeDraft;
@@ -1048,14 +1050,14 @@ app.MapPost("/api/resolutions", async (ResolutionCreate request, AppDb db, HttpC
         .Where(person => recipientIdList.Contains(person.NationalId))
         .Select(person => new { person.NationalId, person.DisplayName, person.Title, person.OrgPositionDesc })
         .ToDictionaryAsync(person => person.NationalId);
-    foreach (var recipient in recipientIds)
+    foreach (var recipient in record.IsForInformation ? Enumerable.Empty<string>() : recipientIds)
     {
         recipientProfiles.TryGetValue(recipient, out var profile);
         var displayName = profile?.DisplayName ?? "کاربر";
         var title = string.IsNullOrWhiteSpace(profile?.Title) ? profile?.OrgPositionDesc : profile.Title;
         db.Notifications.Add(new UserNotification { NationalId = recipient, ResolutionId = record.Id, Type = "assigned", DateKey = record.Id.ToString(), Text = BaleMessageText.ForAssignment(record, displayName, title), CreatedAt = DateTimeOffset.UtcNow });
     }
-    db.Events.Add(new ResolutionEvent { ResolutionId = record.Id, NationalId = primaryAdminNationalId, UserName = record.CreatedBy, Text = record.IsSpecialTracking ? (record.SpecialTrackingType == "provincial" ? "سفر استانی وزیر ثبت و برای اقدام ارجاع شد." : "دستور وزیر ثبت و برای اقدام ارجاع شد.") : "مصوبه شورای معاونین ثبت و برای پیگیری ارجاع شد.", CreatedAt = DateTimeOffset.UtcNow });
+    db.Events.Add(new ResolutionEvent { ResolutionId = record.Id, NationalId = primaryAdminNationalId, UserName = record.CreatedBy, Text = record.IsForInformation ? "دستور وزیر جهت اطلاع ثبت شد." : record.IsSpecialTracking ? (record.SpecialTrackingType == "provincial" ? "سفر استانی وزیر ثبت و برای اقدام ارجاع شد." : "دستور وزیر ثبت و برای اقدام ارجاع شد.") : "مصوبه شورای معاونین ثبت و برای پیگیری ارجاع شد.", CreatedAt = DateTimeOffset.UtcNow });
     await db.SaveChangesAsync();
     await transaction.CommitAsync();
     return Results.Created("/api/resolutions/" + record.Id, record);
@@ -1101,6 +1103,8 @@ app.MapPut("/api/resolutions/{id:int}", async (int id, ResolutionCreate request,
     record.RequiresPeriodicReport = request.RequiresPeriodicReport;
     record.ReportFrequency = request.RequiresPeriodicReport ? request.ReportFrequency ?? "" : "";
     
+    var wasInformationOnly = record.IsForInformation;
+    record.IsForInformation = request.IsForInformation && request.IsSpecialTracking && ResolutionTracking.NormalizeType(request.SpecialTrackingType) == "minister";
     record.PublishToAll = request.PublishToAll;
     record.MeetingDateJalali = string.IsNullOrWhiteSpace(request.MeetingDateJalali) ? JalaliDate.FromGregorian(request.MeetingDate) : request.MeetingDateJalali;
     record.Priority = request.Priority ?? record.Priority;
@@ -1125,8 +1129,8 @@ app.MapPut("/api/resolutions/{id:int}", async (int id, ResolutionCreate request,
     await db.SaveChangesAsync();
     var newRecipients = requestedPeople.ToHashSet();
     newRecipients.UnionWith(await db.GroupMembers.Where(member => groupIds.Contains(member.GroupId)).Select(member => member.NationalId).ToListAsync());
-    if (request.PublishToAll && !wasPublic) newRecipients.UnionWith(await db.Users.Select(person => person.NationalId).ToListAsync());
-    var newlyAssigned = newRecipients.Except(priorRecipients).ToList();
+    if (request.PublishToAll && (!wasPublic || wasInformationOnly)) newRecipients.UnionWith(await db.Users.Select(person => person.NationalId).ToListAsync());
+    var newlyAssigned = record.IsForInformation ? new List<string>() : (wasInformationOnly ? newRecipients : newRecipients.Except(priorRecipients)).ToList();
     var recipientProfiles = await db.Users.AsNoTracking().Where(person => newlyAssigned.Contains(person.NationalId)).ToListAsync();
     var recipientAccounts = await db.Users.AsNoTracking().Where(user => newlyAssigned.Contains(user.NationalId)).ToListAsync();
     foreach (var recipient in newlyAssigned)
@@ -2435,7 +2439,7 @@ static string NormalizeStatusEventText(ResolutionEvent entry, IReadOnlyDictionar
 app.MapFallbackToFile("index.html");
 app.Run();
 
-record ResolutionCreate(DateOnly MeetingDate, string? MeetingDateJalali, string Number, string Text, string? Notes, string Status, int? GroupId, List<int>? GroupIds, List<string> People, bool PublishToAll, DateOnly? DueDate, string? DueDateJalali, DateOnly? StartDate, string? StartDateJalali, bool RequiresPeriodicReport, string? ReportFrequency, string? CancellationReason, int? MeetingId, bool IsConfidential, bool IsSpecialTracking = false, string? SpecialTrackingType = null, string? Province = null, string? MinisterCategory = null, int? ProvincialTripId = null, bool IsCommitteeDraft = false, string? Priority = null);
+record ResolutionCreate(DateOnly MeetingDate, string? MeetingDateJalali, string Number, string Text, string? Notes, string Status, int? GroupId, List<int>? GroupIds, List<string> People, bool PublishToAll, DateOnly? DueDate, string? DueDateJalali, DateOnly? StartDate, string? StartDateJalali, bool RequiresPeriodicReport, string? ReportFrequency, string? CancellationReason, int? MeetingId, bool IsConfidential, bool IsSpecialTracking = false, string? SpecialTrackingType = null, string? Province = null, string? MinisterCategory = null, int? ProvincialTripId = null, bool IsCommitteeDraft = false, string? Priority = null, bool IsForInformation = false);
 record MinisterDirectiveCategoriesRequest(List<string> Categories);
 record MeetingAttendeeRequest(string NationalId, bool IsPresent, string? AbsenceReason);
 record MeetingRequest(DateOnly Date, string? DateJalali, string Title, string? GuestText, List<MeetingAttendeeRequest>? Attendees);

@@ -14,7 +14,7 @@ static class AdminStatus
     public static async Task<Data> Read(AppDb db, ClaimsPrincipal user, string? type, string? priority, DateOnly? from,
         DateOnly? to, string? province, int? unit, CancellationToken ct, int? targetId = null)
     {
-        var query = AdminAccess.Filter(db.Resolutions.AsNoTracking(), user).Where(item => !item.IsArchived && item.Status != "cancelled" && !item.IsCommitteeDraft);
+        var query = AdminAccess.Filter(db.Resolutions.AsNoTracking(), user).Where(item => !item.IsForInformation && !item.IsArchived && item.Status != "cancelled" && !item.IsCommitteeDraft);
         if (targetId.HasValue) query = query.Where(item => item.Id == targetId.Value);
         query = type switch
         {
