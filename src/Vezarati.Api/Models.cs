@@ -481,6 +481,14 @@ public sealed class AppDb(DbContextOptions<AppDb> options, ILogger<AppDb> logger
     protected override void OnModelCreating(ModelBuilder model)
     {
         model.Entity<Resolution>().HasQueryFilter(item => !item.IsForInformation || IncludeInformationOnly);
+        // Keep direct child queries and Include queries consistent with resolution visibility.
+        model.Entity<ResolutionAssignment>().HasQueryFilter(item => !item.Resolution!.IsForInformation || IncludeInformationOnly);
+        model.Entity<ResolutionAttachment>().HasQueryFilter(item => !item.Resolution!.IsForInformation || IncludeInformationOnly);
+        model.Entity<ResolutionEvent>().HasQueryFilter(item => !item.Resolution!.IsForInformation || IncludeInformationOnly);
+        model.Entity<ResolutionGroupAssignment>().HasQueryFilter(item => !item.Resolution!.IsForInformation || IncludeInformationOnly);
+        model.Entity<ResolutionReport>().HasQueryFilter(item => !item.Resolution!.IsForInformation || IncludeInformationOnly);
+        model.Entity<ResolutionProgress>().HasQueryFilter(item => IncludeInformationOnly || Resolutions.Any(resolution => resolution.Id == item.ResolutionId));
+
 
         model.Entity<AppSetting>().ToTable("Settings").HasKey(x => x.Key);
         model.Entity<BaleQueuedMessage>().ToTable("BaleMessageQueue");
@@ -735,11 +743,30 @@ public static class JalaliDate
 
 public static class SchemaCompatibility
 {
+    private static async Task CheckRecentUpgradePermissions(AppDb db)
+    {
+        var blocked = await db.Database.SqlQueryRaw<string>("""
+            SELECT CAST(v.TableName + N'.' + v.ColumnName AS nvarchar(max)) AS [Value]
+            FROM (VALUES
+                (N'dbo.Users', N'MinisterLiaisonProvince'),
+                (N'dbo.Resolutions', N'RequiresReportAttachment'),
+                (N'dbo.Resolutions', N'IsForInformation')
+            ) AS v(TableName, ColumnName)
+            WHERE COL_LENGTH(v.TableName, v.ColumnName) IS NULL
+              AND (OBJECT_ID(v.TableName, N'U') IS NULL OR COALESCE(HAS_PERMS_BY_NAME(v.TableName, N'OBJECT', N'ALTER'), 0) <> 1)
+            """).ToListAsync();
+        if (blocked.Count > 0)
+            throw new InvalidOperationException(
+                "ارتقای ساختار دیتابیس انجام نشد. جدول یا مجوز ALTER برای ستون‌های زیر در دسترس نیست: " + string.Join(", ", blocked) +
+                ". نام دیتابیس و schema را بررسی کنید و فایل Sql/UpgradeMinisterLiaisonsAndReportRequirements.sql را در دیتابیس سامانه با حساب دارای مجوز تغییر این دو جدول اجرا کنید؛ سپس API را دوباره راه‌اندازی کنید. این خطا نباید نادیده گرفته شود زیرا ستون‌های جدید برای اجرای سامانه لازم‌اند.");
+    }
+
     public static async Task UpgradeAsync(AppDb db)
     {
         // EnsureCreatedAsync creates the schema for a new SQL Server database. Existing installations need additive compatibility columns.
         if (db.Database.IsSqlServer())
         {
+            await CheckRecentUpgradePermissions(db);
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.Users', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.Users', N'MinisterLiaisonProvince') IS NULL ALTER TABLE dbo.Users ADD MinisterLiaisonProvince nvarchar(80) NOT NULL CONSTRAINT DF_Users_MinisterLiaisonProvince DEFAULT N'';");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.Resolutions', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.Resolutions', N'RequiresReportAttachment') IS NULL ALTER TABLE dbo.Resolutions ADD RequiresReportAttachment bit NOT NULL CONSTRAINT DF_Resolutions_RequiresReportAttachment DEFAULT 0;");
             await db.Database.ExecuteSqlRawAsync("IF OBJECT_ID(N'dbo.Resolutions', N'U') IS NOT NULL AND COL_LENGTH(N'dbo.Resolutions', N'IsForInformation') IS NULL ALTER TABLE dbo.Resolutions ADD IsForInformation bit NOT NULL CONSTRAINT DF_Resolutions_IsForInformation DEFAULT 0;");
